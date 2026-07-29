@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'channels',
     'corsheaders',
     'rest_framework',
+    'rest_framework_simplejwt',
     'role',
     'users',
 ]
@@ -146,4 +147,21 @@ STORAGES = {
 CORS_ALLOWED_ORIGINS = [
     origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "").split(",") if origin.strip()
 ]
+
+# REST Framework configuration
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'users.authentication.CustomJWTAuthentication',
+    )
+}
+
+# SimpleJWT Configuration
+from datetime import timedelta
+SIMPLE_JWT = {
+    'SIGNING_KEY': os.getenv('JWT_SECRET_KEY', SECRET_KEY),
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
+    'REFRESH_TOKEN_LIFETIME': timedelta(minutes=30),
+}
+
+
 

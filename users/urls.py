@@ -7,4 +7,5 @@ urlpatterns = [
     path('list/<int:pk>', UserViewSet.as_view({'get': 'retrieve'}), name='user-detail'),
     path('edit/<int:pk>', UserViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='user-edit'),
     path('remove/<int:pk>', UserViewSet.as_view({'delete': 'destroy'}), name='user-remove'),
+    path('login', UserViewSet.as_view({'post': 'login'}), name='user-login'),
 ]

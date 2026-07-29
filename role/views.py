@@ -1,11 +1,17 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, permissions
 from rest_framework.response import Response
 from .models import Role
 from .serializers import RoleSerializer
+from users.permissions import IsAdminUser
 
 class RoleViewSet(viewsets.ModelViewSet):
-    queryset = Role.objects.all()
+    queryset = Role.objects.all().order_by('role_id')
     serializer_class = RoleSerializer
+
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [IsAdminUser()]
+        return []
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
@@ -45,4 +51,28 @@ class RoleViewSet(viewsets.ModelViewSet):
             "code": 200,
             "message": "deleted successfully"
         }, status=status.HTTP_200_OK)
+
+    def handle_exception(self, exc):
+        from django.http import Http404
+        from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied
+
+        if isinstance(exc, (Http404, NotFound)):
+            return Response({
+                "code": 404,
+                "message": "Role not found"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if isinstance(exc, NotAuthenticated):
+            return Response({
+                "code": 401,
+                "message": "You don't have access to this resource."
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        if isinstance(exc, PermissionDenied):
+            return Response({
+                "code": 403,
+                "message": "You don't have access to this resource."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        return super().handle_exception(exc)
 

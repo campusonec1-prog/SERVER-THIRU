@@ -13,3 +13,7 @@ class User(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.username})"
+
+    @property
+    def is_authenticated(self):
+        return True
