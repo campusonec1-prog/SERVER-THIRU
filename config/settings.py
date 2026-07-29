@@ -31,7 +31,7 @@ SECRET_KEY = 'django-insecure-ykl(c@d%suhxao%t37pce@@b!u)f5syt@x%ksoe8=at76t&=+c
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [host.strip() for host in os.getenv("ALLOWED_HOSTS", "*").split(",") if host.strip()]
 
 
 # Application definition
@@ -46,6 +46,9 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'channels',
     'corsheaders',
+    'rest_framework',
+    'role',
+    'users',
 ]
 
 MIDDLEWARE = [
