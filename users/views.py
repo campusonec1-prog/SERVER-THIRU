@@ -13,6 +13,14 @@ class UserViewSet(viewsets.ModelViewSet):
             return [IsAdminUser()]
         return []
 
+    def perform_create(self, serializer):
+        user = self.request.user if self.request.user and self.request.user.is_authenticated else None
+        serializer.save(created_by=user, updated_by=user)
+
+    def perform_update(self, serializer):
+        user = self.request.user if self.request.user and self.request.user.is_authenticated else None
+        serializer.save(updated_by=user)
+
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
         return Response({

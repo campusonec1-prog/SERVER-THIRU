@@ -1,6 +1,7 @@
 from django.db import models
+from common.models import TrackingModel
 
-class User(models.Model):
+class User(TrackingModel):
     name = models.CharField(max_length=150)
     username = models.CharField(max_length=150, unique=True)
     password = models.CharField(max_length=128)

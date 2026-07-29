@@ -1,6 +1,7 @@
 from django.db import models
+from common.models import TrackingModel
 
-class Role(models.Model):
+class Role(TrackingModel):
     role_id = models.AutoField(primary_key=True)
     role_name = models.CharField(max_length=100, unique=True)
 

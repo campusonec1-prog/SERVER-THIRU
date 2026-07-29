@@ -4,7 +4,8 @@ from .models import Role
 class RoleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Role
-        fields = ['role_id', 'role_name']
+        fields = ['role_id', 'role_name', 'created_at', 'updated_at', 'created_by', 'updated_by']
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
