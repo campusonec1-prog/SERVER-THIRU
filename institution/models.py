@@ -135,3 +135,18 @@ class Section(TrackingModel):
         return f"Sections for {self.department.department_name}"
 
 
+class CollegeHeader(TrackingModel):
+    college_name = models.CharField(max_length=255)
+    address = models.TextField()
+    header_type = models.CharField(max_length=100, unique=True)
+    primary_logo = models.CharField(max_length=500, null=True, blank=True)
+    secondary_logo = models.CharField(max_length=500, null=True, blank=True)
+
+    class Meta:
+        db_table = 'college_header'
+
+    def __str__(self):
+        return f"{self.college_name} - {self.header_type}"
+
+
+

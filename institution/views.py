@@ -2,8 +2,8 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied
-from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section
-from .serializers import ProgramSerializer, DepartmentSerializer, AcademicYearSerializer, BatchSerializer, RegulationSerializer, SemesterSerializer, SectionSerializer
+from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader
+from .serializers import ProgramSerializer, DepartmentSerializer, AcademicYearSerializer, BatchSerializer, RegulationSerializer, SemesterSerializer, SectionSerializer, CollegeHeaderSerializer
 from users.permissions import IsAdminUser
 
 
@@ -241,4 +241,33 @@ class SectionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         super().destroy(request, *args, **kwargs)
         return Response({"code": 200, "message": "Section deleted successfully"}, status=status.HTTP_200_OK)
+
+
+# ─── College Header ────────────────────────────────────────────────
+
+class CollegeHeaderViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+    queryset = CollegeHeader.objects.all().order_by('id')
+    serializer_class = CollegeHeaderSerializer
+    model_label = "College Header"
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return Response({"code": 200, "message": "College Headers listed successfully", "data": response.data}, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        return Response({"code": 200, "message": "College Header retrieved successfully", "data": response.data}, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        return Response({"code": 201, "message": "College Header created successfully", "data": response.data}, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        response = super().update(request, *args, **kwargs)
+        return Response({"code": 200, "message": "College Header updated successfully", "data": response.data}, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        super().destroy(request, *args, **kwargs)
+        return Response({"code": 200, "message": "College Header deleted successfully"}, status=status.HTTP_200_OK)
+
 

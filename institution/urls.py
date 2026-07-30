@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import ProgramViewSet, DepartmentViewSet, AcademicYearViewSet, BatchViewSet, RegulationViewSet, SemesterViewSet, SectionViewSet
+from .views import ProgramViewSet, DepartmentViewSet, AcademicYearViewSet, BatchViewSet, RegulationViewSet, SemesterViewSet, SectionViewSet, CollegeHeaderViewSet
 
 urlpatterns = [
     # Program endpoints
@@ -50,4 +50,11 @@ urlpatterns = [
     path('sections/get/<int:pk>', SectionViewSet.as_view({'get': 'retrieve'}), name='section-detail'),
     path('sections/edit/<int:pk>', SectionViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='section-edit'),
     path('sections/remove/<int:pk>', SectionViewSet.as_view({'delete': 'destroy'}), name='section-remove'),
+
+    # College Header endpoints
+    path('college-headers/list', CollegeHeaderViewSet.as_view({'get': 'list'}), name='college-header-list'),
+    path('college-headers/create', CollegeHeaderViewSet.as_view({'post': 'create'}), name='college-header-create'),
+    path('college-headers/get/<int:pk>', CollegeHeaderViewSet.as_view({'get': 'retrieve'}), name='college-header-detail'),
+    path('college-headers/edit/<int:pk>', CollegeHeaderViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='college-header-edit'),
+    path('college-headers/remove/<int:pk>', CollegeHeaderViewSet.as_view({'delete': 'destroy'}), name='college-header-remove'),
 ]

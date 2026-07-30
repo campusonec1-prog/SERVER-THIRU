@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section
+from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader
 from users.models import User
 
 
@@ -296,4 +296,83 @@ class SectionSerializer(serializers.ModelSerializer):
             cleaned_value.append(stripped_item)
             
         return cleaned_value
+
+
+# ─── College Header ────────────────────────────────────────────
+
+class LogoField(serializers.Field):
+    """
+    Custom field that handles both uploaded files (which get uploaded to Cloudflare R2)
+    and existing URL strings.
+    """
+    def to_internal_value(self, data):
+        if not data:
+            return None
+        # If it's a string, it's the existing public URL or empty string
+        if isinstance(data, str):
+            return data
+        # If it's a file, accept it
+        from django.core.files.uploadedfile import UploadedFile
+        if isinstance(data, UploadedFile) or hasattr(data, 'file'):
+            return data
+        raise serializers.ValidationError("Must be a file upload or a valid URL string.")
+
+    def to_representation(self, value):
+        return value
+
+
+class CollegeHeaderSerializer(serializers.ModelSerializer):
+    primary_logo = LogoField(required=False, allow_null=True)
+    secondary_logo = LogoField(required=False, allow_null=True)
+
+    class Meta:
+        model = CollegeHeader
+        fields = ['id', 'college_name', 'address', 'header_type', 'primary_logo', 'secondary_logo', 'created_at', 'updated_at', 'created_by', 'updated_by']
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        extra_kwargs = {
+            'college_name': {'required': True},
+            'address': {'required': True},
+            'header_type': {
+                'required': True,
+                'error_messages': {'unique': 'This header type is already in use.'}
+            },
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+    def validate_college_name(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("College name cannot be empty.")
+        return value
+
+    def validate_address(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Address cannot be empty.")
+        return value
+
+    def validate_header_type(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Header type cannot be empty.")
+        return value
+
+    def _upload_logos(self, validated_data):
+        from common.r2 import upload_file_to_r2
+        primary = validated_data.get('primary_logo')
+        secondary = validated_data.get('secondary_logo')
+
+        if primary and not isinstance(primary, str):
+            validated_data['primary_logo'] = upload_file_to_r2(primary)
+        if secondary and not isinstance(secondary, str):
+            validated_data['secondary_logo'] = upload_file_to_r2(secondary)
+
+    def create(self, validated_data):
+        self._upload_logos(validated_data)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        self._upload_logos(validated_data)
+        return super().update(instance, validated_data)
+
 
