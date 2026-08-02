@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import ProgramViewSet, DepartmentViewSet, AcademicYearViewSet, BatchViewSet, RegulationViewSet, SemesterViewSet, SectionViewSet, CollegeHeaderViewSet
+from .views import ProgramViewSet, DepartmentViewSet, AcademicYearViewSet, BatchViewSet, RegulationViewSet, SemesterViewSet, SectionViewSet, CollegeHeaderViewSet, ExamTypeViewSet, ExamViewSet
 
 urlpatterns = [
     # Program endpoints
@@ -57,4 +57,18 @@ urlpatterns = [
     path('college-headers/get/<int:pk>', CollegeHeaderViewSet.as_view({'get': 'retrieve'}), name='college-header-detail'),
     path('college-headers/edit/<int:pk>', CollegeHeaderViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='college-header-edit'),
     path('college-headers/remove/<int:pk>', CollegeHeaderViewSet.as_view({'delete': 'destroy'}), name='college-header-remove'),
+
+    # Exam Type endpoints
+    path('exam-types/list', ExamTypeViewSet.as_view({'get': 'list'}), name='exam-type-list'),
+    path('exam-types/create', ExamTypeViewSet.as_view({'post': 'create'}), name='exam-type-create'),
+    path('exam-types/get/<int:pk>', ExamTypeViewSet.as_view({'get': 'retrieve'}), name='exam-type-detail'),
+    path('exam-types/edit/<int:pk>', ExamTypeViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='exam-type-edit'),
+    path('exam-types/remove/<int:pk>', ExamTypeViewSet.as_view({'delete': 'destroy'}), name='exam-type-remove'),
+
+    # Exam endpoints
+    path('exams/list', ExamViewSet.as_view({'get': 'list'}), name='exam-list'),
+    path('exams/create', ExamViewSet.as_view({'post': 'create'}), name='exam-create'),
+    path('exams/get/<int:pk>', ExamViewSet.as_view({'get': 'retrieve'}), name='exam-detail'),
+    path('exams/edit/<int:pk>', ExamViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='exam-edit'),
+    path('exams/remove/<int:pk>', ExamViewSet.as_view({'delete': 'destroy'}), name='exam-remove'),
 ]

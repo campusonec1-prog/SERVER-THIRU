@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader
+from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader, ExamType, Exam
 from users.models import User
 
 
@@ -57,13 +57,15 @@ class ProgramSerializer(serializers.ModelSerializer):
 class DepartmentSerializer(serializers.ModelSerializer):
     program_id = serializers.PrimaryKeyRelatedField(
         source='program',
-        queryset=Program.objects.all()
+        queryset=Program.objects.all(),
+        error_messages={'does_not_exist': 'Program does not exist.'}
     )
     hod_id = serializers.PrimaryKeyRelatedField(
         source='hod',
         queryset=User.objects.all(),
         allow_null=True,
-        required=False
+        required=False,
+        error_messages={'does_not_exist': 'User does not exist.'}
     )
 
     class Meta:
@@ -151,12 +153,14 @@ class AcademicYearSerializer(serializers.ModelSerializer):
 class BatchSerializer(serializers.ModelSerializer):
     department_id = serializers.PrimaryKeyRelatedField(
         source='department',
-        queryset=Department.objects.all()
+        queryset=Department.objects.all(),
+        error_messages={'does_not_exist': 'Department does not exist.'}
     )
     academic_year_id = serializers.PrimaryKeyRelatedField(
         source='academic_year',
         queryset=AcademicYear.objects.all(),
-        allow_null=False
+        allow_null=False,
+        error_messages={'does_not_exist': 'Academic year does not exist.'}
     )
 
     class Meta:
@@ -184,7 +188,8 @@ class BatchSerializer(serializers.ModelSerializer):
 class RegulationSerializer(serializers.ModelSerializer):
     academic_year_id = serializers.PrimaryKeyRelatedField(
         source='academic_year',
-        queryset=AcademicYear.objects.all()
+        queryset=AcademicYear.objects.all(),
+        error_messages={'does_not_exist': 'Academic year does not exist.'}
     )
 
     class Meta:
@@ -214,7 +219,8 @@ class RegulationSerializer(serializers.ModelSerializer):
 class SemesterSerializer(serializers.ModelSerializer):
     department_id = serializers.PrimaryKeyRelatedField(
         source='department',
-        queryset=Department.objects.all()
+        queryset=Department.objects.all(),
+        error_messages={'does_not_exist': 'Department does not exist.'}
     )
 
     class Meta:
@@ -255,7 +261,8 @@ class SemesterSerializer(serializers.ModelSerializer):
 class SectionSerializer(serializers.ModelSerializer):
     department_id = serializers.PrimaryKeyRelatedField(
         source='department',
-        queryset=Department.objects.all()
+        queryset=Department.objects.all(),
+        error_messages={'does_not_exist': 'Department does not exist.'}
     )
 
     class Meta:
@@ -374,5 +381,62 @@ class CollegeHeaderSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         self._upload_logos(validated_data)
         return super().update(instance, validated_data)
+
+
+# ─── Exam Type ─────────────────────────────────────────────────
+
+class ExamTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ExamType
+        fields = ['id', 'exam_type_name', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        extra_kwargs = {
+            'exam_type_name': {
+                'required': True,
+                'error_messages': {'unique': 'This exam type already exists.'}
+            },
+            'is_active': {'required': False, 'default': True},
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+    def validate_exam_type_name(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Exam type name cannot be empty.")
+        return value.strip()
+
+
+# ─── Exam ──────────────────────────────────────────────────────
+
+class ExamSerializer(serializers.ModelSerializer):
+    exam_type_id = serializers.PrimaryKeyRelatedField(
+        source='exam_type',
+        queryset=ExamType.objects.all(),
+        error_messages={'does_not_exist': 'Exam type does not exist.'}
+    )
+
+    class Meta:
+        model = Exam
+        fields = ['id', 'exam_name', 'exam_type_id', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        extra_kwargs = {
+            'exam_name': {
+                'required': True,
+                'error_messages': {'unique': 'This exam name already exists.'}
+            },
+            'is_active': {'required': False, 'default': True},
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+    def validate_exam_name(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Exam name cannot be empty.")
+        return value.strip()
+
 
 

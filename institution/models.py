@@ -149,4 +149,33 @@ class CollegeHeader(TrackingModel):
         return f"{self.college_name} - {self.header_type}"
 
 
+class ExamType(TrackingModel):
+    exam_type_name = models.CharField(max_length=100, unique=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'exam_type'
+
+    def __str__(self):
+        return self.exam_type_name
+
+
+class Exam(TrackingModel):
+    exam_name = models.CharField(max_length=150, unique=True)
+    exam_type = models.ForeignKey(
+        ExamType,
+        on_delete=models.CASCADE,
+        db_column='exam_type_id',
+        related_name='exams'
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'exams'
+
+    def __str__(self):
+        return f"{self.exam_name} ({self.exam_type.exam_type_name})"
+
+
+
 

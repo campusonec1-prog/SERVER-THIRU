@@ -2,8 +2,8 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied
-from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader
-from .serializers import ProgramSerializer, DepartmentSerializer, AcademicYearSerializer, BatchSerializer, RegulationSerializer, SemesterSerializer, SectionSerializer, CollegeHeaderSerializer
+from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader, ExamType, Exam
+from .serializers import ProgramSerializer, DepartmentSerializer, AcademicYearSerializer, BatchSerializer, RegulationSerializer, SemesterSerializer, SectionSerializer, CollegeHeaderSerializer, ExamTypeSerializer, ExamSerializer
 from users.permissions import IsAdminUser
 
 
@@ -269,5 +269,62 @@ class CollegeHeaderViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         super().destroy(request, *args, **kwargs)
         return Response({"code": 200, "message": "College Header deleted successfully"}, status=status.HTTP_200_OK)
+
+
+# ─── Exam Type ─────────────────────────────────────────────────────
+
+class ExamTypeViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+    queryset = ExamType.objects.all().order_by('id')
+    serializer_class = ExamTypeSerializer
+    model_label = "Exam Type"
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return Response({"code": 200, "message": "Exam Types listed successfully", "data": response.data}, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        return Response({"code": 200, "message": "Exam Type retrieved successfully", "data": response.data}, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        return Response({"code": 201, "message": "Exam Type created successfully", "data": response.data}, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        response = super().update(request, *args, **kwargs)
+        return Response({"code": 200, "message": "Exam Type updated successfully", "data": response.data}, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        super().destroy(request, *args, **kwargs)
+        return Response({"code": 200, "message": "Exam Type deleted successfully"}, status=status.HTTP_200_OK)
+
+
+# ─── Exam ──────────────────────────────────────────────────────────
+
+class ExamViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+    queryset = Exam.objects.all().order_by('id')
+    serializer_class = ExamSerializer
+    model_label = "Exam"
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return Response({"code": 200, "message": "Exams listed successfully", "data": response.data}, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        return Response({"code": 200, "message": "Exam retrieved successfully", "data": response.data}, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        return Response({"code": 201, "message": "Exam created successfully", "data": response.data}, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        response = super().update(request, *args, **kwargs)
+        return Response({"code": 200, "message": "Exam updated successfully", "data": response.data}, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        super().destroy(request, *args, **kwargs)
+        return Response({"code": 200, "message": "Exam deleted successfully"}, status=status.HTTP_200_OK)
+
 
 

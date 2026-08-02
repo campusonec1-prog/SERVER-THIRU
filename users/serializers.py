@@ -6,7 +6,8 @@ import bcrypt
 class UserSerializer(serializers.ModelSerializer):
     role_id = serializers.PrimaryKeyRelatedField(
         source='role',
-        queryset=Role.objects.all()
+        queryset=Role.objects.all(),
+        error_messages={'does_not_exist': 'Role does not exist.'}
     )
 
     class Meta:
