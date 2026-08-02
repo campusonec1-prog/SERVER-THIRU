@@ -24,4 +24,5 @@ urlpatterns = [
     path('api/institution/', include('institution.urls')),
     path('api/schedule/', include('schedule.urls')),
     path('api/announcements/', include('announcements.urls')),
+    path('api/forms/', include('dynamic_forms.urls')),
 ]

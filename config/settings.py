@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     'common',
     'schedule',
     'announcements',
+    'dynamic_forms',
 ]
 
 MIDDLEWARE = [
