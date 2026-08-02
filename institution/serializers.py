@@ -156,16 +156,10 @@ class BatchSerializer(serializers.ModelSerializer):
         queryset=Department.objects.all(),
         error_messages={'does_not_exist': 'Department does not exist.'}
     )
-    academic_year_id = serializers.PrimaryKeyRelatedField(
-        source='academic_year',
-        queryset=AcademicYear.objects.all(),
-        allow_null=False,
-        error_messages={'does_not_exist': 'Academic year does not exist.'}
-    )
 
     class Meta:
         model = Batch
-        fields = ['id', 'department_id', 'academic_year_id', 'batch', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = ['id', 'department_id', 'batch', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
         extra_kwargs = {
             'department_id': {'required': True},
@@ -181,6 +175,7 @@ class BatchSerializer(serializers.ModelSerializer):
         if not value.strip():
             raise serializers.ValidationError("Batch cannot be empty.")
         return value
+
 
 
 # ─── Regulation ──────────────────────────────────────────────────────────────

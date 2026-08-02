@@ -51,7 +51,7 @@ INSTALLED_APPS = [
     'role',
     'users',
     'institution',
-    'common',
+    'common.apps.CommonConfig',
     'schedule',
     'announcements',
     'dynamic_forms',
@@ -176,6 +176,9 @@ CLOUDFLARE_R2_BUCKET_NAME = os.getenv('CLOUDFLARE_R2_BUCKET_NAME')
 CLOUDFLARE_R2_ENDPOINT = os.getenv('CLOUDFLARE_R2_ENDPOINT')
 CLOUDFLARE_R2_PUBLIC_URL = os.getenv('CLOUDFLARE_R2_PUBLIC_URL')
 
-
-
-
+# Channels Configuration
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}

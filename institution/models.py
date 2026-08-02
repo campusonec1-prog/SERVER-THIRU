@@ -68,14 +68,6 @@ class Batch(TrackingModel):
         db_column='department_id',
         related_name='batches'
     )
-    academic_year = models.ForeignKey(
-        AcademicYear,
-        on_delete=models.CASCADE,
-        db_column='academic_year_id',
-        related_name='batches',
-        null=True,
-        blank=True
-    )
     batch = models.CharField(max_length=20)
     is_active = models.BooleanField(default=True)
 
@@ -84,6 +76,7 @@ class Batch(TrackingModel):
 
     def __str__(self):
         return f"{self.batch} ({self.department.department_name})"
+
 
 
 class Regulation(TrackingModel):
