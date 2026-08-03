@@ -115,7 +115,10 @@ class ApplicationViewSet(viewsets.ModelViewSet):
     model_label = "Application"
 
     def get_permissions(self):
+        from users.permissions import IsAdminUser
         from rest_framework.permissions import IsAuthenticated
+        if self.action == 'list':
+            return [IsAdminUser()]
         return [IsAuthenticated()]
 
     def get_queryset(self):
