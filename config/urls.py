@@ -25,4 +25,5 @@ urlpatterns = [
     path('api/schedule/', include('schedule.urls')),
     path('api/announcements/', include('announcements.urls')),
     path('api/forms/', include('dynamic_forms.urls')),
+    path('api/subject/', include('subject.urls')),
 ]

@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     'schedule',
     'announcements',
     'dynamic_forms',
+    'subject',
 ]
 
 MIDDLEWARE = [
@@ -164,8 +165,8 @@ REST_FRAMEWORK = {
 from datetime import timedelta
 SIMPLE_JWT = {
     'SIGNING_KEY': os.getenv('JWT_SECRET_KEY', SECRET_KEY),
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
-    'REFRESH_TOKEN_LIFETIME': timedelta(minutes=30),
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=7),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
 }
 
 # Cloudflare R2 Settings
