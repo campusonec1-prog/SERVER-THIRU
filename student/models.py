@@ -11,3 +11,48 @@ class StudentStatus(TrackingModel):
 
     def __str__(self):
         return self.status_name
+
+
+class Student(TrackingModel):
+    roll_number = models.CharField(max_length=50, unique=True)
+    register_number = models.CharField(max_length=50, unique=True, null=True, blank=True)
+    department = models.ForeignKey(
+        'institution.Department',
+        on_delete=models.CASCADE,
+        db_column='department_id',
+        related_name='students'
+    )
+    section = models.ForeignKey(
+        'institution.Section',
+        on_delete=models.SET_NULL,
+        db_column='section_id',
+        related_name='students',
+        null=True,
+        blank=True
+    )
+    batch = models.ForeignKey(
+        'institution.Batch',
+        on_delete=models.CASCADE,
+        db_column='batch_id',
+        related_name='students'
+    )
+    user = models.ForeignKey(
+        'dynamic_forms.ApplicationUser',
+        on_delete=models.CASCADE,
+        db_column='user_id',
+        related_name='students'
+    )
+    lab_batch = models.CharField(max_length=50, null=True, blank=True)
+    status = models.ForeignKey(
+        StudentStatus,
+        on_delete=models.CASCADE,
+        db_column='status_id',
+        related_name='students'
+    )
+
+    class Meta:
+        db_table = 'students'
+
+    def __str__(self):
+        return f"{self.roll_number} - {self.user.name}"
+
