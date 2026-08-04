@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User
+from .models import User, UserDetails
 from role.models import Role
 import bcrypt
 
@@ -62,3 +62,80 @@ class UserSerializer(serializers.ModelSerializer):
             hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
             validated_data['password'] = hashed_password
         return super().update(instance, validated_data)
+
+
+def apply_default_error_messages(fields):
+    for field_name, field in fields.items():
+        friendly_name = field_name.replace('_', ' ').capitalize()
+        field.error_messages['required'] = f"{friendly_name} is required."
+        field.error_messages['blank'] = f"{friendly_name} cannot be empty."
+        field.error_messages['null'] = f"{friendly_name} cannot be null."
+
+
+class UserDetailsSerializer(serializers.ModelSerializer):
+    user_id = serializers.PrimaryKeyRelatedField(
+        source='user',
+        queryset=User.objects.all(),
+        required=False,
+        error_messages={'does_not_exist': 'User does not exist.'}
+    )
+
+    class Meta:
+        model = UserDetails
+        fields = [
+            'id', 'user_id', 'faculty_code', 'qualification',
+            'designation', 'date_of_joining', 'gender',
+            'created_at', 'updated_at', 'created_by', 'updated_by'
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        extra_kwargs = {
+            'faculty_code': {
+                'required': True,
+                'error_messages': {'unique': 'This faculty code already exists.'}
+            },
+            'qualification': {'required': True},
+            'designation': {'required': True},
+            'date_of_joining': {'required': True},
+            'gender': {'required': True},
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+    def validate_faculty_code(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Faculty code cannot be empty.")
+        qs = UserDetails.objects.filter(faculty_code__iexact=value.strip())
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("This faculty code already exists.")
+        return value.strip()
+
+    def validate_qualification(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Qualification cannot be empty.")
+        return value.strip()
+
+    def validate_designation(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Designation cannot be empty.")
+        return value.strip()
+
+    def validate_gender(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Gender cannot be empty.")
+        return value.strip()
+
+    def validate(self, data):
+        request = self.context.get('request')
+        if request and request.user and request.user.is_authenticated:
+            if 'user' not in data and not (self.instance and self.instance.user):
+                data['user'] = request.user
+
+        if 'user' not in data and not (self.instance and self.instance.user):
+            raise serializers.ValidationError({'user_id': 'User is required.'})
+
+        return data
+
