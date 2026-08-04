@@ -199,6 +199,7 @@ class ApplicationSerializer(serializers.ModelSerializer):
     status_id = serializers.PrimaryKeyRelatedField(
         source='status',
         queryset=ApplicationStatus.objects.all(),
+        required=False,
         error_messages={'does_not_exist': 'Application status does not exist.'}
     )
 
@@ -208,7 +209,6 @@ class ApplicationSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by', 'application_no']
         extra_kwargs = {
             'program_id': {'required': True},
-            'status_id': {'required': True},
             'form_data': {'required': False, 'default': dict},
         }
 
@@ -227,8 +227,15 @@ class ApplicationSerializer(serializers.ModelSerializer):
         if not data.get('candidate') and not (self.instance and self.instance.candidate):
             raise serializers.ValidationError({"candidate_id": "Candidate is required."})
 
+        # Auto-assign default 'Submitted' status if status is not provided on creation
+        if not data.get('status') and not (self.instance and self.instance.status):
+            submitted_status = ApplicationStatus.objects.filter(status_name__iexact='Submitted').first()
+            if not submitted_status:
+                submitted_status = ApplicationStatus.objects.create(status_name='Submitted')
+            data['status'] = submitted_status
+
         status_instance = data.get('status', self.instance.status if self.instance else None)
-        status_name = status_instance.status_name.lower() if status_instance else 'draft'
+        status_name = status_instance.status_name.lower() if status_instance else 'submitted'
 
         # Filter and keep only dynamic fields that exist in the database
         if 'form_data' in data or self.instance is None:

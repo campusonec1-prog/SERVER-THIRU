@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     'announcements',
     'dynamic_forms',
     'subject',
+    'student',
 ]
 
 MIDDLEWARE = [
