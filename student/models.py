@@ -36,11 +36,11 @@ class Student(TrackingModel):
         db_column='batch_id',
         related_name='students'
     )
-    user = models.ForeignKey(
+    user = models.OneToOneField(
         'dynamic_forms.ApplicationUser',
         on_delete=models.CASCADE,
         db_column='user_id',
-        related_name='students'
+        related_name='student'
     )
     lab_batch = models.CharField(max_length=50, null=True, blank=True)
     status = models.ForeignKey(

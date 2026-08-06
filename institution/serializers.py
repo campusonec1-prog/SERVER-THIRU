@@ -117,7 +117,7 @@ class DepartmentSerializer(serializers.ModelSerializer):
 class AcademicYearSerializer(serializers.ModelSerializer):
     class Meta:
         model = AcademicYear
-        fields = ['id', 'academic_year', 'start_date', 'end_date', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = ['id', 'academic_year', 'start_date', 'end_date', 'is_active', 'is_display', 'created_at', 'updated_at', 'created_by', 'updated_by']
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
         extra_kwargs = {
             'academic_year': {
@@ -127,6 +127,7 @@ class AcademicYearSerializer(serializers.ModelSerializer):
             'start_date': {'required': False, 'allow_null': True},
             'end_date': {'required': False, 'allow_null': True},
             'is_active': {'required': False, 'default': True},
+            'is_display': {'required': False, 'default': False},
         }
 
     def __init__(self, *args, **kwargs):
@@ -139,12 +140,22 @@ class AcademicYearSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, data):
-        start_date = data.get('start_date')
-        end_date = data.get('end_date')
+        start_date = data.get('start_date', self.instance.start_date if self.instance else None)
+        end_date = data.get('end_date', self.instance.end_date if self.instance else None)
         if start_date and end_date and end_date <= start_date:
             raise serializers.ValidationError(
                 {"end_date": "End date must be after the start date."}
             )
+
+        is_display = data.get('is_display', self.instance.is_display if self.instance else False)
+        if is_display:
+            qs = AcademicYear.objects.filter(is_display=True)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    {"is_display": "Only one academic year can be set as display."}
+                )
         return data
 
 
@@ -174,28 +185,37 @@ class BatchSerializer(serializers.ModelSerializer):
     def validate_batch(self, value):
         if not value.strip():
             raise serializers.ValidationError("Batch cannot be empty.")
-        return value
+        return value.strip()
+
+    def validate(self, data):
+        department = data.get('department', self.instance.department if self.instance else None)
+        batch_val = data.get('batch', self.instance.batch if self.instance else None)
+        if department and batch_val:
+            batch_val = str(batch_val).strip()
+            qs = Batch.objects.filter(department=department, batch__iexact=batch_val)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({
+                    "batch": "This batch already exists for the selected department."
+                })
+        return data
 
 
 
 # ─── Regulation ──────────────────────────────────────────────────────────────
 
 class RegulationSerializer(serializers.ModelSerializer):
-    academic_year_id = serializers.PrimaryKeyRelatedField(
-        source='academic_year',
-        queryset=AcademicYear.objects.all(),
-        error_messages={'does_not_exist': 'Academic year does not exist.'}
-    )
-
     class Meta:
         model = Regulation
-        fields = ['id', 'regulation_code', 'academic_year_id', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = ['id', 'regulation_code', 'effective_from_year', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
         extra_kwargs = {
             'regulation_code': {
                 'required': True,
                 'error_messages': {'unique': 'This regulation code already exists.'}
             },
+            'effective_from_year': {'required': True},
             'is_active': {'required': True},
         }
 
@@ -206,6 +226,11 @@ class RegulationSerializer(serializers.ModelSerializer):
     def validate_regulation_code(self, value):
         if not value.strip():
             raise serializers.ValidationError("Regulation code cannot be empty.")
+        return value
+
+    def validate_effective_from_year(self, value):
+        if value is None or value <= 0:
+            raise serializers.ValidationError("Effective from year must be a valid positive year.")
         return value
 
 

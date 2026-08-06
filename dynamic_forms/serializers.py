@@ -12,9 +12,27 @@ def apply_default_error_messages(fields):
         field.error_messages['null'] = f"{friendly} cannot be null."
 
 
+class FormModuleListSerializer(serializers.ListSerializer):
+    def validate(self, attrs):
+        seen_keys = set()
+        for idx, item in enumerate(attrs):
+            module_key = item.get('module_key')
+            if module_key:
+                if module_key in seen_keys:
+                    raise serializers.ValidationError(
+                        f"Duplicate module_key '{module_key}' found in request payload at position {idx + 1}."
+                    )
+                seen_keys.add(module_key)
+        return super().validate(attrs)
+
+    def create(self, validated_data):
+        return [FormModule.objects.create(**item) for item in validated_data]
+
+
 class FormModuleSerializer(serializers.ModelSerializer):
     class Meta:
         model = FormModule
+        list_serializer_class = FormModuleListSerializer
         fields = ['id', 'module_name', 'module_key', 'display_order', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
         extra_kwargs = {
@@ -42,6 +60,26 @@ class FormModuleSerializer(serializers.ModelSerializer):
         return value.strip().lower()
 
 
+class FormFieldListSerializer(serializers.ListSerializer):
+    def validate(self, attrs):
+        seen_keys = set()
+        for idx, item in enumerate(attrs):
+            form_module = item.get('form_module')
+            field_key = item.get('field_key')
+            if form_module and field_key:
+                mod_id = form_module.id if hasattr(form_module, 'id') else form_module
+                pair = (mod_id, field_key)
+                if pair in seen_keys:
+                    raise serializers.ValidationError(
+                        f"Duplicate field_key '{field_key}' for module ID {mod_id} found in request payload at position {idx + 1}."
+                    )
+                seen_keys.add(pair)
+        return super().validate(attrs)
+
+    def create(self, validated_data):
+        return [FormField.objects.create(**item) for item in validated_data]
+
+
 class FormFieldSerializer(serializers.ModelSerializer):
     form_module_id = serializers.PrimaryKeyRelatedField(
         source='form_module',
@@ -51,6 +89,7 @@ class FormFieldSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = FormField
+        list_serializer_class = FormFieldListSerializer
         fields = [
             'id', 'form_module_id', 'field_key', 'field_label', 'field_type', 
             'placeholder', 'default_value', 'required', 'unique', 'validation', 
@@ -64,7 +103,7 @@ class FormFieldSerializer(serializers.ModelSerializer):
             'field_type': {
                 'required': True,
                 'error_messages': {
-                    'invalid_choice': 'Invalid field type. Choose from: text, number, email, date, select, checkbox, radio, textarea, file.'
+                    'invalid_choice': 'Invalid field type. Choose from: text, number, email, date, select, checkbox, radio, textarea, file, array.'
                 }
             },
             'placeholder': {'required': False, 'allow_null': True},
@@ -111,14 +150,24 @@ class FormFieldSerializer(serializers.ModelSerializer):
         field_type = data.get('field_type')
         choices = data.get('choices')
         if field_type in ['select', 'radio']:
-            if not choices:
-                raise serializers.ValidationError(
-                    {"choices": "Choices are required when field type is select or radio."}
-                )
-            if not isinstance(choices, list):
+            if choices is not None and not isinstance(choices, list):
                 raise serializers.ValidationError(
                     {"choices": "Choices must be a list of options (e.g. ['Option 1', 'Option 2'])."}
                 )
+        elif field_type == 'array':
+            if not choices:
+                raise serializers.ValidationError(
+                    {"choices": "Column choices definition is required for array field type."}
+                )
+            if not isinstance(choices, list):
+                raise serializers.ValidationError(
+                    {"choices": "Array choices must be a list of column objects."}
+                )
+            for idx, col in enumerate(choices):
+                if not isinstance(col, dict) or 'key' not in col or 'label' not in col or 'type' not in col:
+                    raise serializers.ValidationError(
+                        {"choices": f"Column {idx + 1} must be an object with 'key', 'label', and 'type' attributes."}
+                    )
         return data
 
 
@@ -274,46 +323,101 @@ class ApplicationSerializer(serializers.ModelSerializer):
                     field_key = field.field_key
                     field_value = module_data.get(field_key)
 
-                    if field.required and (field_value is None or field_value == ''):
-                        if module_key not in errors:
-                            errors[module_key] = {}
-                        errors[module_key][field_key] = f"Field '{field.field_label}' is required."
-                        continue
+                    if field.field_type == 'array':
+                        if field.required and (not field_value or not isinstance(field_value, list) or len(field_value) == 0):
+                            if module_key not in errors:
+                                errors[module_key] = {}
+                            errors[module_key][field_key] = f"Field '{field.field_label}' requires at least one entry."
+                            continue
+                        
+                        if field_value and isinstance(field_value, list):
+                            columns = field.choices if isinstance(field.choices, list) else []
+                            for row_idx, row in enumerate(field_value):
+                                if not isinstance(row, dict):
+                                    if module_key not in errors:
+                                        errors[module_key] = {}
+                                    errors[module_key][field_key] = f"Row {row_idx + 1} must be an object."
+                                    break
+                                for col in columns:
+                                    if not isinstance(col, dict):
+                                        continue
+                                    col_key = col.get('key')
+                                    col_label = col.get('label', col_key)
+                                    col_val = row.get(col_key)
+                                    if col.get('required') and (col_val is None or col_val == ''):
+                                        if module_key not in errors:
+                                            errors[module_key] = {}
+                                        errors[module_key][field_key] = f"Row {row_idx + 1}: '{col_label}' is required."
+                                        break
+                                    if col_val is not None and col_val != '':
+                                        col_type = col.get('type')
+                                        if col_type == 'number':
+                                            try:
+                                                float(col_val)
+                                            except ValueError:
+                                                if module_key not in errors:
+                                                    errors[module_key] = {}
+                                                errors[module_key][field_key] = f"Row {row_idx + 1}: '{col_label}' must be a number."
+                                                break
+                                        elif col_type == 'email':
+                                            from django.core.validators import validate_email
+                                            from django.core.exceptions import ValidationError
+                                            try:
+                                                validate_email(col_val)
+                                            except ValidationError:
+                                                if module_key not in errors:
+                                                    errors[module_key] = {}
+                                                errors[module_key][field_key] = f"Row {row_idx + 1}: '{col_label}' has invalid email format."
+                                                break
+                                        elif col_type == 'select':
+                                            opts = col.get('options')
+                                            if opts and isinstance(opts, list) and col_val not in opts and str(col_val) not in [str(o) for o in opts]:
+                                                if module_key not in errors:
+                                                    errors[module_key] = {}
+                                                errors[module_key][field_key] = f"Row {row_idx + 1}: Invalid option for '{col_label}'."
+                                                break
 
-                    if field_value is not None and field_value != '':
-                        if field.field_type == 'number':
-                            try:
-                                float(field_value)
-                            except ValueError:
-                                if module_key not in errors:
-                                    errors[module_key] = {}
-                                errors[module_key][field_key] = "Value must be a number."
-                                continue
+                    else:
+                        if field.required and (field_value is None or field_value == ''):
+                            if module_key not in errors:
+                                errors[module_key] = {}
+                            errors[module_key][field_key] = f"Field '{field.field_label}' is required."
+                            continue
 
-                        elif field.field_type == 'email':
-                            from django.core.validators import validate_email
-                            from django.core.exceptions import ValidationError
-                            try:
-                                validate_email(field_value)
-                            except ValidationError:
-                                if module_key not in errors:
-                                    errors[module_key] = {}
-                                errors[module_key][field_key] = "Invalid email format."
-                                continue
+                        if field_value is not None and field_value != '':
+                            if field.field_type == 'number':
+                                try:
+                                    float(field_value)
+                                except ValueError:
+                                    if module_key not in errors:
+                                        errors[module_key] = {}
+                                    errors[module_key][field_key] = "Value must be a number."
+                                    continue
 
-                        elif field.field_type in ['select', 'radio']:
-                            if field.choices and field_value not in field.choices:
-                                if module_key not in errors:
-                                    errors[module_key] = {}
-                                errors[module_key][field_key] = f"Invalid option. Must be one of: {', '.join(field.choices)}."
-                                continue
+                            elif field.field_type == 'email':
+                                from django.core.validators import validate_email
+                                from django.core.exceptions import ValidationError
+                                try:
+                                    validate_email(field_value)
+                                except ValidationError:
+                                    if module_key not in errors:
+                                        errors[module_key] = {}
+                                    errors[module_key][field_key] = "Invalid email format."
+                                    continue
 
-                        if field.validation:
-                            import re
-                            if not re.match(field.validation, str(field_value)):
-                                if module_key not in errors:
-                                    errors[module_key] = {}
-                                errors[module_key][field_key] = f"Value does not match pattern format."
+                            elif field.field_type in ['select', 'radio']:
+                                if field.choices and field_value not in field.choices:
+                                    if module_key not in errors:
+                                        errors[module_key] = {}
+                                    errors[module_key][field_key] = f"Invalid option. Must be one of: {', '.join(field.choices)}."
+                                    continue
+
+                            if field.validation:
+                                import re
+                                if not re.match(field.validation, str(field_value)):
+                                    if module_key not in errors:
+                                        errors[module_key] = {}
+                                    errors[module_key][field_key] = f"Value does not match pattern format."
 
             if errors:
                 raise serializers.ValidationError({"form_data": errors})

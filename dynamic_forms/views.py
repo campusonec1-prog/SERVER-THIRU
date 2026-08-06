@@ -11,6 +11,9 @@ from .serializers import (
 from users.permissions import IsAdminUser
 
 
+from django.db import transaction
+
+
 class AdminWriteMixin:
     """Restrict create/update/delete to Admin users; list/retrieve are public."""
 
@@ -67,8 +70,19 @@ class FormModuleViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         return Response({"code": 200, "message": "Form Module retrieved successfully", "data": response.data}, status=status.HTTP_200_OK)
 
     def create(self, request, *args, **kwargs):
-        response = super().create(request, *args, **kwargs)
-        return Response({"code": 201, "message": "Form Module created successfully", "data": response.data}, status=status.HTTP_201_CREATED)
+        is_bulk = isinstance(request.data, list)
+        serializer = self.get_serializer(data=request.data, many=is_bulk)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            self.perform_create(serializer)
+            headers = self.get_success_headers(serializer.data)
+
+        msg = "Form Modules created successfully" if is_bulk else "Form Module created successfully"
+        return Response({
+            "code": 201,
+            "message": msg,
+            "data": serializer.data
+        }, status=status.HTTP_201_CREATED, headers=headers)
 
     def update(self, request, *args, **kwargs):
         response = super().update(request, *args, **kwargs)
@@ -97,8 +111,19 @@ class FormFieldViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         return Response({"code": 200, "message": "Form Field retrieved successfully", "data": response.data}, status=status.HTTP_200_OK)
 
     def create(self, request, *args, **kwargs):
-        response = super().create(request, *args, **kwargs)
-        return Response({"code": 201, "message": "Form Field created successfully", "data": response.data}, status=status.HTTP_201_CREATED)
+        is_bulk = isinstance(request.data, list)
+        serializer = self.get_serializer(data=request.data, many=is_bulk)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            self.perform_create(serializer)
+            headers = self.get_success_headers(serializer.data)
+
+        msg = "Form Fields created successfully" if is_bulk else "Form Field created successfully"
+        return Response({
+            "code": 201,
+            "message": msg,
+            "data": serializer.data
+        }, status=status.HTTP_201_CREATED, headers=headers)
 
     def update(self, request, *args, **kwargs):
         response = super().update(request, *args, **kwargs)

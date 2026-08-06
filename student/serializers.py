@@ -91,7 +91,10 @@ class StudentSerializer(serializers.ModelSerializer):
             },
             'department_id': {'required': True},
             'batch_id': {'required': True},
-            'user_id': {'required': True},
+            'user_id': {
+                'required': True,
+                'error_messages': {'unique': 'This user is already assigned to a student.'}
+            },
             'status_id': {'required': True},
             'lab_batch': {'required': False, 'allow_null': True, 'allow_blank': True},
         }
@@ -99,6 +102,16 @@ class StudentSerializer(serializers.ModelSerializer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         apply_default_error_messages(self.fields)
+
+    def validate_user_id(self, value):
+        if not value:
+            raise serializers.ValidationError("Application user is required.")
+        qs = Student.objects.filter(user=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("This user is already assigned to a student.")
+        return value
 
     def validate_roll_number(self, value):
         if not value.strip():

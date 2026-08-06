@@ -53,12 +53,28 @@ class AcademicYear(TrackingModel):
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    is_display = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'academic_years'
 
     def __str__(self):
         return self.academic_year
+
+    def clean(self):
+        super().clean()
+        if self.is_display:
+            qs = AcademicYear.objects.filter(is_display=True)
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+            if qs.exists():
+                from django.core.exceptions import ValidationError
+                raise ValidationError({'is_display': 'Only one academic year can be set as display.'})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
 
 
 class Batch(TrackingModel):
@@ -73,6 +89,7 @@ class Batch(TrackingModel):
 
     class Meta:
         db_table = 'batches'
+        unique_together = ('department', 'batch')
 
     def __str__(self):
         return f"{self.batch} ({self.department.department_name})"
@@ -81,19 +98,14 @@ class Batch(TrackingModel):
 
 class Regulation(TrackingModel):
     regulation_code = models.CharField(max_length=50, unique=True)
-    academic_year = models.ForeignKey(
-        AcademicYear,
-        on_delete=models.CASCADE,
-        db_column='academic_year_id',
-        related_name='regulations'
-    )
+    effective_from_year = models.PositiveIntegerField(default=2024)
     is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = 'regulation'
 
     def __str__(self):
-        return self.regulation_code
+        return f"{self.regulation_code} ({self.effective_from_year})"
 
 
 class Semester(TrackingModel):

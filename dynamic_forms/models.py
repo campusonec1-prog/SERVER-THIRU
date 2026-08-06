@@ -29,6 +29,7 @@ class FormField(TrackingModel):
         ('radio', 'Radio Button'),
         ('textarea', 'Text Area'),
         ('file', 'File Upload'),
+        ('array', 'Array'),
     ]
 
     form_module = models.ForeignKey(
