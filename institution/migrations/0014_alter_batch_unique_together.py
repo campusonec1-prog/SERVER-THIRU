@@ -22,6 +22,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('institution', '0013_academicyear_is_display'),
+        ('student', '0002_student'),
     ]
 
     operations = [

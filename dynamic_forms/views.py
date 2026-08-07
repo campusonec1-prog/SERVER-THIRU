@@ -401,5 +401,52 @@ class ApplicationUserLoginView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+class DocumentUploadView(APIView):
+    from rest_framework.permissions import IsAuthenticated
+    from rest_framework.parsers import MultiPartParser, FormParser
+    
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, *args, **kwargs):
+        # Retrieve all files from request.FILES list
+        files = request.FILES.getlist('files')
+        if not files:
+            files = request.FILES.getlist('file')
+        if not files:
+            files = [file_obj for key in request.FILES for file_obj in request.FILES.getlist(key)]
+
+        if not files:
+            return Response({
+                "code": 400,
+                "message": "No files were uploaded."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from common.r2 import upload_file_to_r2
+            doc_type = request.data.get('docType', 'documents')
+            uploaded_data = []
+
+            for file_obj in files:
+                file_url = upload_file_to_r2(file_obj, folder_name=doc_type)
+                uploaded_data.append({
+                    "file_name": file_obj.name,
+                    "file_url": file_url
+                })
+
+            return Response({
+                "code": 200,
+                "message": "Files uploaded successfully.",
+                "data": uploaded_data
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({
+                "code": 500,
+                "message": f"File upload failed: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
 
 

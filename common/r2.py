@@ -12,7 +12,7 @@ def get_r2_client():
         region_name='auto'
     )
 
-def upload_file_to_r2(file_obj, folder_name="logos"):
+def upload_file_to_r2(file_obj, folder_name="college_headers"):
     """
     Uploads a file object to Cloudflare R2 and returns its public URL.
     """
@@ -20,8 +20,8 @@ def upload_file_to_r2(file_obj, folder_name="logos"):
     
     # Get extension
     ext = os.path.splitext(file_obj.name)[1]
-    # Keep folder structure clean: college_headers/<uuid><ext>
-    unique_filename = f"college_headers/{uuid.uuid4()}{ext}"
+    # Use folder_name dynamically to isolate headers vs documents
+    unique_filename = f"{folder_name}/{uuid.uuid4()}{ext}"
     
     # Try to guess content type if not present
     content_type = getattr(file_obj, 'content_type', 'application/octet-stream')

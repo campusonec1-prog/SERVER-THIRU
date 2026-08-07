@@ -16,6 +16,7 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from dynamic_forms.views import DocumentUploadView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -27,4 +28,6 @@ urlpatterns = [
     path('api/forms/', include('dynamic_forms.urls')),
     path('api/subject/', include('subject.urls')),
     path('api/student/', include('student.urls')),
+    path('api/documents/upload', DocumentUploadView.as_view(), name='document-upload'),
 ]
+

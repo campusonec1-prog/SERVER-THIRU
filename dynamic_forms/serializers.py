@@ -243,6 +243,7 @@ class ApplicationSerializer(serializers.ModelSerializer):
     program_id = serializers.PrimaryKeyRelatedField(
         source='program',
         queryset=Program.objects.all(),
+        required=False,
         error_messages={'does_not_exist': 'Program does not exist.'}
     )
     status_id = serializers.PrimaryKeyRelatedField(
@@ -257,7 +258,6 @@ class ApplicationSerializer(serializers.ModelSerializer):
         fields = ['id', 'candidate_id', 'program_id', 'application_no', 'form_data', 'status_id', 'created_at', 'updated_at', 'created_by', 'updated_by']
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by', 'application_no']
         extra_kwargs = {
-            'program_id': {'required': True},
             'form_data': {'required': False, 'default': dict},
         }
 
@@ -283,8 +283,26 @@ class ApplicationSerializer(serializers.ModelSerializer):
                 submitted_status = ApplicationStatus.objects.create(status_name='Submitted')
             data['status'] = submitted_status
 
+        # Derive program if not explicitly provided
+        if not data.get('program') and not (self.instance and self.instance.program):
+            input_form_data = data.get('form_data', {})
+            course_selection = input_form_data.get('course_selection', {})
+            department_name = course_selection.get('department')
+            if isinstance(department_name, list) and len(department_name) > 0:
+                department_name = department_name[0]
+            if department_name:
+                from institution.models import Department
+                try:
+                    dept = Department.objects.get(department_name__iexact=str(department_name).strip())
+                    data['program'] = dept.program
+                except Department.DoesNotExist:
+                    raise serializers.ValidationError({"program_id": f"Could not derive program: department '{department_name}' does not exist."})
+            else:
+                raise serializers.ValidationError({"program_id": "Program is required."})
+
         status_instance = data.get('status', self.instance.status if self.instance else None)
         status_name = status_instance.status_name.lower() if status_instance else 'submitted'
+
 
         # Filter and keep only dynamic fields that exist in the database
         if 'form_data' in data or self.instance is None:
@@ -378,13 +396,13 @@ class ApplicationSerializer(serializers.ModelSerializer):
                                                 break
 
                     else:
-                        if field.required and (field_value is None or field_value == ''):
+                        if field.required and (field_value is None or field_value == '' or (isinstance(field_value, list) and len(field_value) == 0)):
                             if module_key not in errors:
                                 errors[module_key] = {}
                             errors[module_key][field_key] = f"Field '{field.field_label}' is required."
                             continue
 
-                        if field_value is not None and field_value != '':
+                        if field_value is not None and field_value != '' and not (isinstance(field_value, list) and len(field_value) == 0):
                             if field.field_type == 'number':
                                 try:
                                     float(field_value)
@@ -406,11 +424,20 @@ class ApplicationSerializer(serializers.ModelSerializer):
                                     continue
 
                             elif field.field_type in ['select', 'radio']:
-                                if field.choices and field_value not in field.choices:
-                                    if module_key not in errors:
-                                        errors[module_key] = {}
-                                    errors[module_key][field_key] = f"Invalid option. Must be one of: {', '.join(field.choices)}."
-                                    continue
+                                if isinstance(field_value, list):
+                                    if field.choices:
+                                        invalid_opts = [val for val in field_value if val not in field.choices]
+                                        if invalid_opts:
+                                            if module_key not in errors:
+                                                errors[module_key] = {}
+                                            errors[module_key][field_key] = f"Invalid options: {', '.join(invalid_opts)}."
+                                            continue
+                                else:
+                                    if field.choices and field_value not in field.choices:
+                                        if module_key not in errors:
+                                            errors[module_key] = {}
+                                        errors[module_key][field_key] = f"Invalid option. Must be one of: {', '.join(field.choices)}."
+                                        continue
 
                             if field.validation:
                                 import re
