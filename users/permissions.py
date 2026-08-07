@@ -40,3 +40,18 @@ class IsMarksManager(permissions.BasePermission):
             return False
 
 
+class IsCounsellingCreator(permissions.BasePermission):
+    """
+    Allows access only to HOD, Faculty, Principal, Vice Principal.
+    """
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        try:
+            role_name = request.user.role.role_name.upper()
+            return role_name in ['HOD', 'FACULTY', 'PRINCIPAL', 'VICE PRINCIPAL', 'VICE_PRINCIPAL']
+        except AttributeError:
+            return False
+
+
+

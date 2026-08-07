@@ -1,5 +1,5 @@
 from django.test import TestCase
-from student.models import Student, StudentStatus
+from student.models import Student, StudentStatus, CounsellingReport
 from student.serializers import StudentSerializer
 from dynamic_forms.models import ApplicationUser
 from institution.models import Program, Department, Batch
@@ -255,6 +255,115 @@ class MarksViewSetTest(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['data'][0]['marks_obtained'], "A+")
         self.assertEqual(response.data['data'][0]['student_id'], self.student.id)
+
+
+class CounsellingReportViewSetTest(APITestCase):
+    def setUp(self):
+        # Create roles
+        self.admin_role = Role.objects.create(role_name="ADMIN")
+        self.faculty_role = Role.objects.create(role_name="FACULTY")
+        self.student_role = Role.objects.create(role_name="STUDENT")
+        
+        # Create users
+        self.faculty_user = StandardUser.objects.create(
+            name="Faculty User",
+            username="faculty",
+            password="password123",
+            mobile_number="1234567890",
+            mail="faculty@example.com",
+            role=self.faculty_role
+        )
+        self.student_user = StandardUser.objects.create(
+            name="Student User",
+            username="student",
+            password="password123",
+            mobile_number="1234567891",
+            mail="student@example.com",
+            role=self.student_role
+        )
+
+        # Setup student structure
+        self.status = StudentStatus.objects.create(status_name="Active")
+        self.program = Program.objects.create(
+            program_name="Computer Science Engineering",
+            program_level="UG",
+            duration=4
+        )
+        self.department = Department.objects.create(
+            program=self.program,
+            department_name="Computer Science",
+            department_code="CSE",
+            short_name="CS"
+        )
+        self.batch = Batch.objects.create(
+            department=self.department,
+            batch="2022-2026"
+        )
+        self.app_user = ApplicationUser.objects.create(
+            name="Student App User",
+            email="studentapp@example.com",
+            phone_number="9876543210",
+            password="pass"
+        )
+        self.student = Student.objects.create(
+            roll_number="1001",
+            register_number="REG1001",
+            department=self.department,
+            batch=self.batch,
+            user=self.app_user,
+            status=self.status
+        )
+
+        # Create Semester
+        from institution.models import Semester
+        self.semester = Semester.objects.create(department=self.department, semesters=[1, 2])
+
+    def test_counselling_create_unauthenticated_fails(self):
+        url = reverse('counselling-create')
+        response = self.client.post(url, {}, format='json')
+        self.assertEqual(response.status_code, 401)
+
+    def test_counselling_create_unauthorized_role_fails(self):
+        # Authenticate as student
+        self.client.force_authenticate(user=self.student_user)
+        url = reverse('counselling-create')
+        response = self.client.post(url, {}, format='json')
+        self.assertEqual(response.status_code, 403)
+
+    @patch('channels.layers.get_channel_layer')
+    def test_counselling_create_success(self, mock_channel_layer):
+        # Authenticate as faculty
+        self.client.force_authenticate(user=self.faculty_user)
+        
+        payload = {
+            "student_id": self.student.id,
+            "semester_id": self.semester.id,
+            "report_date": "2026-08-07",
+            "remarks": "Excellent academic performance."
+        }
+        
+        url = reverse('counselling-create')
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['data']['remarks'], "Excellent academic performance.")
+        
+        # Verify db persistence
+        self.assertTrue(CounsellingReport.objects.filter(student=self.student, semester=self.semester, report_date="2026-08-07").exists())
+
+    def test_counselling_list_authenticated_success(self):
+        # Create counselling report
+        CounsellingReport.objects.create(
+            student=self.student,
+            semester=self.semester,
+            report_date="2026-08-07",
+            remarks="Participative"
+        )
+        self.client.force_authenticate(user=self.student_user)
+        url = reverse('counselling-list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['data']), 1)
+
 
 
 

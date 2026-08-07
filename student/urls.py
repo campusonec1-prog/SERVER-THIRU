@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import StudentStatusViewSet, StudentViewSet, MarksViewSet
+from .views import StudentStatusViewSet, StudentViewSet, MarksViewSet, CounsellingReportViewSet
 
 urlpatterns = [
     # Student Status endpoints
@@ -21,5 +21,12 @@ urlpatterns = [
     path('marks/list', MarksViewSet.as_view({'get': 'list'}), name='marks-list'),
     path('marks/get/<int:pk>', MarksViewSet.as_view({'get': 'retrieve'}), name='marks-detail'),
     path('marks/edit', MarksViewSet.as_view({'put': 'update'}), name='marks-edit'),
+
+    # Counselling Report endpoints
+    path('counselling/create', CounsellingReportViewSet.as_view({'post': 'create'}), name='counselling-create'),
+    path('counselling/list', CounsellingReportViewSet.as_view({'get': 'list'}), name='counselling-list'),
+    path('counselling/get/<int:pk>', CounsellingReportViewSet.as_view({'get': 'retrieve'}), name='counselling-detail'),
+    path('counselling/edit/<int:pk>', CounsellingReportViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='counselling-edit'),
+    path('counselling/remove/<int:pk>', CounsellingReportViewSet.as_view({'delete': 'destroy'}), name='counselling-remove'),
 ]
 

@@ -169,3 +169,32 @@ class MarksSerializer(serializers.ModelSerializer):
         apply_default_error_messages(self.fields)
 
 
+from .models import CounsellingReport
+from institution.models import Semester
+
+class CounsellingReportSerializer(serializers.ModelSerializer):
+    student_id = serializers.PrimaryKeyRelatedField(
+        source='student',
+        queryset=Student.objects.all(),
+        error_messages={'does_not_exist': 'Student does not exist.'}
+    )
+    semester_id = serializers.PrimaryKeyRelatedField(
+        source='semester',
+        queryset=Semester.objects.all(),
+        error_messages={'does_not_exist': 'Semester does not exist.'}
+    )
+
+    class Meta:
+        model = CounsellingReport
+        fields = [
+            'id', 'student_id', 'semester_id', 'report_date', 'remarks',
+            'created_at', 'updated_at', 'created_by', 'updated_by'
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+
+

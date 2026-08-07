@@ -86,3 +86,27 @@ class Marks(TrackingModel):
         return f"{self.student.roll_number} - {self.subject.subject_code} ({self.exam.exam_name}): {self.marks_obtained}"
 
 
+class CounsellingReport(TrackingModel):
+    student = models.ForeignKey(
+        Student,
+        on_delete=models.CASCADE,
+        db_column='student_id',
+        related_name='counselling_reports'
+    )
+    semester = models.ForeignKey(
+        'institution.Semester',
+        on_delete=models.CASCADE,
+        db_column='semester_id',
+        related_name='counselling_reports'
+    )
+    report_date = models.DateField()
+    remarks = models.TextField()
+
+    class Meta:
+        db_table = 'counselling_reports'
+
+    def __str__(self):
+        return f"Counselling Report for {self.student.roll_number} on {self.report_date}"
+
+
+
