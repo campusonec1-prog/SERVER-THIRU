@@ -208,3 +208,219 @@ class StudentViewSet(viewsets.ModelViewSet):
             "message": "Student deleted successfully"
         }, status=status.HTTP_200_OK)
 
+
+from django.db import transaction
+from rest_framework.permissions import IsAuthenticated
+from users.permissions import IsMarksManager
+from .models import Marks
+from .serializers import MarksSerializer
+from institution.models import Exam
+from subject.models import Subject
+
+class MarksViewSet(viewsets.ViewSet):
+    def get_permissions(self):
+        if self.action in ['create', 'update']:
+            return [IsAuthenticated(), IsMarksManager()]
+        # Token is needed for GET, but no role restriction is required
+        return [IsAuthenticated()]
+
+    def handle_exception(self, exc):
+        if isinstance(exc, (Http404, NotFound)):
+            return Response({
+                "code": 404,
+                "message": "Marks records not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if isinstance(exc, NotAuthenticated):
+            return Response({
+                "code": 401,
+                "message": "You don't have access to this resource."
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        if isinstance(exc, PermissionDenied):
+            return Response({
+                "code": 403,
+                "message": "You don't have access to this resource."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        if isinstance(exc, ValidationError):
+            return Response({
+                "code": 400,
+                "message": str(exc.detail)
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        return super().handle_exception(exc)
+
+    def list(self, request):
+        queryset = Marks.objects.all().order_by('id')
+        exam_id = request.query_params.get('exam_id')
+        subject_id = request.query_params.get('subject_id')
+        batch_id = request.query_params.get('batch_id')
+        section_id = request.query_params.get('section_id')
+
+        if exam_id:
+            queryset = queryset.filter(exam_id=exam_id)
+        if subject_id:
+            queryset = queryset.filter(subject_id=subject_id)
+        if batch_id:
+            queryset = queryset.filter(student__batch_id=batch_id)
+        if section_id:
+            queryset = queryset.filter(student__section_id=section_id)
+
+        serializer = MarksSerializer(queryset, many=True)
+        return Response({
+            "code": 200,
+            "message": "Marks records listed successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, pk=None):
+        # pk represents student_id
+        student_id = pk
+        try:
+            student = Student.objects.get(pk=student_id)
+        except Student.DoesNotExist:
+            raise Http404()
+        
+        queryset = Marks.objects.filter(student_id=student_id).order_by('id')
+        serializer = MarksSerializer(queryset, many=True)
+        return Response({
+            "code": 200,
+            "message": f"Marks records for student {student_id} retrieved successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def create(self, request):
+        # We handle bulk insert/update in create endpoint
+        return self._save_marks(request, is_create=True)
+
+    def update(self, request, pk=None):
+        # Update can also do bulk update/insert of entries
+        return self._save_marks(request, is_create=False)
+
+    def _save_marks(self, request, is_create):
+        exam_id = request.data.get('exam_id')
+        subject_id = request.data.get('subject_id')
+        marks_entries = request.data.get('marks_entries')
+
+        if not exam_id or not subject_id or not isinstance(marks_entries, list):
+            return Response({
+                "code": 400,
+                "message": "exam_id, subject_id and a list of marks_entries are required."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check for duplicate student_id in the payload
+        seen_students = set()
+        for entry in marks_entries:
+            student_id = entry.get('student_id')
+            if student_id in seen_students:
+                return Response({
+                    "code": 400,
+                    "message": f"Duplicate student entry with ID {student_id} found in the payload."
+                }, status=status.HTTP_400_BAD_REQUEST)
+            seen_students.add(student_id)
+
+        # Validate exam and subject exist
+        try:
+            exam = Exam.objects.get(pk=exam_id)
+            subject = Subject.objects.get(pk=subject_id)
+        except Exam.DoesNotExist:
+            return Response({
+                "code": 400,
+                "message": f"Exam with ID {exam_id} does not exist."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Subject.DoesNotExist:
+            return Response({
+                "code": 400,
+                "message": f"Subject with ID {subject_id} does not exist."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        from users.models import User as StandardUser
+        tracking_user = user if isinstance(user, StandardUser) else None
+
+        saved_marks = []
+        broadcast_payload_entries = []
+
+        try:
+            with transaction.atomic():
+                for entry in marks_entries:
+                    student_id = entry.get('student_id')
+                    marks_obtained = str(entry.get('marks_obtained', '')).strip()
+
+                    if not student_id or marks_obtained == '':
+                        raise ValidationError("student_id and marks_obtained are required for each entry.")
+
+                    try:
+                        student = Student.objects.get(pk=student_id)
+                    except Student.DoesNotExist:
+                        raise ValidationError(f"Student with ID {student_id} does not exist.")
+
+                    if is_create:
+                        if Marks.objects.filter(student=student, exam=exam, subject=subject).exists():
+                            raise ValidationError(f"Marks record already exists for student ID {student_id}, exam ID {exam_id}, and subject ID {subject_id}.")
+
+                    # Create or update marks record
+                    marks_instance, created = Marks.objects.get_or_create(
+                        student=student,
+                        exam=exam,
+                        subject=subject,
+                        defaults={
+                            'marks_obtained': marks_obtained,
+                            'created_by': tracking_user,
+                            'updated_by': tracking_user
+                        }
+                    )
+
+                    if not created:
+                        marks_instance.marks_obtained = marks_obtained
+                        marks_instance.updated_by = tracking_user
+                        marks_instance.save()
+
+                    saved_marks.append(marks_instance)
+                    broadcast_payload_entries.append({
+                        'student_id': student.id,
+                        'roll_number': student.roll_number,
+                        'student_name': student.user.name if hasattr(student, 'user') else "",
+                        'marks_obtained': marks_obtained
+                    })
+        except ValidationError as e:
+            return Response({
+                "code": 400,
+                "message": str(e.detail[0] if isinstance(e.detail, list) else e.detail)
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Websocket Broadcast
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'realtime_updates',
+                    {
+                        'type': 'broadcast_update',
+                        'data': {
+                            'event': 'marks_created' if is_create else 'marks_updated',
+                            'payload': {
+                                'exam_id': exam.id,
+                                'exam_name': exam.exam_name,
+                                'subject_id': subject.id,
+                                'subject_code': subject.subject_code,
+                                'entries': broadcast_payload_entries
+                            }
+                        }
+                    }
+                )
+        except Exception as e:
+            # Prevent failure to broadcast from failing the HTTP request
+            pass
+
+        serializer = MarksSerializer(saved_marks, many=True)
+        return Response({
+            "code": 201 if is_create else 200,
+            "message": "Marks recorded successfully." if is_create else "Marks updated successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_201_CREATED if is_create else status.HTTP_200_OK)
+
+

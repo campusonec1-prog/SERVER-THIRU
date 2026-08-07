@@ -56,3 +56,33 @@ class Student(TrackingModel):
     def __str__(self):
         return f"{self.roll_number} - {self.user.name}"
 
+
+class Marks(TrackingModel):
+    student = models.ForeignKey(
+        Student,
+        on_delete=models.CASCADE,
+        db_column='student_id',
+        related_name='marks'
+    )
+    exam = models.ForeignKey(
+        'institution.Exam',
+        on_delete=models.CASCADE,
+        db_column='exam_id',
+        related_name='marks'
+    )
+    subject = models.ForeignKey(
+        'subject.Subject',
+        on_delete=models.CASCADE,
+        db_column='subject_id',
+        related_name='marks'
+    )
+    marks_obtained = models.CharField(max_length=50)
+
+    class Meta:
+        db_table = 'marks'
+        unique_together = ('student', 'exam', 'subject')
+
+    def __str__(self):
+        return f"{self.student.roll_number} - {self.subject.subject_code} ({self.exam.exam_name}): {self.marks_obtained}"
+
+

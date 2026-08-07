@@ -134,3 +134,38 @@ class StudentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("This register number already exists.")
         return val_str
 
+
+from .models import Marks
+from institution.models import Exam
+from subject.models import Subject
+
+class MarksSerializer(serializers.ModelSerializer):
+    student_id = serializers.PrimaryKeyRelatedField(
+        source='student',
+        queryset=Student.objects.all(),
+        error_messages={'does_not_exist': 'Student does not exist.'}
+    )
+    exam_id = serializers.PrimaryKeyRelatedField(
+        source='exam',
+        queryset=Exam.objects.all(),
+        error_messages={'does_not_exist': 'Exam does not exist.'}
+    )
+    subject_id = serializers.PrimaryKeyRelatedField(
+        source='subject',
+        queryset=Subject.objects.all(),
+        error_messages={'does_not_exist': 'Subject does not exist.'}
+    )
+
+    class Meta:
+        model = Marks
+        fields = [
+            'id', 'student_id', 'exam_id', 'subject_id', 'marks_obtained',
+            'created_at', 'updated_at', 'created_by', 'updated_by'
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+

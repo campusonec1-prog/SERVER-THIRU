@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import StudentStatusViewSet, StudentViewSet
+from .views import StudentStatusViewSet, StudentViewSet, MarksViewSet
 
 urlpatterns = [
     # Student Status endpoints
@@ -15,5 +15,11 @@ urlpatterns = [
     path('get/<int:pk>', StudentViewSet.as_view({'get': 'retrieve'}), name='student-detail'),
     path('edit/<int:pk>', StudentViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='student-edit'),
     path('remove/<int:pk>', StudentViewSet.as_view({'delete': 'destroy'}), name='student-remove'),
+
+    # Marks endpoints
+    path('marks/create', MarksViewSet.as_view({'post': 'create'}), name='marks-create'),
+    path('marks/list', MarksViewSet.as_view({'get': 'list'}), name='marks-list'),
+    path('marks/get/<int:pk>', MarksViewSet.as_view({'get': 'retrieve'}), name='marks-detail'),
+    path('marks/edit', MarksViewSet.as_view({'put': 'update'}), name='marks-edit'),
 ]
 
