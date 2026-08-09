@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     'dynamic_forms',
     'subject',
     'student',
+    'timetable',
 ]
 
 MIDDLEWARE = [

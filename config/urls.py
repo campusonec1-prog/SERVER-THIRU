@@ -28,6 +28,7 @@ urlpatterns = [
     path('api/forms/', include('dynamic_forms.urls')),
     path('api/subject/', include('subject.urls')),
     path('api/student/', include('student.urls')),
+    path('api/timetable/', include('timetable.urls')),
     path('api/documents/upload', DocumentUploadView.as_view(), name='document-upload'),
 ]
 
