@@ -20,7 +20,8 @@ class AdminWriteMixin:
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [IsAdminUser()]
-        return []
+        from rest_framework.permissions import IsAuthenticated
+        return [IsAuthenticated()]
 
     def handle_exception(self, exc):
         if isinstance(exc, (Http404, NotFound)):
@@ -303,7 +304,7 @@ class ApplicationUserViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ['list', 'destroy']:
             return [IsAdminUser()]
-        elif self.action in ['update', 'partial_update']:
+        elif self.action in ['update', 'partial_update', 'retrieve']:
             from rest_framework.permissions import IsAuthenticated
             return [IsAuthenticated()]
         return []

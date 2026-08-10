@@ -13,6 +13,8 @@ class UserViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [IsAdminUser()]
+        elif self.action in ['list', 'retrieve']:
+            return [permissions.IsAuthenticated()]
         return []
 
     def perform_create(self, serializer):

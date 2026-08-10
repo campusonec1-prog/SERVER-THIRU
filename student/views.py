@@ -13,7 +13,7 @@ class StudentStatusViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in ['list', 'retrieve']:
-            return []
+            return [permissions.IsAuthenticated()]
         return [IsAdminUser()]
 
     def handle_exception(self, exc):
@@ -114,7 +114,7 @@ class StudentViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in ['list', 'retrieve']:
-            return []
+            return [permissions.IsAuthenticated()]
         return [IsAdminUser()]
 
     def handle_exception(self, exc):
