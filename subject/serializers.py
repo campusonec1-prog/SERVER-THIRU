@@ -64,5 +64,5 @@ class SubjectSerializer(serializers.ModelSerializer):
 
     def validate_credits(self, value):
         if value <= 0:
-            raise serializers.ValidationError("Credits must be a positive integer.")
+            raise serializers.ValidationError("Credits must be a positive number.")
         return value

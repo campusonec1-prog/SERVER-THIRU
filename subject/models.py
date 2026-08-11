@@ -4,7 +4,7 @@ from common.models import TrackingModel
 class Subject(TrackingModel):
     subject_code = models.CharField(max_length=50, unique=True)
     subject_name = models.CharField(max_length=150)
-    credits = models.PositiveIntegerField()
+    credits = models.FloatField()
     regulation = models.ForeignKey(
         'institution.Regulation',
         on_delete=models.CASCADE,
