@@ -48,9 +48,19 @@ class AdminWriteMixin:
         serializer.save(updated_by=user)
 
 
+class PublicListMixin:
+    """Allow public access to 'list' action; otherwise fall back to standard permissions."""
+
+    def get_permissions(self):
+        if self.action == 'list':
+            from rest_framework.permissions import AllowAny
+            return [AllowAny()]
+        return super().get_permissions()
+
+
 # ─── Program ─────────────────────────────────────────────────────────────────
 
-class ProgramViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+class ProgramViewSet(PublicListMixin, AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Program.objects.all().order_by('id')
     serializer_class = ProgramSerializer
     model_label = "Program"
@@ -78,7 +88,7 @@ class ProgramViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 # ─── Department ──────────────────────────────────────────────────────────────
 
-class DepartmentViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+class DepartmentViewSet(PublicListMixin, AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Department.objects.all().order_by('id')
     serializer_class = DepartmentSerializer
     model_label = "Department"
@@ -106,7 +116,7 @@ class DepartmentViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 # ─── Academic Year ───────────────────────────────────────────────────────────
 
-class AcademicYearViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+class AcademicYearViewSet(PublicListMixin, AdminWriteMixin, viewsets.ModelViewSet):
     queryset = AcademicYear.objects.all().order_by('id')
     serializer_class = AcademicYearSerializer
     model_label = "Academic year"
