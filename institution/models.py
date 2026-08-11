@@ -182,5 +182,17 @@ class Exam(TrackingModel):
         return f"{self.exam_name} ({self.exam_type.exam_type_name})"
 
 
+class Quota(TrackingModel):
+    quota_name = models.CharField(max_length=100, unique=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'quotas'
+
+    def __str__(self):
+        return self.quota_name
+
+
+
 
 

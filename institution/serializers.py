@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader, ExamType, Exam
+from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader, ExamType, Exam, Quota
 from users.models import User
 
 
@@ -457,6 +457,32 @@ class ExamSerializer(serializers.ModelSerializer):
         if not value.strip():
             raise serializers.ValidationError("Exam name cannot be empty.")
         return value.strip()
+
+
+# ─── Quota ─────────────────────────────────────────────────────
+
+class QuotaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Quota
+        fields = ['id', 'quota_name', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        extra_kwargs = {
+            'quota_name': {
+                'required': True,
+                'error_messages': {'unique': 'This quota already exists.'}
+            },
+            'is_active': {'required': False, 'default': True},
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+    def validate_quota_name(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Quota name cannot be empty.")
+        return value.strip()
+
 
 
 

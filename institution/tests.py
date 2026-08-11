@@ -1,7 +1,7 @@
 from django.test import TestCase
 from rest_framework.exceptions import ValidationError
 from institution.models import AcademicYear, Program, Department, Batch, Regulation
-from institution.serializers import AcademicYearSerializer, BatchSerializer, RegulationSerializer
+from institution.serializers import AcademicYearSerializer, BatchSerializer, RegulationSerializer, QuotaSerializer
 
 
 class AcademicYearIsDisplayTest(TestCase):
@@ -114,3 +114,45 @@ class RegulationEffectiveFromYearTest(TestCase):
         serializer = RegulationSerializer(data=data)
         self.assertFalse(serializer.is_valid())
         self.assertIn('effective_from_year', serializer.errors)
+
+
+class QuotaModelAndSerializerTest(TestCase):
+    def test_quota_creation_success(self):
+        data = {
+            'quota_name': 'Sports Quota',
+            'is_active': True
+        }
+        serializer = QuotaSerializer(data=data)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        quota = serializer.save()
+        self.assertEqual(quota.quota_name, 'Sports Quota')
+        self.assertTrue(quota.is_active)
+
+    def test_quota_validation_empty_name(self):
+        data = {
+            'quota_name': '   ',
+            'is_active': True
+        }
+        serializer = QuotaSerializer(data=data)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('quota_name', serializer.errors)
+        self.assertEqual(
+            str(serializer.errors['quota_name'][0]),
+            "Quota name cannot be empty."
+        )
+
+    def test_quota_uniqueness(self):
+        from institution.models import Quota
+        Quota.objects.create(quota_name='Management Quota')
+        data = {
+            'quota_name': 'Management Quota',
+            'is_active': True
+        }
+        serializer = QuotaSerializer(data=data)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('quota_name', serializer.errors)
+        self.assertEqual(
+            str(serializer.errors['quota_name'][0]),
+            "This quota already exists."
+        )
+

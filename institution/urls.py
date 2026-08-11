@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import ProgramViewSet, DepartmentViewSet, AcademicYearViewSet, BatchViewSet, RegulationViewSet, SemesterViewSet, SectionViewSet, CollegeHeaderViewSet, ExamTypeViewSet, ExamViewSet
+from .views import ProgramViewSet, DepartmentViewSet, AcademicYearViewSet, BatchViewSet, RegulationViewSet, SemesterViewSet, SectionViewSet, CollegeHeaderViewSet, ExamTypeViewSet, ExamViewSet, QuotaViewSet
 
 urlpatterns = [
     # Program endpoints
@@ -71,4 +71,11 @@ urlpatterns = [
     path('exams/get/<int:pk>', ExamViewSet.as_view({'get': 'retrieve'}), name='exam-detail'),
     path('exams/edit/<int:pk>', ExamViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='exam-edit'),
     path('exams/remove/<int:pk>', ExamViewSet.as_view({'delete': 'destroy'}), name='exam-remove'),
+
+    # Quota endpoints
+    path('quotas/list', QuotaViewSet.as_view({'get': 'list'}), name='quota-list'),
+    path('quotas/create', QuotaViewSet.as_view({'post': 'create'}), name='quota-create'),
+    path('quotas/get/<int:pk>', QuotaViewSet.as_view({'get': 'retrieve'}), name='quota-detail'),
+    path('quotas/edit/<int:pk>', QuotaViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='quota-edit'),
+    path('quotas/remove/<int:pk>', QuotaViewSet.as_view({'delete': 'destroy'}), name='quota-remove'),
 ]
