@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import User, UserDetails
 from role.models import Role
+from common.r2 import upload_file_to_r2
 import bcrypt
 
 class UserSerializer(serializers.ModelSerializer):
@@ -79,15 +80,24 @@ class UserDetailsSerializer(serializers.ModelSerializer):
         required=False,
         error_messages={'does_not_exist': 'User does not exist.'}
     )
+    user_image_file = serializers.ImageField(
+        write_only=True,
+        required=False,
+        allow_null=True,
+        error_messages={
+            'invalid_image': 'Upload a valid image file (JPG, PNG, WEBP, etc.).',
+        }
+    )
 
     class Meta:
         model = UserDetails
         fields = [
             'id', 'user_id', 'faculty_code', 'qualification',
             'designation', 'date_of_joining', 'gender',
+            'user_image', 'user_image_file',
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by', 'user_image']
         extra_kwargs = {
             'faculty_code': {
                 'required': True,

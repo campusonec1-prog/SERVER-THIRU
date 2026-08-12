@@ -171,10 +171,20 @@ class UserDetailsViewSet(viewsets.ModelViewSet):
         except AttributeError:
             pass
 
+        # Handle image upload to R2
+        image_file = serializer.validated_data.pop('user_image_file', None)
+        image_url = None
+        if image_file:
+            from common.r2 import upload_file_to_r2
+            image_url = upload_file_to_r2(image_file, folder_name='user')
+
+        save_kwargs = {'created_by': tracking_user, 'updated_by': tracking_user}
+        if image_url:
+            save_kwargs['user_image'] = image_url
         if not is_admin and isinstance(user, User):
-            serializer.save(user=user, created_by=tracking_user, updated_by=tracking_user)
-        else:
-            serializer.save(created_by=tracking_user, updated_by=tracking_user)
+            save_kwargs['user'] = user
+
+        serializer.save(**save_kwargs)
 
     def perform_update(self, serializer):
         user = self.request.user
@@ -192,8 +202,19 @@ class UserDetailsViewSet(viewsets.ModelViewSet):
             if instance.user != user:
                 raise PermissionDenied("You do not have permission to update these user details.")
 
+        # Handle image upload to R2
+        image_file = serializer.validated_data.pop('user_image_file', None)
+        image_url = None
+        if image_file:
+            from common.r2 import upload_file_to_r2
+            image_url = upload_file_to_r2(image_file, folder_name='user')
+
         tracking_user = user if isinstance(user, User) else None
-        serializer.save(updated_by=tracking_user)
+        save_kwargs = {'updated_by': tracking_user}
+        if image_url:
+            save_kwargs['user_image'] = image_url
+
+        serializer.save(**save_kwargs)
 
     def destroy(self, request, *args, **kwargs):
         user = request.user
