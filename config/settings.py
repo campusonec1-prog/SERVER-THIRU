@@ -160,7 +160,8 @@ CORS_ALLOWED_ORIGINS = [
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'users.authentication.CustomJWTAuthentication',
-    )
+    ),
+    'EXCEPTION_HANDLER': 'common.exceptions.custom_exception_handler',
 }
 
 # SimpleJWT Configuration
