@@ -82,15 +82,15 @@ class UserViewSet(viewsets.ModelViewSet):
             user = User.objects.get(username=username)
         except User.DoesNotExist:
             return Response({
-                "code": 404,
-                "message": "User not found"
-            }, status=status.HTTP_404_NOT_FOUND)
+                "code": 400,
+                "message": "Invalid username or password."
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         import bcrypt
         if not bcrypt.checkpw(password.encode('utf-8'), user.password.encode('utf-8')):
             return Response({
                 "code": 400,
-                "message": "Invalid password"
+                "message": "Invalid username or password."
             }, status=status.HTTP_400_BAD_REQUEST)
 
         from rest_framework_simplejwt.tokens import RefreshToken

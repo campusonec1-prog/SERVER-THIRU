@@ -74,6 +74,12 @@ class UserPermission(BaseRolePermission):
     read_roles = ['authenticated']
     write_roles = ['admin', 'administrator']
 
+    def has_permission(self, request, view):
+        if view.action == 'login':
+            return True
+        return super().has_permission(request, view)
+
+
 
 class UserDetailsPermission(BaseRolePermission):
     read_roles = ['authenticated']
