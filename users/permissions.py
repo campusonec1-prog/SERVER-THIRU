@@ -1,57 +1,86 @@
 from rest_framework import permissions
 
-class IsAdminUser(permissions.BasePermission):
+class BaseRolePermission(permissions.BasePermission):
+    """
+    Base permission for role-based access.
+    Subclasses must define:
+      - read_roles: list of roles allowed to read (list, retrieve).
+                    Can include 'anyone' for public access, 'authenticated' for any logged-in user.
+      - write_roles: list of roles allowed to write (create, update, partial_update, destroy).
+    """
+    read_roles = []
+    write_roles = []
+
+    def has_permission(self, request, view):
+        is_read = request.method in permissions.SAFE_METHODS
+        
+        # Normalize allowed roles
+        roles_to_check = self.read_roles if is_read else self.write_roles
+        norm_roles = [r.upper().replace(' ', '_') for r in roles_to_check]
+        
+        # 1. Check public access (for both read and write)
+        if 'ANYONE' in norm_roles:
+            return True
+            
+        # 2. All other access requires authentication
+        if not request.user or not request.user.is_authenticated:
+            return False
+            
+        # 3. Superusers and staff have full access automatically
+        if getattr(request.user, 'is_superuser', False) or getattr(request.user, 'is_staff', False):
+            return True
+            
+        # 4. Check for 'authenticated' placeholder (any logged-in user allowed)
+        if is_read and 'AUTHENTICATED' in norm_roles:
+            return True
+            
+        # 5. Check specific roles
+        try:
+            user_role = request.user.role.role_name.upper().replace(' ', '_')
+            return user_role in norm_roles
+        except AttributeError:
+            return False
+
+
+# ─── Legacy Permission Classes (Refactored to subclass BaseRolePermission) ────
+
+class IsAdminUser(BaseRolePermission):
     """
     Allows access only to authenticated admin users.
     """
-    def has_permission(self, request, view):
-        # Must be authenticated
-        if not request.user or not request.user.is_authenticated:
-            return False
-        
-        # Superusers and staff have full admin access
-        if getattr(request.user, 'is_superuser', False) or getattr(request.user, 'is_staff', False):
-            return True
-            
-        # Check if their role name is ADMIN or ADMINISTRATOR
-        try:
-            role_name = request.user.role.role_name.upper()
-            return role_name in ['ADMIN', 'ADMINISTRATOR']
-        except AttributeError:
-            return False
+    read_roles = ['admin', 'administrator']
+    write_roles = ['admin', 'administrator']
 
 
-class IsMarksManager(permissions.BasePermission):
+class IsMarksManager(BaseRolePermission):
     """
     Allows access only to HOD, Faculty, Principal, Vice Principal, and Admin.
     """
-    def has_permission(self, request, view):
-        if not request.user or not request.user.is_authenticated:
-            return False
-            
-        # Superusers and staff have full manager access
-        if getattr(request.user, 'is_superuser', False) or getattr(request.user, 'is_staff', False):
-            return True
-            
-        try:
-            role_name = request.user.role.role_name.upper()
-            return role_name in ['HOD', 'FACULTY', 'PRINCIPAL', 'VICE PRINCIPAL', 'VICE_PRINCIPAL', 'ADMIN', 'ADMINISTRATOR']
-        except AttributeError:
-            return False
+    read_roles = ['hod', 'faculty', 'principal', 'vice principal', 'admin', 'administrator']
+    write_roles = ['hod', 'faculty', 'principal', 'vice principal', 'admin', 'administrator']
 
 
-class IsCounsellingCreator(permissions.BasePermission):
+class IsCounsellingCreator(BaseRolePermission):
     """
     Allows access only to HOD, Faculty, Principal, Vice Principal.
     """
-    def has_permission(self, request, view):
-        if not request.user or not request.user.is_authenticated:
-            return False
-        try:
-            role_name = request.user.role.role_name.upper()
-            return role_name in ['HOD', 'FACULTY', 'PRINCIPAL', 'VICE PRINCIPAL', 'VICE_PRINCIPAL']
-        except AttributeError:
-            return False
+    read_roles = ['hod', 'faculty', 'principal', 'vice principal']
+    write_roles = ['hod', 'faculty', 'principal', 'vice principal']
+
+
+# ─── Users App Permission Classes ─────────────────────────────────────────────
+
+class UserPermission(BaseRolePermission):
+    read_roles = ['authenticated']
+    write_roles = ['admin', 'administrator']
+
+
+class UserDetailsPermission(BaseRolePermission):
+    read_roles = ['authenticated']
+    write_roles = ['admin', 'administrator']
+
+
+
 
 
 

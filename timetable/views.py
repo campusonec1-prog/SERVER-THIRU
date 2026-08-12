@@ -5,19 +5,13 @@ from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDeni
 from rest_framework.permissions import IsAuthenticated
 from .models import ExamTimetable
 from .serializers import ExamTimetableSerializer
-from .permissions import IsTimetableManager
+from .permissions import ExamTimetablePermission
 
 class ExamTimetableViewSet(viewsets.ModelViewSet):
     queryset = ExamTimetable.objects.all().order_by('id')
     serializer_class = ExamTimetableSerializer
+    permission_classes = [ExamTimetablePermission]
     model_label = "Exam timetable"
-
-    def get_permissions(self):
-        # Write operations require HOD, Admin, or Exam Cell roles.
-        # Get operations require the user to be authenticated (token).
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsTimetableManager()]
-        return [IsAuthenticated()]
 
     def handle_exception(self, exc):
         if isinstance(exc, (Http404, NotFound)):

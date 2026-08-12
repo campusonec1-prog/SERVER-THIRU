@@ -4,17 +4,13 @@ from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied
 from .models import NoticeBoard
 from .serializers import NoticeBoardSerializer
-from .permissions import IsNoticeManager
+from .permissions import NoticeBoardPermission
 
 
 class NoticeBoardViewSet(viewsets.ModelViewSet):
     queryset = NoticeBoard.objects.all().order_by('-publish_date')
     serializer_class = NoticeBoardSerializer
-
-    def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsNoticeManager()]
-        return []
+    permission_classes = [NoticeBoardPermission]
 
     def handle_exception(self, exc):
         if isinstance(exc, (Http404, NotFound)):

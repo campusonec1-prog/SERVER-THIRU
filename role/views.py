@@ -2,16 +2,12 @@ from rest_framework import viewsets, status, permissions
 from rest_framework.response import Response
 from .models import Role
 from .serializers import RoleSerializer
-from users.permissions import IsAdminUser
+from .permissions import RolePermission
 
 class RoleViewSet(viewsets.ModelViewSet):
     queryset = Role.objects.all().order_by('role_id')
     serializer_class = RoleSerializer
-
-    def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAdminUser()]
-        return [permissions.IsAuthenticated()]
+    permission_classes = [RolePermission]
 
     def perform_create(self, serializer):
         user = self.request.user if self.request.user and self.request.user.is_authenticated else None

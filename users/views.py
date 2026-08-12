@@ -4,18 +4,12 @@ from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied, ValidationError
 from .models import User, UserDetails
 from .serializers import UserSerializer, UserDetailsSerializer
-from .permissions import IsAdminUser
+from .permissions import IsAdminUser, UserPermission, UserDetailsPermission
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all().order_by('id')
     serializer_class = UserSerializer
-
-    def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAdminUser()]
-        elif self.action in ['list', 'retrieve']:
-            return [permissions.IsAuthenticated()]
-        return []
+    permission_classes = [UserPermission]
 
     def perform_create(self, serializer):
         user = self.request.user if self.request.user and self.request.user.is_authenticated else None
@@ -142,7 +136,7 @@ class UserViewSet(viewsets.ModelViewSet):
 class UserDetailsViewSet(viewsets.ModelViewSet):
     queryset = UserDetails.objects.all().order_by('id')
     serializer_class = UserDetailsSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [UserDetailsPermission]
 
     def get_queryset(self):
         user = self.request.user

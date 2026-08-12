@@ -5,16 +5,13 @@ from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDeni
 from .models import StudentStatus, Student
 from .serializers import StudentStatusSerializer, StudentSerializer
 from users.permissions import IsAdminUser
+from .permissions import StudentStatusPermission, StudentPermission, MarksPermission, CounsellingReportPermission
 
 
 class StudentStatusViewSet(viewsets.ModelViewSet):
     queryset = StudentStatus.objects.all().order_by('id')
     serializer_class = StudentStatusSerializer
-
-    def get_permissions(self):
-        if self.action in ['list', 'retrieve']:
-            return [permissions.IsAuthenticated()]
-        return [IsAdminUser()]
+    permission_classes = [StudentStatusPermission]
 
     def handle_exception(self, exc):
         if isinstance(exc, (Http404, NotFound)):
@@ -111,11 +108,7 @@ class StudentStatusViewSet(viewsets.ModelViewSet):
 class StudentViewSet(viewsets.ModelViewSet):
     queryset = Student.objects.all().order_by('id')
     serializer_class = StudentSerializer
-
-    def get_permissions(self):
-        if self.action in ['list', 'retrieve']:
-            return [permissions.IsAuthenticated()]
-        return [IsAdminUser()]
+    permission_classes = [StudentPermission]
 
     def handle_exception(self, exc):
         if isinstance(exc, (Http404, NotFound)):
@@ -218,11 +211,7 @@ from institution.models import Exam
 from subject.models import Subject
 
 class MarksViewSet(viewsets.ViewSet):
-    def get_permissions(self):
-        if self.action in ['create', 'update']:
-            return [IsAuthenticated(), IsMarksManager()]
-        # Token is needed for GET, but no role restriction is required
-        return [IsAuthenticated()]
+    permission_classes = [MarksPermission]
 
     def handle_exception(self, exc):
         if isinstance(exc, (Http404, NotFound)):
@@ -430,15 +419,7 @@ from .serializers import CounsellingReportSerializer
 class CounsellingReportViewSet(viewsets.ModelViewSet):
     queryset = CounsellingReport.objects.all().order_by('-report_date', '-id')
     serializer_class = CounsellingReportSerializer
-
-    def get_permissions(self):
-        if self.action == 'create':
-            from users.permissions import IsCounsellingCreator
-            return [IsAuthenticated(), IsCounsellingCreator()]
-        elif self.action in ['update', 'partial_update', 'destroy']:
-            return [IsAuthenticated(), IsMarksManager()]
-        # Token is needed for GET, but no role restriction is required
-        return [IsAuthenticated()]
+    permission_classes = [CounsellingReportPermission]
 
     def handle_exception(self, exc):
         if isinstance(exc, (Http404, NotFound)):

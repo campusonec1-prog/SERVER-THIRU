@@ -5,18 +5,18 @@ from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDeni
 from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader, ExamType, Exam, Quota, FeesStructure
 from .serializers import ProgramSerializer, DepartmentSerializer, AcademicYearSerializer, BatchSerializer, RegulationSerializer, SemesterSerializer, SectionSerializer, CollegeHeaderSerializer, ExamTypeSerializer, ExamSerializer, QuotaSerializer, FeesStructureSerializer
 from users.permissions import IsAdminUser
+from .permissions import (
+    ProgramPermission, DepartmentPermission, AcademicYearPermission,
+    BatchPermission, RegulationPermission, SemesterPermission,
+    SectionPermission, CollegeHeaderPermission, ExamTypePermission,
+    ExamPermission, QuotaPermission, FeesStructurePermission
+)
 
 
 # ─── Shared Mixin ────────────────────────────────────────────────────────────
 
 class AdminWriteMixin:
-    """Restrict create/update/delete to Admin users; list/retrieve are public."""
-
-    def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAdminUser()]
-        from rest_framework.permissions import IsAuthenticated
-        return [IsAuthenticated()]
+    """Provides standard exception handling and user auditing for creation and updates."""
 
     def handle_exception(self, exc):
         if isinstance(exc, (Http404, NotFound)):
@@ -48,21 +48,12 @@ class AdminWriteMixin:
         serializer.save(updated_by=user)
 
 
-class PublicListMixin:
-    """Allow public access to 'list' action; otherwise fall back to standard permissions."""
-
-    def get_permissions(self):
-        if self.action == 'list':
-            from rest_framework.permissions import AllowAny
-            return [AllowAny()]
-        return super().get_permissions()
-
-
 # ─── Program ─────────────────────────────────────────────────────────────────
 
-class ProgramViewSet(PublicListMixin, AdminWriteMixin, viewsets.ModelViewSet):
+class ProgramViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Program.objects.all().order_by('id')
     serializer_class = ProgramSerializer
+    permission_classes = [ProgramPermission]
     model_label = "Program"
 
     def list(self, request, *args, **kwargs):
@@ -88,9 +79,10 @@ class ProgramViewSet(PublicListMixin, AdminWriteMixin, viewsets.ModelViewSet):
 
 # ─── Department ──────────────────────────────────────────────────────────────
 
-class DepartmentViewSet(PublicListMixin, AdminWriteMixin, viewsets.ModelViewSet):
+class DepartmentViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Department.objects.all().order_by('id')
     serializer_class = DepartmentSerializer
+    permission_classes = [DepartmentPermission]
     model_label = "Department"
 
     def list(self, request, *args, **kwargs):
@@ -116,9 +108,10 @@ class DepartmentViewSet(PublicListMixin, AdminWriteMixin, viewsets.ModelViewSet)
 
 # ─── Academic Year ───────────────────────────────────────────────────────────
 
-class AcademicYearViewSet(PublicListMixin, AdminWriteMixin, viewsets.ModelViewSet):
+class AcademicYearViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = AcademicYear.objects.all().order_by('id')
     serializer_class = AcademicYearSerializer
+    permission_classes = [AcademicYearPermission]
     model_label = "Academic year"
 
     def list(self, request, *args, **kwargs):
@@ -147,6 +140,7 @@ class AcademicYearViewSet(PublicListMixin, AdminWriteMixin, viewsets.ModelViewSe
 class BatchViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Batch.objects.all().order_by('id')
     serializer_class = BatchSerializer
+    permission_classes = [BatchPermission]
     model_label = "Batch"
 
     def list(self, request, *args, **kwargs):
@@ -175,6 +169,7 @@ class BatchViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 class RegulationViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Regulation.objects.all().order_by('id')
     serializer_class = RegulationSerializer
+    permission_classes = [RegulationPermission]
     model_label = "Regulation"
 
     def list(self, request, *args, **kwargs):
@@ -203,6 +198,7 @@ class RegulationViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 class SemesterViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Semester.objects.all().order_by('id')
     serializer_class = SemesterSerializer
+    permission_classes = [SemesterPermission]
     model_label = "Semester"
 
     def list(self, request, *args, **kwargs):
@@ -231,6 +227,7 @@ class SemesterViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 class SectionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Section.objects.all().order_by('id')
     serializer_class = SectionSerializer
+    permission_classes = [SectionPermission]
     model_label = "Section"
 
     def list(self, request, *args, **kwargs):
@@ -259,6 +256,7 @@ class SectionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 class CollegeHeaderViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = CollegeHeader.objects.all().order_by('id')
     serializer_class = CollegeHeaderSerializer
+    permission_classes = [CollegeHeaderPermission]
     model_label = "College Header"
 
     def list(self, request, *args, **kwargs):
@@ -287,6 +285,7 @@ class CollegeHeaderViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 class ExamTypeViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = ExamType.objects.all().order_by('id')
     serializer_class = ExamTypeSerializer
+    permission_classes = [ExamTypePermission]
     model_label = "Exam Type"
 
     def list(self, request, *args, **kwargs):
@@ -315,6 +314,7 @@ class ExamTypeViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 class ExamViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Exam.objects.all().order_by('id')
     serializer_class = ExamSerializer
+    permission_classes = [ExamPermission]
     model_label = "Exam"
 
     def list(self, request, *args, **kwargs):
@@ -343,6 +343,7 @@ class ExamViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 class QuotaViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Quota.objects.all().order_by('id')
     serializer_class = QuotaSerializer
+    permission_classes = [QuotaPermission]
     model_label = "Quota"
 
     def list(self, request, *args, **kwargs):
@@ -371,6 +372,7 @@ class QuotaViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 class FeesStructureViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = FeesStructure.objects.all().order_by('id')
     serializer_class = FeesStructureSerializer
+    permission_classes = [FeesStructurePermission]
     model_label = "Fees Structure"
 
     def list(self, request, *args, **kwargs):

@@ -4,29 +4,13 @@ from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied
 from .models import Subject
 from .serializers import SubjectSerializer
+from .permissions import SubjectPermission
 
-class IsSubjectAuthorized(permissions.BasePermission):
-    """
-    Allows access only to authenticated users with role ADMIN, HOD, VICE PRINCIPAL, or PRINCIPAL.
-    """
-    def has_permission(self, request, view):
-        if not request.user or not request.user.is_authenticated:
-            return False
-        try:
-            role_name = request.user.role.role_name.upper()
-            allowed_roles = ['ADMIN', 'ADMINISTRATOR', 'HOD', 'VICE PRINCIPAL', 'PRINCIPAL']
-            return role_name in allowed_roles
-        except AttributeError:
-            return False
 
 class SubjectViewSet(viewsets.ModelViewSet):
     queryset = Subject.objects.all().order_by('id')
     serializer_class = SubjectSerializer
-
-    def get_permissions(self):
-        if self.action in ['list', 'retrieve']:
-            return [permissions.IsAuthenticated()]
-        return [IsSubjectAuthorized()]
+    permission_classes = [SubjectPermission]
 
     def handle_exception(self, exc):
         if isinstance(exc, (Http404, NotFound)):

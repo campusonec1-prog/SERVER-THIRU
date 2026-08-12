@@ -5,16 +5,11 @@ from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDeni
 from .models import Day, Period, Session
 from .serializers import DaySerializer, PeriodSerializer, SessionSerializer
 from users.permissions import IsAdminUser
+from .permissions import DayPermission, PeriodPermission, SessionPermission
 
 
 class AdminWriteMixin:
-    """Restrict create/update/delete to Admin users; list/retrieve are public."""
-
-    def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAdminUser()]
-        from rest_framework.permissions import IsAuthenticated
-        return [IsAuthenticated()]
+    """Provides standard exception handling and user auditing for creation and updates."""
 
     def handle_exception(self, exc):
         if isinstance(exc, (Http404, NotFound)):
@@ -49,6 +44,7 @@ class AdminWriteMixin:
 class DayViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Day.objects.all().order_by('id')
     serializer_class = DaySerializer
+    permission_classes = [DayPermission]
     model_label = "Day"
 
     def list(self, request, *args, **kwargs):
@@ -75,6 +71,7 @@ class DayViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 class PeriodViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Period.objects.all().order_by('id')
     serializer_class = PeriodSerializer
+    permission_classes = [PeriodPermission]
     model_label = "Period"
 
     def list(self, request, *args, **kwargs):
@@ -101,6 +98,7 @@ class PeriodViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 class SessionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Session.objects.all().order_by('id')
     serializer_class = SessionSerializer
+    permission_classes = [SessionPermission]
     model_label = "Session"
 
     def list(self, request, *args, **kwargs):

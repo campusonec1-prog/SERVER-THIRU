@@ -9,19 +9,17 @@ from .serializers import (
     ApplicationStatusSerializer, ApplicationUserSerializer
 )
 from users.permissions import IsAdminUser
+from .permissions import (
+    FormModulePermission, FormFieldPermission, ApplicationPermission,
+    ApplicationStatusPermission, ApplicationUserPermission
+)
 
 
 from django.db import transaction
 
 
 class AdminWriteMixin:
-    """Restrict create/update/delete to Admin users; list/retrieve are public."""
-
-    def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAdminUser()]
-        from rest_framework.permissions import IsAuthenticated
-        return [IsAuthenticated()]
+    """Provides standard exception handling and user auditing for creation and updates."""
 
     def handle_exception(self, exc):
         if isinstance(exc, (Http404, NotFound)):
@@ -60,6 +58,7 @@ class AdminWriteMixin:
 class FormModuleViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = FormModule.objects.all().order_by('display_order', 'id')
     serializer_class = FormModuleSerializer
+    permission_classes = [FormModulePermission]
     model_label = "Form Module"
 
     def list(self, request, *args, **kwargs):
@@ -97,6 +96,7 @@ class FormModuleViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 class FormFieldViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = FormField.objects.all().order_by('display_order', 'id')
     serializer_class = FormFieldSerializer
+    permission_classes = [FormFieldPermission]
     model_label = "Form Field"
 
     def list(self, request, *args, **kwargs):
@@ -138,14 +138,8 @@ class FormFieldViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 class ApplicationViewSet(viewsets.ModelViewSet):
     queryset = Application.objects.all().order_by('-id')
     serializer_class = ApplicationSerializer
+    permission_classes = [ApplicationPermission]
     model_label = "Application"
-
-    def get_permissions(self):
-        from users.permissions import IsAdminUser
-        from rest_framework.permissions import IsAuthenticated
-        if self.action == 'list':
-            return [IsAdminUser()]
-        return [IsAuthenticated()]
 
     def get_queryset(self):
         user = self.request.user
@@ -273,6 +267,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
 class ApplicationStatusViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = ApplicationStatus.objects.all().order_by('id')
     serializer_class = ApplicationStatusSerializer
+    permission_classes = [ApplicationStatusPermission]
     model_label = "Application Status"
 
     def list(self, request, *args, **kwargs):
@@ -299,15 +294,8 @@ class ApplicationStatusViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 class ApplicationUserViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = ApplicationUser.objects.all().order_by('id')
     serializer_class = ApplicationUserSerializer
+    permission_classes = [ApplicationUserPermission]
     model_label = "Application User"
-
-    def get_permissions(self):
-        if self.action in ['list', 'destroy']:
-            return [IsAdminUser()]
-        elif self.action in ['update', 'partial_update', 'retrieve']:
-            from rest_framework.permissions import IsAuthenticated
-            return [IsAuthenticated()]
-        return []
 
     def perform_update(self, serializer):
         user = self.request.user
