@@ -2,8 +2,8 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied
-from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader, ExamType, Exam, Quota
-from .serializers import ProgramSerializer, DepartmentSerializer, AcademicYearSerializer, BatchSerializer, RegulationSerializer, SemesterSerializer, SectionSerializer, CollegeHeaderSerializer, ExamTypeSerializer, ExamSerializer, QuotaSerializer
+from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader, ExamType, Exam, Quota, FeesStructure
+from .serializers import ProgramSerializer, DepartmentSerializer, AcademicYearSerializer, BatchSerializer, RegulationSerializer, SemesterSerializer, SectionSerializer, CollegeHeaderSerializer, ExamTypeSerializer, ExamSerializer, QuotaSerializer, FeesStructureSerializer
 from users.permissions import IsAdminUser
 
 
@@ -364,6 +364,35 @@ class QuotaViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         super().destroy(request, *args, **kwargs)
         return Response({"code": 200, "message": "Quota deleted successfully"}, status=status.HTTP_200_OK)
+
+
+# ─── Fees Structure ──────────────────────────────────────────
+
+class FeesStructureViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+    queryset = FeesStructure.objects.all().order_by('id')
+    serializer_class = FeesStructureSerializer
+    model_label = "Fees Structure"
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return Response({"code": 200, "message": "Fees structures listed successfully", "data": response.data}, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        return Response({"code": 200, "message": "Fees structure retrieved successfully", "data": response.data}, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        return Response({"code": 201, "message": "Fees structure created successfully", "data": response.data}, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        response = super().update(request, *args, **kwargs)
+        return Response({"code": 200, "message": "Fees structure updated successfully", "data": response.data}, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        super().destroy(request, *args, **kwargs)
+        return Response({"code": 200, "message": "Fees structure deleted successfully"}, status=status.HTTP_200_OK)
+
 
 
 

@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import ProgramViewSet, DepartmentViewSet, AcademicYearViewSet, BatchViewSet, RegulationViewSet, SemesterViewSet, SectionViewSet, CollegeHeaderViewSet, ExamTypeViewSet, ExamViewSet, QuotaViewSet
+from .views import ProgramViewSet, DepartmentViewSet, AcademicYearViewSet, BatchViewSet, RegulationViewSet, SemesterViewSet, SectionViewSet, CollegeHeaderViewSet, ExamTypeViewSet, ExamViewSet, QuotaViewSet, FeesStructureViewSet
 
 urlpatterns = [
     # Program endpoints
@@ -78,4 +78,11 @@ urlpatterns = [
     path('quotas/get/<int:pk>', QuotaViewSet.as_view({'get': 'retrieve'}), name='quota-detail'),
     path('quotas/edit/<int:pk>', QuotaViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='quota-edit'),
     path('quotas/remove/<int:pk>', QuotaViewSet.as_view({'delete': 'destroy'}), name='quota-remove'),
+
+    # Fees Structure endpoints
+    path('fees-structures/list', FeesStructureViewSet.as_view({'get': 'list'}), name='fees-structure-list'),
+    path('fees-structures/create', FeesStructureViewSet.as_view({'post': 'create'}), name='fees-structure-create'),
+    path('fees-structures/get/<int:pk>', FeesStructureViewSet.as_view({'get': 'retrieve'}), name='fees-structure-detail'),
+    path('fees-structures/edit/<int:pk>', FeesStructureViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='fees-structure-edit'),
+    path('fees-structures/remove/<int:pk>', FeesStructureViewSet.as_view({'delete': 'destroy'}), name='fees-structure-remove'),
 ]

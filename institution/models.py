@@ -193,6 +193,42 @@ class Quota(TrackingModel):
         return self.quota_name
 
 
+class FeesStructure(TrackingModel):
+    academic_year = models.ForeignKey(
+        AcademicYear,
+        on_delete=models.CASCADE,
+        db_column='academic_year_id',
+        related_name='fees_structures'
+    )
+    department = models.ForeignKey(
+        Department,
+        on_delete=models.CASCADE,
+        db_column='department_id',
+        related_name='fees_structures'
+    )
+    batch = models.ForeignKey(
+        Batch,
+        on_delete=models.CASCADE,
+        db_column='batch_id',
+        related_name='fees_structures'
+    )
+    quota = models.ForeignKey(
+        Quota,
+        on_delete=models.CASCADE,
+        db_column='quota_id',
+        related_name='fees_structures'
+    )
+    fees = models.DecimalField(max_digits=10, decimal_places=2)
+
+    class Meta:
+        db_table = 'fees_structure'
+        unique_together = ('academic_year', 'department', 'batch', 'quota')
+
+    def __str__(self):
+        return f"{self.academic_year.academic_year} - {self.department.department_code} - {self.batch.batch} - {self.quota.quota_name}: {self.fees}"
+
+
+
 
 
 

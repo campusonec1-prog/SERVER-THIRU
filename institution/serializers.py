@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader, ExamType, Exam, Quota
+from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader, ExamType, Exam, Quota, FeesStructure
 from users.models import User
 
 
@@ -482,6 +482,72 @@ class QuotaSerializer(serializers.ModelSerializer):
         if not value.strip():
             raise serializers.ValidationError("Quota name cannot be empty.")
         return value.strip()
+
+
+# ─── Fees Structure ───────────────────────────────────────────
+
+class FeesStructureSerializer(serializers.ModelSerializer):
+    academic_year_id = serializers.PrimaryKeyRelatedField(
+        source='academic_year',
+        queryset=AcademicYear.objects.all(),
+        error_messages={'does_not_exist': 'Academic year does not exist.'}
+    )
+    department_id = serializers.PrimaryKeyRelatedField(
+        source='department',
+        queryset=Department.objects.all(),
+        error_messages={'does_not_exist': 'Department does not exist.'}
+    )
+    batch_id = serializers.PrimaryKeyRelatedField(
+        source='batch',
+        queryset=Batch.objects.all(),
+        error_messages={'does_not_exist': 'Batch does not exist.'}
+    )
+    quota_id = serializers.PrimaryKeyRelatedField(
+        source='quota',
+        queryset=Quota.objects.all(),
+        error_messages={'does_not_exist': 'Quota does not exist.'}
+    )
+
+    class Meta:
+        model = FeesStructure
+        fields = [
+            'id', 'academic_year_id', 'department_id', 'batch_id', 'quota_id', 
+            'fees', 'created_at', 'updated_at', 'created_by', 'updated_by'
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        extra_kwargs = {
+            'fees': {'required': True},
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+    def validate_fees(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Fees must be a positive number.")
+        return value
+
+    def validate(self, attrs):
+        academic_year = attrs.get('academic_year')
+        department = attrs.get('department')
+        batch = attrs.get('batch')
+        quota = attrs.get('quota')
+
+        qs = FeesStructure.objects.filter(
+            academic_year=academic_year,
+            department=department,
+            batch=batch,
+            quota=quota
+        )
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError({
+                "non_field_errors": "Fees structure for this academic year, department, batch, and quota already exists."
+            })
+        return attrs
+
 
 
 

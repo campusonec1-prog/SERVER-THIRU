@@ -1,7 +1,7 @@
 from django.test import TestCase
 from rest_framework.exceptions import ValidationError
-from institution.models import AcademicYear, Program, Department, Batch, Regulation
-from institution.serializers import AcademicYearSerializer, BatchSerializer, RegulationSerializer, QuotaSerializer
+from institution.models import AcademicYear, Program, Department, Batch, Regulation, Quota, FeesStructure
+from institution.serializers import AcademicYearSerializer, BatchSerializer, RegulationSerializer, QuotaSerializer, FeesStructureSerializer
 
 
 class AcademicYearIsDisplayTest(TestCase):
@@ -155,4 +155,86 @@ class QuotaModelAndSerializerTest(TestCase):
             str(serializer.errors['quota_name'][0]),
             "This quota already exists."
         )
+
+
+class FeesStructureModelAndSerializerTest(TestCase):
+    def setUp(self):
+        self.year = AcademicYear.objects.create(
+            academic_year="2024-2025",
+            is_display=True
+        )
+        self.program = Program.objects.create(
+            program_name="Engineering",
+            program_level="UG",
+            duration=4
+        )
+        self.dept = Department.objects.create(
+            program=self.program,
+            department_name="Computer Science",
+            department_code="CSE",
+            short_name="CS"
+        )
+        self.batch = Batch.objects.create(
+            department=self.dept,
+            batch="2024-2028",
+            is_active=True
+        )
+        self.quota = Quota.objects.create(
+            quota_name="Government Quota"
+        )
+
+    def test_fees_structure_creation_success(self):
+        data = {
+            'academic_year_id': self.year.id,
+            'department_id': self.dept.id,
+            'batch_id': self.batch.id,
+            'quota_id': self.quota.id,
+            'fees': 75000.00
+        }
+        serializer = FeesStructureSerializer(data=data)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        fees_struct = serializer.save()
+        self.assertEqual(float(fees_struct.fees), 75000.00)
+        self.assertEqual(fees_struct.academic_year, self.year)
+
+    def test_fees_structure_invalid_fees(self):
+        data = {
+            'academic_year_id': self.year.id,
+            'department_id': self.dept.id,
+            'batch_id': self.batch.id,
+            'quota_id': self.quota.id,
+            'fees': -100.00
+        }
+        serializer = FeesStructureSerializer(data=data)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('fees', serializer.errors)
+        self.assertEqual(
+            str(serializer.errors['fees'][0]),
+            "Fees must be a positive number."
+        )
+
+    def test_fees_structure_duplicate_uniqueness(self):
+        from institution.models import FeesStructure
+        FeesStructure.objects.create(
+            academic_year=self.year,
+            department=self.dept,
+            batch=self.batch,
+            quota=self.quota,
+            fees=50000.00
+        )
+        data = {
+            'academic_year_id': self.year.id,
+            'department_id': self.dept.id,
+            'batch_id': self.batch.id,
+            'quota_id': self.quota.id,
+            'fees': 60000.00
+        }
+        serializer = FeesStructureSerializer(data=data)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('non_field_errors', serializer.errors)
+        self.assertEqual(
+            str(serializer.errors['non_field_errors'][0]),
+            "Fees structure for this academic year, department, batch, and quota already exists."
+        )
+
 
