@@ -162,6 +162,11 @@ REST_FRAMEWORK = {
         'users.authentication.CustomJWTAuthentication',
     ),
     'EXCEPTION_HANDLER': 'common.exceptions.custom_exception_handler',
+    'DEFAULT_PAGINATION_CLASS': 'common.pagination.CustomPageNumberPagination',
+    'PAGE_SIZE': 10,
+    'DEFAULT_FILTER_BACKENDS': (
+        'common.filters.DynamicFilterBackend',
+    ),
 }
 
 # SimpleJWT Configuration
