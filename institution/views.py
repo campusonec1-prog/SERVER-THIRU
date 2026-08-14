@@ -80,16 +80,10 @@ class ProgramViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 # ─── Department ──────────────────────────────────────────────────────────────
 
 class DepartmentViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+    queryset = Department.objects.all().order_by('id')
     serializer_class = DepartmentSerializer
     permission_classes = [DepartmentPermission]
     model_label = "Department"
-
-    def get_queryset(self):
-        queryset = Department.objects.all().order_by('id')
-        all_depts = self.request.query_params.get('all_depts', None)
-        if all_depts != 'true':
-            queryset = queryset.filter(is_display=True)
-        return queryset
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)

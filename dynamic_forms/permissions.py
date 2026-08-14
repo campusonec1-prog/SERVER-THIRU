@@ -20,12 +20,12 @@ class ApplicationPermission(BaseRolePermission):
             return False
 
         if view.action == 'list':
-            # Only admin/administrator can list all applications
+            # Only admin/administrator can list all applications, but candidate can list their own
             if getattr(request.user, 'is_superuser', False) or getattr(request.user, 'is_staff', False):
                 return True
             try:
                 role_name = request.user.role.role_name.upper()
-                return role_name in ['ADMIN', 'ADMINISTRATOR']
+                return role_name in ['ADMIN', 'ADMINISTRATOR', 'CANDIDATE']
             except AttributeError:
                 return False
 
