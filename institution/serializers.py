@@ -437,10 +437,14 @@ class ExamSerializer(serializers.ModelSerializer):
         queryset=ExamType.objects.all(),
         error_messages={'does_not_exist': 'Exam type does not exist.'}
     )
+    exam_type_name = serializers.CharField(
+        source='exam_type.exam_type_name',
+        read_only=True
+    )
 
     class Meta:
         model = Exam
-        fields = ['id', 'exam_name', 'exam_type_id', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = ['id', 'exam_name', 'exam_type_id', 'exam_type_name', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
         extra_kwargs = {
             'exam_name': {
