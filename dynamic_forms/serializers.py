@@ -252,10 +252,18 @@ class ApplicationSerializer(serializers.ModelSerializer):
         required=False,
         error_messages={'does_not_exist': 'Application status does not exist.'}
     )
+    
+    candidate_name = serializers.CharField(source='candidate.name', read_only=True)
+    program_name = serializers.CharField(source='program.program_name', read_only=True)
+    status_name = serializers.CharField(source='status.status_name', read_only=True)
 
     class Meta:
         model = Application
-        fields = ['id', 'candidate_id', 'program_id', 'application_no', 'form_data', 'status_id', 'created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = [
+            'id', 'candidate_id', 'candidate_name', 'program_id', 'program_name', 
+            'application_no', 'form_data', 'status_id', 'status_name', 
+            'created_at', 'updated_at', 'created_by', 'updated_by'
+        ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by', 'application_no']
         extra_kwargs = {
             'form_data': {'required': False, 'default': dict},
