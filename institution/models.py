@@ -40,6 +40,8 @@ class Department(TrackingModel):
         blank=True
     )
     is_active = models.BooleanField(default=True)
+    is_display = models.BooleanField(default=True)
+
 
     class Meta:
         db_table = 'departments'

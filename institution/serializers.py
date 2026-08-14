@@ -70,7 +70,7 @@ class DepartmentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Department
-        fields = ['id', 'department_name', 'department_code', 'short_name', 'program_id', 'hod_id', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = ['id', 'department_name', 'department_code', 'short_name', 'program_id', 'hod_id', 'is_active', 'is_display', 'created_at', 'updated_at', 'created_by', 'updated_by']
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
         extra_kwargs = {
             'department_name': {'required': True},
@@ -80,6 +80,7 @@ class DepartmentSerializer(serializers.ModelSerializer):
             },
             'short_name': {'required': True},
             'is_active': {'required': False, 'default': True},
+            'is_display': {'required': False, 'default': True},
         }
 
     def __init__(self, *args, **kwargs):
