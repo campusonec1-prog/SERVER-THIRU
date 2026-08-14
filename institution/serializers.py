@@ -512,11 +512,17 @@ class FeesStructureSerializer(serializers.ModelSerializer):
         queryset=Quota.objects.all(),
         error_messages={'does_not_exist': 'Quota does not exist.'}
     )
+    
+    academic_year_name = serializers.CharField(source='academic_year.academic_year', read_only=True)
+    department_name = serializers.CharField(source='department.department_name', read_only=True)
+    batch_name = serializers.CharField(source='batch.batch', read_only=True)
+    quota_name = serializers.CharField(source='quota.quota_name', read_only=True)
 
     class Meta:
         model = FeesStructure
         fields = [
-            'id', 'academic_year_id', 'department_id', 'batch_id', 'quota_id', 
+            'id', 'academic_year_id', 'academic_year_name', 'department_id', 'department_name', 
+            'batch_id', 'batch_name', 'quota_id', 'quota_name',
             'fees', 'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
