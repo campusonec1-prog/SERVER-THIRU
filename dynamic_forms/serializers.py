@@ -3,6 +3,87 @@ from .models import FormModule, FormField, Application, ApplicationStatus, Appli
 from institution.models import Program
 
 
+STATE_NAME_TO_CODE = {
+    'tamil nadu': 'TN',
+    'kerala': 'KL',
+    'karnataka': 'KA',
+    'andhra pradesh': 'AP',
+    'telangana': 'TS',
+    'puducherry': 'PY',
+    'pondicherry': 'PY'
+}
+
+def normalize_state_value(val):
+    if not val:
+        return ''
+    lower = str(val).strip().lower()
+    return STATE_NAME_TO_CODE.get(lower, val)
+
+def find_parent_value(field_key, choices, form_data, module_key=None):
+    if not isinstance(choices, dict):
+        return None
+        
+    key_map = {k.lower(): k for k in choices.keys()}
+    possible_parent_keys = list(key_map.keys())
+    if not possible_parent_keys:
+        return None
+        
+    prefixes = ['', 'permanent_', 'communication_', 'present_', 'native_', 'parent_']
+    base_names = ['state', 'country', 'region', 'nationality', 'category']
+    
+    current_prefix = ''
+    for pf in prefixes:
+        if pf and field_key.startswith(pf):
+            current_prefix = pf
+            break
+            
+    module_data = form_data.get(module_key, {}) if module_key else {}
+    for base in base_names:
+        candidate_key = current_prefix + base
+        candidate_val = module_data.get(candidate_key)
+        if candidate_val:
+            normalized = normalize_state_value(candidate_val)
+            lower_val = str(normalized).lower()
+            if lower_val in possible_parent_keys:
+                return key_map[lower_val]
+            
+    for m_key, m_data in form_data.items():
+        if not isinstance(m_data, dict):
+            continue
+        for base in base_names:
+            candidate_key = current_prefix + base
+            candidate_val = m_data.get(candidate_key)
+            if candidate_val:
+                normalized = normalize_state_value(candidate_val)
+                lower_val = str(normalized).lower()
+                if lower_val in possible_parent_keys:
+                    return key_map[lower_val]
+                
+    best_match_val = None
+    highest_score = -1
+    for m_key, m_data in form_data.items():
+        if not isinstance(m_data, dict):
+            continue
+        for f_key, val_raw in m_data.items():
+            val = str(val_raw or '')
+            if val:
+                normalized = normalize_state_value(val)
+                lower_val = str(normalized).lower()
+                if lower_val in possible_parent_keys:
+                    score = 0
+                    if current_prefix and f_key.startswith(current_prefix):
+                        score += 10
+                    if 'state' in f_key.lower():
+                        score += 5
+                    if f_key.lower() == 'state':
+                        score += 8
+                    if score > highest_score:
+                        highest_score = score
+                        best_match_val = key_map[lower_val]
+                    
+    return best_match_val
+
+
 def apply_default_error_messages(fields):
     """Apply standard required/blank/null error messages to all fields."""
     for field_name, field in fields.items():
@@ -150,10 +231,17 @@ class FormFieldSerializer(serializers.ModelSerializer):
         field_type = data.get('field_type')
         choices = data.get('choices')
         if field_type in ['select', 'radio']:
-            if choices is not None and not isinstance(choices, list):
-                raise serializers.ValidationError(
-                    {"choices": "Choices must be a list of options (e.g. ['Option 1', 'Option 2'])."}
-                )
+            if choices is not None:
+                if not isinstance(choices, (list, dict)):
+                    raise serializers.ValidationError(
+                        {"choices": "Choices must be a list of options or a dictionary mapping parent keys to lists of options."}
+                    )
+                if isinstance(choices, dict):
+                    for key, val in choices.items():
+                        if not isinstance(val, list):
+                            raise serializers.ValidationError(
+                                {"choices": f"Choices for key '{key}' must be a list of options."}
+                            )
         elif field_type == 'array':
             if not choices:
                 raise serializers.ValidationError(
@@ -256,12 +344,13 @@ class ApplicationSerializer(serializers.ModelSerializer):
     candidate_name = serializers.CharField(source='candidate.name', read_only=True)
     program_name = serializers.CharField(source='program.program_name', read_only=True)
     status_name = serializers.CharField(source='status.status_name', read_only=True)
+    readable_form_data = serializers.SerializerMethodField()
 
     class Meta:
         model = Application
         fields = [
             'id', 'candidate_id', 'candidate_name', 'program_id', 'program_name', 
-            'application_no', 'form_data', 'status_id', 'status_name', 
+            'application_no', 'form_data', 'readable_form_data', 'status_id', 'status_name', 
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by', 'application_no']
@@ -272,6 +361,52 @@ class ApplicationSerializer(serializers.ModelSerializer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         apply_default_error_messages(self.fields)
+
+    def get_readable_form_data(self, obj):
+        form_data = obj.form_data or {}
+        readable_data = {}
+        
+        # Load all form fields to lookup labels
+        fields = FormField.objects.filter(is_active=True).select_related('form_module')
+        fields_map = {f.field_key: f for f in fields}
+        
+        for module_key, module_payload in form_data.items():
+            if not isinstance(module_payload, dict):
+                readable_data[module_key] = module_payload
+                continue
+            readable_data[module_key] = {}
+            for field_key, field_value in module_payload.items():
+                field = fields_map.get(field_key)
+                if field and field.field_type in ['select', 'radio'] and field.choices:
+                    resolved_choices = []
+                    if isinstance(field.choices, list):
+                        resolved_choices = field.choices
+                    elif isinstance(field.choices, dict):
+                        parent_val = find_parent_value(field_key, field.choices, form_data, module_key)
+                        resolved_choices = field.choices.get(parent_val) if parent_val else []
+                        if not resolved_choices:
+                            # Fallback: gather all options
+                            for val in field.choices.values():
+                                if isinstance(val, list):
+                                    resolved_choices.extend(val)
+                    
+                    label = field_value
+                    if isinstance(resolved_choices, list):
+                        for opt in resolved_choices:
+                            if isinstance(opt, dict):
+                                val = opt.get('value', opt.get('id', opt.get('key', opt.get('name', ''))))
+                                if str(val) == str(field_value):
+                                    label = opt.get('label', opt.get('name', opt.get('display', field_value)))
+                                    break
+                            else:
+                                if str(opt) == str(field_value):
+                                    label = opt
+                                    break
+                    readable_data[module_key][field_key] = label
+                else:
+                    readable_data[module_key][field_key] = field_value
+                    
+        return readable_data
 
     def validate(self, data):
         # Auto-assign candidate from logged-in user if candidate is logged in
@@ -432,20 +567,41 @@ class ApplicationSerializer(serializers.ModelSerializer):
                                     continue
 
                             elif field.field_type in ['select', 'radio']:
-                                if isinstance(field_value, list):
-                                    if field.choices:
-                                        invalid_opts = [val for val in field_value if val not in field.choices]
-                                        if invalid_opts:
-                                            if module_key not in errors:
-                                                errors[module_key] = {}
-                                            errors[module_key][field_key] = f"Invalid options: {', '.join(invalid_opts)}."
-                                            continue
-                                else:
-                                    if field.choices and field_value not in field.choices:
-                                        if module_key not in errors:
-                                            errors[module_key] = {}
-                                        errors[module_key][field_key] = f"Invalid option. Must be one of: {', '.join(field.choices)}."
-                                        continue
+                                if field.choices:
+                                    resolved_choices = []
+                                    if isinstance(field.choices, list):
+                                        resolved_choices = field.choices
+                                    elif isinstance(field.choices, dict):
+                                        parent_val = find_parent_value(field_key, field.choices, form_data, module_key)
+                                        resolved_choices = field.choices.get(parent_val) if parent_val else []
+                                    
+                                    valid_option_values = []
+                                    if isinstance(resolved_choices, list):
+                                        for opt in resolved_choices:
+                                            if isinstance(opt, dict):
+                                                val = opt.get('value', opt.get('id', opt.get('key', opt.get('name', ''))))
+                                                valid_option_values.append(str(val))
+                                            else:
+                                                valid_option_values.append(str(opt))
+                                                
+                                    if valid_option_values:
+                                        if isinstance(field_value, list):
+                                            invalid_opts = [str(val) for val in field_value if str(val) not in valid_option_values]
+                                            if invalid_opts:
+                                                if module_key not in errors:
+                                                    errors[module_key] = {}
+                                                errors[module_key][field_key] = f"Invalid options: {', '.join(invalid_opts)}."
+                                                continue
+                                        else:
+                                            if str(field_value) not in valid_option_values:
+                                                if module_key not in errors:
+                                                    errors[module_key] = {}
+                                                limit_options = valid_option_values[:10]
+                                                opts_str = ", ".join(limit_options)
+                                                if len(valid_option_values) > 10:
+                                                    opts_str += f"... (+{len(valid_option_values)-10} more)"
+                                                errors[module_key][field_key] = f"Invalid option. Must be one of: {opts_str}."
+                                                continue
 
                             if field.validation:
                                 import re
