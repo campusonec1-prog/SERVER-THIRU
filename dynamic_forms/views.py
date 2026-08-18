@@ -435,6 +435,651 @@ class DocumentUploadView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+class ApplicationPDFDownloadView(APIView):
+    from rest_framework.permissions import IsAuthenticated
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk, *args, **kwargs):
+        import os
+        from io import BytesIO
+        from django.http import HttpResponse
+        from django.shortcuts import get_object_or_404
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image as RLImage
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from PIL import Image as PILImage
+        import urllib.request
+
+        from .models import Application, ApplicationStatus, ApplicationUser
+        from institution.models import CollegeHeader, Program
+
+        application = get_object_or_404(Application, pk=pk)
+        
+        # Security check: candidates can only download their own application
+        if request.user.role.role_name == 'CANDIDATE' and application.candidate.email != request.user.email:
+            return HttpResponse("Unauthorized", status=403)
+
+        # Create BytesIO buffer
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            leftMargin=30,
+            rightMargin=30,
+            topMargin=25,
+            bottomMargin=25
+        )
+
+        form_data = application.form_data or {}
+
+        # -------------------------------------------------------------
+        # Helper to get field value safely
+        # -------------------------------------------------------------
+        def get_val(key):
+            if not form_data:
+                return ''
+            if key in form_data:
+                return form_data[key]
+            for m_key, m_data in form_data.items():
+                if isinstance(m_data, dict) and key in m_data:
+                    return m_data[key]
+            return ''
+
+        # -------------------------------------------------------------
+        # Load College Header Data
+        # -------------------------------------------------------------
+        college_header_obj = CollegeHeader.objects.filter(header_type='Main').first()
+        if not college_header_obj:
+            college_header_obj = CollegeHeader.objects.first()
+
+        college_name = college_header_obj.college_name if college_header_obj else 'THIRUMALAI ENGINEERING COLLEGE'
+        college_address = college_header_obj.address if college_header_obj else 'Kilambi, Krishnapuram Post - 631 551, Kancheepuram Taluk & District, Tamil Nadu.'
+        logo_url = college_header_obj.primary_logo if college_header_obj else None
+
+        # -------------------------------------------------------------
+        # Helper to load image securely & convert WebP/PNG for ReportLab
+        # -------------------------------------------------------------
+        def load_image(url_or_path, width, height):
+            if not url_or_path:
+                return None
+            try:
+                if isinstance(url_or_path, str) and url_or_path.startswith('http'):
+                    headers = {'User-Agent': 'Mozilla/5.0'}
+                    req = urllib.request.Request(url_or_path, headers=headers)
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        img_data = response.read()
+                        pil_img = PILImage.open(BytesIO(img_data))
+                        # Convert WebP/etc to PNG in memory
+                        out_io = BytesIO()
+                        pil_img.save(out_io, format='PNG')
+                        out_io.seek(0)
+                        return RLImage(out_io, width=width, height=height)
+                else:
+                    if os.path.exists(url_or_path):
+                        pil_img = PILImage.open(url_or_path)
+                        out_io = BytesIO()
+                        pil_img.save(out_io, format='PNG')
+                        out_io.seek(0)
+                        return RLImage(out_io, width=width, height=height)
+            except Exception as e:
+                print(f"[PDF Gen] Failed to load image {url_or_path}: {e}")
+            return None
+
+        # Resolve primary college logo
+        logo_flowable = None
+        if logo_url:
+            logo_flowable = load_image(logo_url, 52, 52)
+        if not logo_flowable:
+            # Fallback to local logo path in frontend assets
+            fallback_logo_path = 'd:\\IMS-Thirumalai\\APP-THIRU\\src\\assets\\logo.webp'
+            logo_flowable = load_image(fallback_logo_path, 52, 52)
+
+        # Resolve secondary emblem (BMQR)
+        emblem_flowable = None
+        fallback_emblem_path = 'd:\\IMS-Thirumalai\\APP-THIRU\\src\\assets\\emblem.png'
+        emblem_flowable = load_image(fallback_emblem_path, 52, 17)
+
+        # Resolve candidate photo
+        photo_url = get_val('photo')
+        if not photo_url:
+            # Check inside certificates list
+            certs = get_val('certificates') or []
+            if isinstance(certs, dict) and 'certificates' in certs:
+                certs = certs['certificates']
+            if isinstance(certs, list):
+                for c in certs:
+                    if c and isinstance(c, dict) and c.get('certificate_type') == 'Passport Size Photo':
+                        doc_val = c.get('document')
+                        if isinstance(doc_val, str) and doc_val.startswith('http'):
+                            photo_url = doc_val
+                        elif isinstance(doc_val, dict) and isinstance(doc_val.get('url'), str):
+                            photo_url = doc_val.get('url')
+
+        photo_flowable = None
+        if photo_url:
+            photo_flowable = load_image(photo_url, 66, 80)
+
+        # -------------------------------------------------------------
+        # PDF Styles
+        # -------------------------------------------------------------
+        styles = getSampleStyleSheet()
+        
+        title_style = ParagraphStyle(
+            name='CollegeTitle',
+            fontName='Helvetica-Bold',
+            fontSize=13,
+            textColor=colors.HexColor('#0B2C5D'),
+            alignment=1, # Centered
+            spaceAfter=2
+        )
+        
+        sub_style = ParagraphStyle(
+            name='CollegeSub',
+            fontName='Helvetica-Oblique',
+            fontSize=7,
+            textColor=colors.HexColor('#333333'),
+            alignment=1,
+            spaceAfter=3
+        )
+        
+        addr_style = ParagraphStyle(
+            name='CollegeAddr',
+            fontName='Helvetica-Bold',
+            fontSize=8,
+            textColor=colors.HexColor('#000000'),
+            alignment=1,
+            spaceAfter=2
+        )
+
+        app_title_style = ParagraphStyle(
+            name='AppTitle',
+            fontName='Helvetica-Bold',
+            fontSize=8.5,
+            textColor=colors.white,
+            alignment=1,
+        )
+
+        # -------------------------------------------------------------
+        # PAGE 1 STORY
+        # -------------------------------------------------------------
+        story = []
+
+        # 1. Gold top line
+        line_t = Table([['']], colWidths=[535], rowHeights=[2])
+        line_t.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#D4A017')),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 0),
+            ('TOPPADDING', (0,0), (-1,-1), 0),
+        ]))
+        story.append(line_t)
+        story.append(Spacer(1, 4))
+
+        # 2. Header Grid (Logo, Titles, Photo Box)
+        # Left cell container for logo and emblem
+        logo_cells = []
+        if logo_flowable:
+            logo_cells.append([logo_flowable])
+        if emblem_flowable:
+            logo_cells.append([emblem_flowable])
+        
+        left_t = Table(logo_cells if logo_cells else [['']], colWidths=[55])
+        left_t.setStyle(TableStyle([
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+            ('TOPPADDING', (0,0), (-1,-1), 0),
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
+        ]))
+
+        # Middle Titles Container
+        app_heading = Table(
+            [[Paragraph('Application Form for Admission to B.E. / B.Tech. / M.E. / MBA / MCA Degree Course', app_title_style)]],
+            colWidths=[385],
+            rowHeights=[16]
+        )
+        app_heading.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#0B2C5D')),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+            ('TOPPADDING', (0,0), (-1,-1), 2),
+            ('LEFTPADDING', (0,0), (-1,-1), 4),
+            ('RIGHTPADDING', (0,0), (-1,-1), 4),
+        ]))
+
+        mid_cells = [
+            [Paragraph(college_name.upper(), title_style)],
+            [Paragraph('(Approved by AICTE & Govt. of Tamilnadu, Affiliated to Anna University)', sub_style)],
+            [Paragraph(college_address, addr_style)],
+            [Spacer(1, 2)],
+            [app_heading]
+        ]
+        mid_t = Table(mid_cells, colWidths=[395])
+        mid_t.setStyle(TableStyle([
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 0),
+            ('TOPPADDING', (0,0), (-1,-1), 0),
+        ]))
+
+        # Right Photo Box
+        photo_box_t = None
+        if photo_flowable:
+            photo_box_t = Table([[photo_flowable]], colWidths=[70], rowHeights=[85])
+            photo_box_t.setStyle(TableStyle([
+                ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#CCCCCC')),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 0),
+                ('TOPPADDING', (0,0), (-1,-1), 0),
+                ('LEFTPADDING', (0,0), (-1,-1), 0),
+                ('RIGHTPADDING', (0,0), (-1,-1), 0),
+            ]))
+        else:
+            photo_label_style = ParagraphStyle(
+                name='PhotoLabel',
+                fontName='Helvetica-Bold',
+                fontSize=6.5,
+                textColor=colors.HexColor('#666666'),
+                alignment=1,
+            )
+            photo_box_t = Table(
+                [
+                    [''],
+                    [Paragraph('Affix', photo_label_style)],
+                    [Paragraph('Passport Size', photo_label_style)],
+                    [Paragraph('Photo', photo_label_style)],
+                    ['']
+                ],
+                colWidths=[70],
+                rowHeights=[8, 16, 16, 16, 29]
+            )
+            photo_box_t.setStyle(TableStyle([
+                ('BOX', (0,0), (-1,-1), 0.75, colors.HexColor('#475569')),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F8FAFC')),
+            ]))
+
+        # Assemble Header
+        header_table = Table([[left_t, mid_t, photo_box_t]], colWidths=[60, 400, 75])
+        header_table.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
+            ('TOPPADDING', (0,0), (-1,-1), 0),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ]))
+        story.append(header_table)
+        story.append(Spacer(1, 10))
+
+        # -------------------------------------------------------------
+        # Helper to generate Section Headers and Tables
+        # -------------------------------------------------------------
+        def make_header(title):
+            h_style = ParagraphStyle(
+                name='HStyle_' + title.replace(' ', '_'),
+                fontName='Helvetica-Bold',
+                fontSize=9,
+                textColor=colors.HexColor('#0B2C5D')
+            )
+            t = Table([[Paragraph(title.upper(), h_style)]], colWidths=[535], rowHeights=[18])
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F1F5F9')),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('LEFTPADDING', (0,0), (-1,-1), 6),
+                ('LINELEFT', (0,0), (0,-1), 3.5, colors.HexColor('#D4A017')),
+                ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
+            ]))
+            return t
+
+        def make_kv_table(pairs):
+            k_style = ParagraphStyle(
+                name='KStyle',
+                fontName='Helvetica-Bold',
+                fontSize=7.5,
+                textColor=colors.HexColor('#475569')
+            )
+            v_style = ParagraphStyle(
+                name='VStyle',
+                fontName='Helvetica',
+                fontSize=8,
+                textColor=colors.HexColor('#0F172A')
+            )
+            
+            data = []
+            for i in range(0, len(pairs), 2):
+                row = []
+                k1, v1 = pairs[i]
+                row.append(Paragraph(k1, k_style))
+                row.append(Paragraph(str(v1) if v1 is not None and v1 != '' else '-', v_style))
+                if i + 1 < len(pairs):
+                    k2, v2 = pairs[i+1]
+                    row.append(Paragraph(k2, k_style))
+                    row.append(Paragraph(str(v2) if v2 is not None and v2 != '' else '-', v_style))
+                else:
+                    row.append('')
+                    row.append('')
+                data.append(row)
+                
+            t = Table(data, colWidths=[110, 157, 110, 158])
+            t.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
+                ('BACKGROUND', (0,0), (0,-1), colors.HexColor('#F8FAFC')),
+                ('BACKGROUND', (2,0), (2,-1), colors.HexColor('#F8FAFC')),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('TOPPADDING', (0,0), (-1,-1), 4.5),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 4.5),
+                ('LEFTPADDING', (0,0), (-1,-1), 6),
+                ('RIGHTPADDING', (0,0), (-1,-1), 6),
+            ]))
+            return t
+
+        # SECTION A: PROGRAM & BRANCH
+        story.append(make_header('A. Program & Branch Details'))
+        story.append(Spacer(1, 4))
+        
+        dept_val = get_val('department')
+        if isinstance(dept_val, list):
+            dept_str = ", ".join(dept_val)
+        else:
+            dept_str = str(dept_val)
+            
+        prog_name = application.program.program_name if application.program else get_val('program')
+        
+        program_pairs = [
+            ('Course Applied', prog_name),
+            ('Application Ref No', application.application_no),
+            ('Selected Department(s)', dept_str),
+            ('Admission Batch Year', '2026 - 2027')
+        ]
+        story.append(make_kv_table(program_pairs))
+        story.append(Spacer(1, 10))
+
+        # SECTION B: PERSONAL INFORMATION
+        story.append(make_header('B. Personal Information'))
+        story.append(Spacer(1, 4))
+        
+        personal_pairs = [
+            ('Applicant Name', get_val('applicant_name')),
+            ('Date of Birth', get_val('date_of_birth')),
+            ('Gender', get_val('gender')),
+            ('Community / Cast', get_val('community')),
+            ('Religion', get_val('religion')),
+            ('Nationality', get_val('nationality')),
+            ('Mother Tongue', get_val('mother_tongue')),
+            ('Aadhaar Number', get_val('aadhaar_number')),
+            ('Email Address', get_val('email')),
+            ('Mobile Number', get_val('student_mobile'))
+        ]
+        story.append(make_kv_table(personal_pairs))
+        story.append(Spacer(1, 10))
+
+        # SECTION C: PARENT & CONTACT DETAILS
+        story.append(make_header('C. Parent / Guardian & Contact Details'))
+        story.append(Spacer(1, 4))
+        
+        parent_pairs = [
+            ('Father / Guardian Name', get_val('parent_name')),
+            ('Occupation', get_val('occupation')),
+            ('Annual Income (Rs.)', get_val('annual_income')),
+            ('Contact Mobile No', get_val('parent_mobile')),
+            ('Residential Address', get_val('address')),
+            ('Area Pincode', get_val('pincode'))
+        ]
+        story.append(make_kv_table(parent_pairs))
+        
+        # End of Page 1 -> Add Page Break to guarantee exactly 2 pages!
+        story.append(PageBreak())
+
+        # -------------------------------------------------------------
+        # PAGE 2 STORY
+        # -------------------------------------------------------------
+        
+        # SECTION D: ACADEMIC QUALIFICATIONS
+        story.append(make_header('D. Academic Qualifications'))
+        story.append(Spacer(1, 4))
+        
+        # Qual Table Headers
+        qual_header_style = ParagraphStyle(
+            name='QualHeaderStyle',
+            fontName='Helvetica-Bold',
+            fontSize=7.5,
+            textColor=colors.HexColor('#475569')
+        )
+        qual_cell_style = ParagraphStyle(
+            name='QualCellStyle',
+            fontName='Helvetica',
+            fontSize=7.5,
+            textColor=colors.HexColor('#0F172A')
+        )
+        
+        qual_data = [[
+            Paragraph('Qualification', qual_header_style),
+            Paragraph('Institution Name', qual_header_style),
+            Paragraph('Board of Study', qual_header_style),
+            Paragraph('Register No.', qual_header_style),
+            Paragraph('Passing Year', qual_header_style),
+            Paragraph('Percentage (%)', qual_header_style)
+        ]]
+        
+        qual_list = get_val('qualifications') or get_val('academic_qualification') or []
+        if isinstance(qual_list, dict) and 'qualifications' in qual_list:
+            qual_list = qual_list['qualifications']
+        elif isinstance(qual_list, dict) and 'academic_qualification' in qual_list:
+            qual_list = qual_list['academic_qualification']
+            
+        if not isinstance(qual_list, list):
+            qual_list = []
+            
+        # Ensure we always show at least SSLC and HSC rows
+        display_quals = qual_list
+        if len(display_quals) == 0:
+            display_quals = [
+                {'qualification': 'SSLC', 'institution': '', 'board': '', 'register_number': '', 'year_of_passing': '', 'percentage': ''},
+                {'qualification': 'HSC', 'institution': '', 'board': '', 'register_number': '', 'year_of_passing': '', 'percentage': ''}
+            ]
+            
+        for q in display_quals:
+            qual_data.append([
+                Paragraph(str(q.get('qualification', '')), qual_cell_style),
+                Paragraph(str(q.get('institution', '')), qual_cell_style),
+                Paragraph(str(q.get('board', '')), qual_cell_style),
+                Paragraph(str(q.get('register_number', '')), qual_cell_style),
+                Paragraph(str(q.get('year_of_passing', '')), qual_cell_style),
+                Paragraph(str(q.get('percentage', '')), qual_cell_style),
+            ])
+            
+        qual_table = Table(qual_data, colWidths=[90, 160, 95, 70, 60, 60])
+        qual_table.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#F8FAFC')),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('TOPPADDING', (0,0), (-1,-1), 4.5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4.5),
+            ('LEFTPADDING', (0,0), (-1,-1), 6),
+            ('RIGHTPADDING', (0,0), (-1,-1), 6),
+        ]))
+        story.append(qual_table)
+        story.append(Spacer(1, 10))
+
+        # SECTION E: ACADEMIC PERFORMANCE (MARKS DETAILS)
+        story.append(make_header('E. Subject-wise Academic Performance'))
+        story.append(Spacer(1, 4))
+        
+        marks_data = [[
+            Paragraph('Qualification / Semester', qual_header_style),
+            Paragraph('Subject / Course Title', qual_header_style),
+            Paragraph('Max. Marks', qual_header_style),
+            Paragraph('Obtained Marks', qual_header_style),
+            Paragraph('Percentage (%)', qual_header_style)
+        ]]
+        
+        marks_list = get_val('academic_performance') or []
+        if isinstance(marks_list, dict) and 'academic_performance' in marks_list:
+            marks_list = marks_list['academic_performance']
+            
+        if not isinstance(marks_list, list):
+            marks_list = []
+            
+        if len(marks_list) == 0:
+            # Fallback placeholder row
+            marks_list = [{'qualification': 'HSC', 'subject': 'Mathematics', 'maximum_marks': 100, 'obtained_marks': '', 'percentage': ''}]
+            
+        for m in marks_list:
+            marks_data.append([
+                Paragraph(str(m.get('qualification', '')), qual_cell_style),
+                Paragraph(str(m.get('subject', '')), qual_cell_style),
+                Paragraph(str(m.get('maximum_marks', '')), qual_cell_style),
+                Paragraph(str(m.get('obtained_marks', '')), qual_cell_style),
+                Paragraph(str(m.get('percentage', '')), qual_cell_style),
+            ])
+            
+        marks_table = Table(marks_data, colWidths=[120, 175, 80, 80, 80])
+        marks_table.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#F8FAFC')),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('TOPPADDING', (0,0), (-1,-1), 4.5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4.5),
+            ('LEFTPADDING', (0,0), (-1,-1), 6),
+            ('RIGHTPADDING', (0,0), (-1,-1), 6),
+        ]))
+        story.append(marks_table)
+        story.append(Spacer(1, 10))
+
+        # SECTION F: UPLOADED CERTIFICATES CHECKLIST
+        story.append(make_header('F. Certificates & Uploaded Documents Checklist'))
+        story.append(Spacer(1, 4))
+        
+        cert_data = [[
+            Paragraph('S.No.', qual_header_style),
+            Paragraph('Certificate / Document Type', qual_header_style),
+            Paragraph('Upload Status', qual_header_style),
+            Paragraph('Document Reference Link', qual_header_style)
+        ]]
+        
+        cert_list = get_val('certificates') or []
+        if isinstance(cert_list, dict) and 'certificates' in cert_list:
+            cert_list = cert_list['certificates']
+            
+        if not isinstance(cert_list, list):
+            cert_list = []
+            
+        if len(cert_list) == 0:
+            cert_list = [{'certificate_type': 'Aadhaar Card', 'document': ''}]
+            
+        for idx, c in enumerate(cert_list):
+            doc_val = c.get('document', '')
+            doc_link = '-'
+            status_text = 'Not Uploaded'
+            status_style = ParagraphStyle(
+                name='StatusStyleErr_' + str(idx),
+                fontName='Helvetica-Bold',
+                fontSize=7.5,
+                textColor=colors.HexColor('#E11D48')
+            )
+            
+            if doc_val:
+                status_text = 'Uploaded'
+                status_style = ParagraphStyle(
+                    name='StatusStyleOk_' + str(idx),
+                    fontName='Helvetica-Bold',
+                    fontSize=7.5,
+                    textColor=colors.HexColor('#059669')
+                )
+                if isinstance(doc_val, str) and doc_val.startswith('http'):
+                    doc_link = doc_val.split('/')[-1]
+                elif isinstance(doc_val, dict) and isinstance(doc_val.get('name'), str):
+                    doc_link = doc_val.get('name')
+                    
+            cert_data.append([
+                Paragraph(str(idx + 1), qual_cell_style),
+                Paragraph(str(c.get('certificate_type', '')), qual_cell_style),
+                Paragraph(status_text, status_style),
+                Paragraph(doc_link, qual_cell_style)
+            ])
+            
+        cert_table = Table(cert_data, colWidths=[40, 205, 90, 200])
+        cert_table.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#F8FAFC')),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('TOPPADDING', (0,0), (-1,-1), 4.5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4.5),
+            ('LEFTPADDING', (0,0), (-1,-1), 6),
+            ('RIGHTPADDING', (0,0), (-1,-1), 6),
+        ]))
+        story.append(cert_table)
+        story.append(Spacer(1, 10))
+
+        # SECTION G: DECLARATION & SIGNATURES
+        story.append(make_header('G. Declaration & Signatures'))
+        story.append(Spacer(1, 4))
+        
+        dec_text = (
+            "I hereby declare that all the particulars furnished in this application form are true and "
+            "correct to the best of my knowledge and belief. I agree to abide by the rules and regulations "
+            "of the institution currently in force and as amended from time to time."
+        )
+        dec_style = ParagraphStyle(
+            name='DeclarationTextStyle',
+            fontName='Helvetica',
+            fontSize=7.5,
+            textColor=colors.HexColor('#334155'),
+            leading=11
+        )
+        story.append(Paragraph(dec_text, dec_style))
+        story.append(Spacer(1, 25))
+
+        # Signatures Row
+        sig_label_style = ParagraphStyle(
+            name='SigLabelStyle',
+            fontName='Helvetica-Bold',
+            fontSize=7.5,
+            textColor=colors.HexColor('#475569')
+        )
+        
+        place_str = get_val('place') or '-'
+        date_str = get_val('application_date') or '-'
+        
+        sig_data = [
+            [
+                Paragraph(f"<b>Place:</b> {place_str}", sig_label_style),
+                Paragraph("<b>Signature of Parent / Guardian</b>", sig_label_style)
+            ],
+            [
+                Paragraph(f"<b>Date:</b> {date_str}", sig_label_style),
+                Paragraph("<b>Signature of Candidate</b>", sig_label_style)
+            ]
+        ]
+        
+        sig_table = Table(sig_data, colWidths=[265, 270], rowHeights=[20, 20])
+        sig_table.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'BOTTOM'),
+            ('ALIGN', (1,0), (1,-1), 'RIGHT'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 0),
+            ('TOPPADDING', (0,0), (-1,-1), 0),
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
+        ]))
+        story.append(sig_table)
+
+        # Build PDF Document
+        doc.build(story)
+
+        # Get response from buffer
+        pdf = buffer.getvalue()
+        buffer.close()
+
+        response = HttpResponse(content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Application_{application.application_no}.pdf"'
+        response.write(pdf)
+        return response
+
+
 
 
 

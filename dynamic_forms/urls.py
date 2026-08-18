@@ -1,7 +1,8 @@
 from django.urls import path
 from .views import (
     FormModuleViewSet, FormFieldViewSet, ApplicationViewSet, 
-    ApplicationStatusViewSet, ApplicationUserViewSet, ApplicationUserLoginView
+    ApplicationStatusViewSet, ApplicationUserViewSet, ApplicationUserLoginView,
+    ApplicationPDFDownloadView
 )
 
 urlpatterns = [
@@ -23,6 +24,7 @@ urlpatterns = [
     path('applications/list', ApplicationViewSet.as_view({'get': 'list'}), name='application-list'),
     path('applications/create', ApplicationViewSet.as_view({'post': 'create'}), name='application-create'),
     path('applications/get/<int:pk>', ApplicationViewSet.as_view({'get': 'retrieve'}), name='application-detail'),
+    path('applications/download-pdf/<int:pk>', ApplicationPDFDownloadView.as_view(), name='application-pdf'),
     path('applications/edit/<int:pk>', ApplicationViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='application-edit'),
     path('applications/remove/<int:pk>', ApplicationViewSet.as_view({'delete': 'destroy'}), name='application-remove'),
 
