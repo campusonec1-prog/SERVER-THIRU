@@ -42,6 +42,14 @@ class ExamTimetable(TrackingModel):
         db_column='section_id',
         related_name='exam_timetables'
     )
+    subject = models.ForeignKey(
+        'subject.Subject',
+        on_delete=models.CASCADE,
+        db_column='subject_id',
+        related_name='exam_timetables',
+        null=True,
+        blank=True
+    )
     semester = models.ForeignKey(
         'institution.Semester',
         on_delete=models.CASCADE,

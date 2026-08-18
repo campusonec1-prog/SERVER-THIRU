@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import ExamTimetable
 from institution.models import AcademicYear, Batch, Department, Exam, Section, Semester
 from schedule.models import Session
+from subject.models import Subject
 
 def apply_default_error_messages(fields):
     """Apply standard required/blank/null error messages to all fields."""
@@ -51,13 +52,20 @@ class ExamTimetableSerializer(serializers.ModelSerializer):
         queryset=Semester.objects.all(),
         error_messages={'does_not_exist': 'Semester does not exist.'}
     )
+    subject_id = serializers.PrimaryKeyRelatedField(
+        source='subject',
+        queryset=Subject.objects.all(),
+        required=False,
+        allow_null=True,
+        error_messages={'does_not_exist': 'Subject does not exist.'}
+    )
 
     class Meta:
         model = ExamTimetable
         fields = [
             'id', 'exam_date', 'session_id', 'start_time', 'end_time',
             'academic_year_id', 'batch_id', 'department_id', 'exam_id',
-            'section_id', 'semester_id', 'created_at', 'updated_at',
+            'section_id', 'semester_id', 'subject_id', 'created_at', 'updated_at',
             'created_by', 'updated_by'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
