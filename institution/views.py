@@ -143,6 +143,13 @@ class BatchViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     permission_classes = [BatchPermission]
     model_label = "Batch"
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        dept_id = self.request.query_params.get('department_id')
+        if dept_id:
+            queryset = queryset.filter(department_id=dept_id)
+        return queryset
+
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
         return Response({"code": 200, "message": "Batches listed successfully", "data": response.data}, status=status.HTTP_200_OK)
@@ -375,6 +382,19 @@ class FeesStructureViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     permission_classes = [FeesStructurePermission]
     model_label = "Fees Structure"
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+        if params.get('department_id'):
+            qs = qs.filter(department_id=params['department_id'])
+        if params.get('batch_id'):
+            qs = qs.filter(batch_id=params['batch_id'])
+        if params.get('quota_id'):
+            qs = qs.filter(quota_id=params['quota_id'])
+        if params.get('academic_year_id'):
+            qs = qs.filter(academic_year_id=params['academic_year_id'])
+        return qs
+
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
         return Response({"code": 200, "message": "Fees structures listed successfully", "data": response.data}, status=status.HTTP_200_OK)
@@ -384,8 +404,15 @@ class FeesStructureViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         return Response({"code": 200, "message": "Fees structure retrieved successfully", "data": response.data}, status=status.HTTP_200_OK)
 
     def create(self, request, *args, **kwargs):
-        response = super().create(request, *args, **kwargs)
-        return Response({"code": 201, "message": "Fees structure created successfully", "data": response.data}, status=status.HTTP_201_CREATED)
+        data = request.data
+        if isinstance(data, list):
+            serializer = self.get_serializer(data=data, many=True)
+            serializer.is_valid(raise_exception=True)
+            self.perform_create(serializer)
+            return Response({"code": 201, "message": "Fees structures created successfully", "data": serializer.data}, status=status.HTTP_201_CREATED)
+        else:
+            response = super().create(request, *args, **kwargs)
+            return Response({"code": 201, "message": "Fees structure created successfully", "data": response.data}, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
         response = super().update(request, *args, **kwargs)
