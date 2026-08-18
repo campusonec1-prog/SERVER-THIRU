@@ -42,6 +42,9 @@ def find_parent_value(field_key, choices, form_data, module_key=None):
         candidate_key = current_prefix + base
         candidate_val = module_data.get(candidate_key)
         if candidate_val:
+            lower_raw = str(candidate_val).strip().lower()
+            if lower_raw in possible_parent_keys:
+                return key_map[lower_raw]
             normalized = normalize_state_value(candidate_val)
             lower_val = str(normalized).lower()
             if lower_val in possible_parent_keys:
@@ -54,6 +57,9 @@ def find_parent_value(field_key, choices, form_data, module_key=None):
             candidate_key = current_prefix + base
             candidate_val = m_data.get(candidate_key)
             if candidate_val:
+                lower_raw = str(candidate_val).strip().lower()
+                if lower_raw in possible_parent_keys:
+                    return key_map[lower_raw]
                 normalized = normalize_state_value(candidate_val)
                 lower_val = str(normalized).lower()
                 if lower_val in possible_parent_keys:
@@ -67,9 +73,8 @@ def find_parent_value(field_key, choices, form_data, module_key=None):
         for f_key, val_raw in m_data.items():
             val = str(val_raw or '')
             if val:
-                normalized = normalize_state_value(val)
-                lower_val = str(normalized).lower()
-                if lower_val in possible_parent_keys:
+                lower_raw = val.strip().lower()
+                if lower_raw in possible_parent_keys:
                     score = 0
                     if current_prefix and f_key.startswith(current_prefix):
                         score += 10
@@ -79,7 +84,21 @@ def find_parent_value(field_key, choices, form_data, module_key=None):
                         score += 8
                     if score > highest_score:
                         highest_score = score
-                        best_match_val = key_map[lower_val]
+                        best_match_val = key_map[lower_raw]
+                else:
+                    normalized = normalize_state_value(val)
+                    lower_val = str(normalized).lower()
+                    if lower_val in possible_parent_keys:
+                        score = 0
+                        if current_prefix and f_key.startswith(current_prefix):
+                            score += 10
+                        if 'state' in f_key.lower():
+                            score += 5
+                        if f_key.lower() == 'state':
+                            score += 8
+                        if score > highest_score:
+                            highest_score = score
+                            best_match_val = key_map[lower_val]
                     
     return best_match_val
 
@@ -609,6 +628,47 @@ class ApplicationSerializer(serializers.ModelSerializer):
                                     if module_key not in errors:
                                         errors[module_key] = {}
                                     errors[module_key][field_key] = f"Value does not match pattern format."
+
+            # Register Number Uniqueness Validation
+            submitted_reg_numbers = []
+            for m_key, m_data in form_data.items():
+                if isinstance(m_data, dict):
+                    for f_key, f_val in m_data.items():
+                        if isinstance(f_val, list):
+                            for r_idx, row in enumerate(f_val):
+                                if isinstance(row, dict) and 'register_number' in row:
+                                    reg_no = str(row['register_number']).strip().upper()
+                                    if reg_no:
+                                        submitted_reg_numbers.append((m_key, f_key, r_idx, reg_no))
+
+            seen_reg_nos = {}
+            for m_key, f_key, r_idx, reg_no in submitted_reg_numbers:
+                if reg_no in seen_reg_nos:
+                    if m_key not in errors:
+                        errors[m_key] = {}
+                    errors[m_key][f_key] = f"Duplicate register number '{reg_no}' found in your qualifications list."
+                else:
+                    seen_reg_nos[reg_no] = (m_key, f_key, r_idx)
+
+            # Check other applications for matching register numbers in database
+            other_apps = Application.objects.all()
+            if self.instance and self.instance.pk:
+                other_apps = other_apps.exclude(pk=self.instance.pk)
+
+            for other_app in other_apps:
+                other_form_data = other_app.form_data or {}
+                for o_m_key, o_m_data in other_form_data.items():
+                    if isinstance(o_m_data, dict):
+                        for o_f_key, o_f_val in o_m_data.items():
+                            if isinstance(o_f_val, list):
+                                for o_row in o_f_val:
+                                    if isinstance(o_row, dict) and 'register_number' in o_row:
+                                        o_reg_no = str(o_row['register_number']).strip().upper()
+                                        if o_reg_no in seen_reg_nos:
+                                            dup_m_key, dup_f_key, _ = seen_reg_nos[o_reg_no]
+                                            if dup_m_key not in errors:
+                                                errors[dup_m_key] = {}
+                                            errors[dup_m_key][dup_f_key] = f"Register number '{o_reg_no}' is already registered in another candidate's application."
 
             if errors:
                 raise serializers.ValidationError({"form_data": errors})
