@@ -49,6 +49,40 @@ class Department(TrackingModel):
     def __str__(self):
         return f"{self.department_name} ({self.department_code})"
 
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        old_name = None
+        if not is_new:
+            try:
+                old_instance = Department.objects.get(pk=self.pk)
+                old_name = old_instance.department_name
+            except Department.DoesNotExist:
+                pass
+        
+        super().save(*args, **kwargs)
+        
+        # Sync future department name changes inside application form_data JSON fields
+        if old_name and old_name != self.department_name:
+            try:
+                from dynamic_forms.models import Application
+                apps = Application.objects.all()
+                updated_count = 0
+                for app in apps:
+                    form_data = app.form_data or {}
+                    course_sel = form_data.get('course_selection', {})
+                    if course_sel.get('department') == old_name:
+                        course_sel['department'] = self.department_name
+                        form_data['course_selection'] = course_sel
+                        app.form_data = form_data
+                        app.save(update_fields=['form_data'])
+                        updated_count += 1
+                if updated_count > 0:
+                    print(f"[Sync] Updated department name from '{old_name}' to '{self.department_name}' in {updated_count} applications.")
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"[Sync Error] Failed to sync renamed department '{old_name}' to '{self.department_name}' in applications: {e}")
+
 
 class AcademicYear(TrackingModel):
     academic_year = models.CharField(max_length=20, unique=True)

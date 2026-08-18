@@ -133,4 +133,36 @@ class Application(TrackingModel):
     def __str__(self):
         return f"{self.application_no} - {self.candidate.name} ({self.status.status_name})"
 
+    def delete(self, *args, **kwargs):
+        # Clean up files in Cloudflare R2 before deleting the application record
+        try:
+            from common.r2 import delete_file_from_r2
+            from django.conf import settings
+            
+            public_url_base = settings.CLOUDFLARE_R2_PUBLIC_URL.rstrip('/')
+            
+            def extract_urls(data):
+                found = []
+                if isinstance(data, str):
+                    if data.startswith(public_url_base):
+                        found.append(data)
+                elif isinstance(data, dict):
+                    for v in data.values():
+                        found.extend(extract_urls(v))
+                elif isinstance(data, list):
+                    for item in data:
+                        found.extend(extract_urls(item))
+                return found
+
+            urls = extract_urls(self.form_data or {})
+            for url in urls:
+                delete_file_from_r2(url)
+        except Exception as e:
+            # Silent fallback to prevent database delete blocks on R2 connectivity issues
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"[R2 Delete Error] Failed to delete files for application {self.application_no}: {e}")
+
+        super().delete(*args, **kwargs)
+
 

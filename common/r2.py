@@ -38,3 +38,23 @@ def upload_file_to_r2(file_obj, folder_name="college_headers"):
     # Combine with public URL base
     public_url_base = settings.CLOUDFLARE_R2_PUBLIC_URL.rstrip('/')
     return f"{public_url_base}/{unique_filename}"
+
+def delete_file_from_r2(public_url):
+    """
+    Deletes a file from Cloudflare R2 given its public URL.
+    """
+    if not public_url:
+        return
+    
+    public_url_base = settings.CLOUDFLARE_R2_PUBLIC_URL.rstrip('/')
+    if public_url.startswith(public_url_base):
+        key = public_url[len(public_url_base):].lstrip('/')
+        client = get_r2_client()
+        try:
+            client.delete_object(
+                Bucket=settings.CLOUDFLARE_R2_BUCKET_NAME,
+                Key=key
+            )
+            print(f"[R2] Deleted file: {key}")
+        except Exception as e:
+            print(f"[R2] Failed to delete file {key}: {e}")
