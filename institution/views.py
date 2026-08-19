@@ -390,13 +390,41 @@ class FeesStructureViewSet(AdminWriteMixin, viewsets.ModelViewSet):
             qs = qs.filter(batch_id=params['batch_id'])
         if params.get('quota_id'):
             qs = qs.filter(quota_id=params['quota_id'])
-        if params.get('academic_year_id'):
-            qs = qs.filter(academic_year_id=params['academic_year_id'])
         return qs
 
     def list(self, request, *args, **kwargs):
-        response = super().list(request, *args, **kwargs)
-        return Response({"code": 200, "message": "Fees structures listed successfully", "data": response.data}, status=status.HTTP_200_OK)
+        # Support bypassing pagination when pagination=false is passed
+        pagination = request.query_params.get('pagination', 'true').lower()
+        if pagination == 'false':
+            queryset = self.filter_queryset(self.get_queryset())
+            serializer = self.get_serializer(queryset, many=True)
+            return Response({"code": 200, "message": "Fees structures listed successfully", "data": serializer.data}, status=status.HTTP_200_OK)
+
+        # Retrieve filtered queryset
+        queryset = self.filter_queryset(self.get_queryset())
+
+        # Group by unique department and batch combinations to define batch pages
+        distinct_batches = queryset.values('department_id', 'batch_id').distinct().order_by('department_id', 'batch_id')
+
+        # Paginate the unique batch pairs
+        page = self.paginate_queryset(distinct_batches)
+        if page is not None:
+            from django.db.models import Q
+            filter_q = Q()
+            for item in page:
+                filter_q |= Q(department_id=item['department_id'], batch_id=item['batch_id'])
+
+            if filter_q:
+                page_queryset = queryset.filter(filter_q).order_by('department_id', 'batch_id', 'quota_id')
+            else:
+                page_queryset = queryset.none()
+
+            serializer = self.get_serializer(page_queryset, many=True)
+            paginated_response = self.get_paginated_response(serializer.data)
+            return Response({"code": 200, "message": "Fees structures listed successfully", "data": paginated_response.data}, status=status.HTTP_200_OK)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({"code": 200, "message": "Fees structures listed successfully", "data": serializer.data}, status=status.HTTP_200_OK)
 
     def retrieve(self, request, *args, **kwargs):
         response = super().retrieve(request, *args, **kwargs)
@@ -405,9 +433,8 @@ class FeesStructureViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         data = request.data
 
-        # ── Structured bulk upsert: { academic_year_id, department_id, fees: [...] }
+        # ── Structured bulk upsert: { department_id, fees: [...] }
         if isinstance(data, dict) and 'fees' in data and isinstance(data['fees'], list):
-            academic_year_id = data.get('academic_year_id')
             department_id    = data.get('department_id')
             fees_list        = data['fees']
 
@@ -419,7 +446,6 @@ class FeesStructureViewSet(AdminWriteMixin, viewsets.ModelViewSet):
             for entry in fees_list:
                 # Flatten: merge shared top-level ids into each fee entry
                 item = {
-                    'academic_year_id': academic_year_id,
                     'department_id':    department_id,
                     'batch_id':         entry.get('batch_id'),
                     'quota_id':         entry.get('quota_id'),
@@ -428,7 +454,6 @@ class FeesStructureViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
                 try:
                     instance = FeesStructure.objects.get(
-                        academic_year_id=academic_year_id,
                         department_id=department_id,
                         batch_id=entry.get('batch_id'),
                         quota_id=entry.get('quota_id'),

@@ -230,12 +230,6 @@ class Quota(TrackingModel):
 
 
 class FeesStructure(TrackingModel):
-    academic_year = models.ForeignKey(
-        AcademicYear,
-        on_delete=models.CASCADE,
-        db_column='academic_year_id',
-        related_name='fees_structures'
-    )
     department = models.ForeignKey(
         Department,
         on_delete=models.CASCADE,
@@ -258,10 +252,10 @@ class FeesStructure(TrackingModel):
 
     class Meta:
         db_table = 'fees_structure'
-        unique_together = ('academic_year', 'department', 'batch', 'quota')
+        unique_together = ('department', 'batch', 'quota')
 
     def __str__(self):
-        return f"{self.academic_year.academic_year} - {self.department.department_code} - {self.batch.batch} - {self.quota.quota_name}: {self.fees}"
+        return f"{self.department.department_code} - {self.batch.batch} - {self.quota.quota_name}: {self.fees}"
 
 
 

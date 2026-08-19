@@ -501,11 +501,6 @@ class QuotaSerializer(serializers.ModelSerializer):
 # ─── Fees Structure ───────────────────────────────────────────
 
 class FeesStructureSerializer(serializers.ModelSerializer):
-    academic_year_id = serializers.PrimaryKeyRelatedField(
-        source='academic_year',
-        queryset=AcademicYear.objects.all(),
-        error_messages={'does_not_exist': 'Academic year does not exist.'}
-    )
     department_id = serializers.PrimaryKeyRelatedField(
         source='department',
         queryset=Department.objects.all(),
@@ -522,7 +517,6 @@ class FeesStructureSerializer(serializers.ModelSerializer):
         error_messages={'does_not_exist': 'Quota does not exist.'}
     )
     
-    academic_year_name = serializers.CharField(source='academic_year.academic_year', read_only=True)
     department_name = serializers.CharField(source='department.department_name', read_only=True)
     batch_name = serializers.CharField(source='batch.batch', read_only=True)
     quota_name = serializers.CharField(source='quota.quota_name', read_only=True)
@@ -530,7 +524,7 @@ class FeesStructureSerializer(serializers.ModelSerializer):
     class Meta:
         model = FeesStructure
         fields = [
-            'id', 'academic_year_id', 'academic_year_name', 'department_id', 'department_name', 
+            'id', 'department_id', 'department_name', 
             'batch_id', 'batch_name', 'quota_id', 'quota_name',
             'fees', 'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
@@ -549,13 +543,11 @@ class FeesStructureSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
-        academic_year = attrs.get('academic_year')
         department = attrs.get('department')
         batch = attrs.get('batch')
         quota = attrs.get('quota')
 
         qs = FeesStructure.objects.filter(
-            academic_year=academic_year,
             department=department,
             batch=batch,
             quota=quota
@@ -564,7 +556,7 @@ class FeesStructureSerializer(serializers.ModelSerializer):
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
             raise serializers.ValidationError({
-                "non_field_errors": "Fees structure for this academic year, department, batch, and quota already exists."
+                "non_field_errors": "Fees structure for this department, batch, and quota already exists."
             })
         return attrs
 
