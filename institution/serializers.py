@@ -67,10 +67,19 @@ class DepartmentSerializer(serializers.ModelSerializer):
         required=False,
         error_messages={'does_not_exist': 'User does not exist.'}
     )
+    # Read-only: allows frontend to disambiguate departments with the same name
+    program_name = serializers.CharField(source='program.program_name', read_only=True)
+    program_level = serializers.CharField(source='program.program_level', read_only=True)
 
     class Meta:
         model = Department
-        fields = ['id', 'department_name', 'department_code', 'short_name', 'program_id', 'hod_id', 'is_active', 'is_display', 'created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = [
+            'id', 'department_name', 'department_code', 'short_name',
+            'program_id', 'program_name', 'program_level',
+            'hod_id', 'is_active', 'is_display',
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+        ]
+
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
         extra_kwargs = {
             'department_name': {'required': True},

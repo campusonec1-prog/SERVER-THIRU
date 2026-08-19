@@ -144,11 +144,10 @@ class BatchViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     model_label = "Batch"
 
     def get_queryset(self):
-        queryset = super().get_queryset()
-        dept_id = self.request.query_params.get('department_id')
-        if dept_id:
-            queryset = queryset.filter(department_id=dept_id)
-        return queryset
+        # Filtering (department_id, is_active, etc.) is handled automatically
+        # by the global DynamicFilterBackend — no manual filtering needed here.
+        return super().get_queryset()
+
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
@@ -405,11 +404,63 @@ class FeesStructureViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         data = request.data
-        if isinstance(data, list):
-            serializer = self.get_serializer(data=data, many=True)
-            serializer.is_valid(raise_exception=True)
-            self.perform_create(serializer)
-            return Response({"code": 201, "message": "Fees structures created successfully", "data": serializer.data}, status=status.HTTP_201_CREATED)
+
+        # ── Structured bulk upsert: { academic_year_id, department_id, fees: [...] }
+        if isinstance(data, dict) and 'fees' in data and isinstance(data['fees'], list):
+            academic_year_id = data.get('academic_year_id')
+            department_id    = data.get('department_id')
+            fees_list        = data['fees']
+
+            user        = request.user if request.user and request.user.is_authenticated else None
+            results     = []
+            created_cnt = 0
+            updated_cnt = 0
+
+            for entry in fees_list:
+                # Flatten: merge shared top-level ids into each fee entry
+                item = {
+                    'academic_year_id': academic_year_id,
+                    'department_id':    department_id,
+                    'batch_id':         entry.get('batch_id'),
+                    'quota_id':         entry.get('quota_id'),
+                    'fees':             entry.get('fees'),
+                }
+
+                try:
+                    instance = FeesStructure.objects.get(
+                        academic_year_id=academic_year_id,
+                        department_id=department_id,
+                        batch_id=entry.get('batch_id'),
+                        quota_id=entry.get('quota_id'),
+                    )
+                    # Record exists → update fees
+                    serializer = self.get_serializer(instance, data=item)
+                    serializer.is_valid(raise_exception=True)
+                    serializer.save(updated_by=user)
+                    updated_cnt += 1
+
+                except FeesStructure.DoesNotExist:
+                    # Record does not exist → create
+                    serializer = self.get_serializer(data=item)
+                    serializer.is_valid(raise_exception=True)
+                    serializer.save(created_by=user, updated_by=user)
+                    created_cnt += 1
+
+                results.append(serializer.data)
+
+            parts = []
+            if created_cnt:
+                parts.append(f"{created_cnt} created")
+            if updated_cnt:
+                parts.append(f"{updated_cnt} updated")
+            msg = "Fees structures saved: " + ", ".join(parts) if parts else "No changes made"
+
+            return Response(
+                {"code": 200, "message": msg, "data": results},
+                status=status.HTTP_200_OK,
+            )
+
+        # ── Single object create ─────────────────────────────────────────────
         else:
             response = super().create(request, *args, **kwargs)
             return Response({"code": 201, "message": "Fees structure created successfully", "data": response.data}, status=status.HTTP_201_CREATED)
