@@ -650,10 +650,11 @@ class ApplicationSerializer(serializers.ModelSerializer):
                 else:
                     seen_reg_nos[reg_no] = (m_key, f_key, r_idx)
 
-            # Check other applications for matching register numbers in database
-            other_apps = Application.objects.all()
+            # Check other applications (belonging to other candidates) for matching register numbers in database
+            other_apps = Application.objects.exclude(candidate=data.get('candidate'))
             if self.instance and self.instance.pk:
                 other_apps = other_apps.exclude(pk=self.instance.pk)
+
 
             for other_app in other_apps:
                 other_form_data = other_app.form_data or {}
