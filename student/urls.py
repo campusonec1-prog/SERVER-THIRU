@@ -18,6 +18,7 @@ urlpatterns = [
     path('admission-slip/save', StudentViewSet.as_view({'post': 'admission_slip_save'}), name='admission-slip-save'),
     path('admission-slip/data/<int:pk>', StudentViewSet.as_view({'get': 'admission_slip_data'}), name='admission-slip-data'),
     path('admission-slip/pdf/<int:pk>', StudentViewSet.as_view({'get': 'admission_slip_pdf'}), name='admission-slip-pdf'),
+    path('fees/save', StudentViewSet.as_view({'post': 'fees_save'}), name='fees-save'),
 
     # Marks endpoints
     path('marks/create', MarksViewSet.as_view({'post': 'create'}), name='marks-create'),

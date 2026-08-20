@@ -201,41 +201,29 @@ class StudentSerializer(serializers.ModelSerializer):
                 total_fees = float(fs.fees)
         ret['total_fees'] = total_fees
 
-        # Populate StudentFees details if created
-        fees_payment = getattr(instance, 'fees_payment', None)
-        if fees_payment:
-            ret['fees_payment_id'] = fees_payment.id
-            ret['fees_paid'] = float(fees_payment.paid_amount)
-            ret['fees_balance'] = float(fees_payment.balance_amount)
-            ret['payment_mode'] = fees_payment.payment_mode
-            ret['aadhaar_number'] = fees_payment.aadhaar_number
-            ret['emis_number'] = fees_payment.emis_number
-            ret['umis_number'] = fees_payment.umis_number
-            ret['remarks'] = fees_payment.remarks
-            ret['certificates_surrendered'] = fees_payment.certificates_surrendered
-            ret['qualification'] = fees_payment.qualification
-            ret['community'] = fees_payment.community
-            ret['marks_maths'] = fees_payment.marks_maths
-            ret['marks_physics'] = fees_payment.marks_physics
-            ret['marks_chemistry'] = fees_payment.marks_chemistry
-            ret['marks_total'] = fees_payment.marks_total
-            ret['marks_percentage'] = float(fees_payment.marks_percentage) if fees_payment.marks_percentage else None
-            ret['mode_of_admission'] = fees_payment.mode_of_admission
-            ret['books_fees_total'] = float(fees_payment.books_fees_total)
-            ret['books_fees_paid'] = float(fees_payment.books_fees_paid)
-            ret['due_date'] = fees_payment.due_date.isoformat() if fees_payment.due_date else None
-            ret['recommendation_id'] = fees_payment.recommendation_id
-            ret['recommendation_name'] = fees_payment.recommendation.name if fees_payment.recommendation else ''
+        # ── Admission slip fields (StudentAdmissionSlip) ────────────────
+        admission_slip = getattr(instance, 'admission_slip', None)
+        if admission_slip:
+            ret['admission_slip_id'] = admission_slip.id
+            ret['aadhaar_number'] = admission_slip.aadhaar_number
+            ret['emis_number'] = admission_slip.emis_number
+            ret['umis_number'] = admission_slip.umis_number
+            ret['qualification'] = admission_slip.qualification
+            ret['community'] = admission_slip.community
+            ret['marks_maths'] = admission_slip.marks_maths
+            ret['marks_physics'] = admission_slip.marks_physics
+            ret['marks_chemistry'] = admission_slip.marks_chemistry
+            ret['marks_total'] = admission_slip.marks_total
+            ret['marks_percentage'] = float(admission_slip.marks_percentage) if admission_slip.marks_percentage else None
+            ret['mode_of_admission'] = admission_slip.mode_of_admission
+            ret['certificates_surrendered'] = admission_slip.certificates_surrendered
+            ret['recommendation_id'] = admission_slip.recommendation_id
+            ret['recommendation_name'] = admission_slip.recommendation.name if admission_slip.recommendation else ''
         else:
-            ret['fees_payment_id'] = None
-            ret['fees_paid'] = 0.0
-            ret['fees_balance'] = total_fees
-            ret['payment_mode'] = 'Cash'
+            ret['admission_slip_id'] = None
             ret['aadhaar_number'] = ''
             ret['emis_number'] = ''
             ret['umis_number'] = ''
-            ret['remarks'] = ''
-            ret['certificates_surrendered'] = {}
             ret['qualification'] = ''
             ret['community'] = ''
             ret['marks_maths'] = None
@@ -244,11 +232,30 @@ class StudentSerializer(serializers.ModelSerializer):
             ret['marks_total'] = None
             ret['marks_percentage'] = None
             ret['mode_of_admission'] = 'I Sem'
+            ret['certificates_surrendered'] = {}
+            ret['recommendation_id'] = None
+            ret['recommendation_name'] = ''
+
+        # ── Fees fields (StudentFees) ───────────────────────────────────
+        fees_payment = getattr(instance, 'fees_payment', None)
+        if fees_payment:
+            ret['fees_payment_id'] = fees_payment.id
+            ret['fees_paid'] = float(fees_payment.paid_amount)
+            ret['fees_balance'] = float(fees_payment.balance_amount)
+            ret['payment_mode'] = fees_payment.payment_mode
+            ret['books_fees_total'] = float(fees_payment.books_fees_total)
+            ret['books_fees_paid'] = float(fees_payment.books_fees_paid)
+            ret['due_date'] = fees_payment.due_date.isoformat() if fees_payment.due_date else None
+            ret['remarks'] = fees_payment.remarks
+        else:
+            ret['fees_payment_id'] = None
+            ret['fees_paid'] = 0.0
+            ret['fees_balance'] = total_fees
+            ret['payment_mode'] = 'Cash'
             ret['books_fees_total'] = 0.0
             ret['books_fees_paid'] = 0.0
             ret['due_date'] = None
-            ret['recommendation_id'] = None
-            ret['recommendation_name'] = ''
+            ret['remarks'] = ''
 
         return ret
 
@@ -315,7 +322,38 @@ class CounsellingReportSerializer(serializers.ModelSerializer):
         apply_default_error_messages(self.fields)
 
 
-from .models import StudentFees
+from .models import StudentFees, StudentAdmissionSlip
+
+class StudentAdmissionSlipSerializer(serializers.ModelSerializer):
+    student_id = serializers.PrimaryKeyRelatedField(
+        source='student',
+        queryset=Student.objects.all(),
+        error_messages={'does_not_exist': 'Student does not exist.'}
+    )
+    recommendation_id = serializers.PrimaryKeyRelatedField(
+        source='recommendation',
+        queryset=User.objects.all(),
+        required=False,
+        allow_null=True,
+        error_messages={'does_not_exist': 'User does not exist.'}
+    )
+
+    class Meta:
+        model = StudentAdmissionSlip
+        fields = [
+            'id', 'student_id',
+            'aadhaar_number', 'emis_number', 'umis_number',
+            'qualification', 'community',
+            'marks_maths', 'marks_physics', 'marks_chemistry', 'marks_total', 'marks_percentage',
+            'mode_of_admission', 'certificates_surrendered', 'recommendation_id',
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
 
 class StudentFeesSerializer(serializers.ModelSerializer):
     student_id = serializers.PrimaryKeyRelatedField(
@@ -326,13 +364,14 @@ class StudentFeesSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = StudentFees
-        fields = '__all__'
+        fields = [
+            'id', 'student_id',
+            'total_fees', 'paid_amount', 'balance_amount', 'payment_mode',
+            'books_fees_total', 'books_fees_paid', 'due_date', 'remarks',
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+        ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         apply_default_error_messages(self.fields)
-
-
-
-

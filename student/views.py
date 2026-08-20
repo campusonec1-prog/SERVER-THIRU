@@ -3,8 +3,8 @@ from rest_framework.response import Response
 from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied, ValidationError
 from django.db.models import Q
-from .models import StudentStatus, Student
-from .serializers import StudentStatusSerializer, StudentSerializer
+from .models import StudentStatus, Student, StudentAdmissionSlip, StudentFees
+from .serializers import StudentStatusSerializer, StudentSerializer, StudentAdmissionSlipSerializer, StudentFeesSerializer
 from users.permissions import IsAdminUser
 from .permissions import StudentStatusPermission, StudentPermission, MarksPermission, CounsellingReportPermission
 
@@ -288,11 +288,11 @@ class StudentViewSet(viewsets.ModelViewSet):
         - Derived qualification (highest)
         - Academic PCM marks from application performance rows
         - Uploaded certificate documents list
-        - Existing fees payment record
+        - Existing StudentAdmissionSlip record (admission fields)
+        - Existing StudentFees record (fees fields)
         - All system users (for recommendation dropdown)
         """
         from django.shortcuts import get_object_or_404
-        from .models import Student, StudentFees
         from users.models import User
 
         student = get_object_or_404(Student, pk=pk)
@@ -341,7 +341,6 @@ class StudentViewSet(viewsets.ModelViewSet):
         if not isinstance(perf_rows, list):
             perf_rows = []
 
-        # Match performance rows to the highest qualification (or any if not matched)
         def extract_marks(rows, qual_filter=None):
             marks = {'maths': None, 'physics': None, 'chemistry': None}
             SUBJECT_MAP = {
@@ -364,7 +363,6 @@ class StudentViewSet(viewsets.ModelViewSet):
             return marks
 
         pcm = extract_marks(perf_rows, highest_qual)
-        # If not matched by qual filter, try without filter as fallback
         if all(v is None for v in pcm.values()):
             pcm = extract_marks(perf_rows)
 
@@ -385,8 +383,7 @@ class StudentViewSet(viewsets.ModelViewSet):
         course_sel = get_fd('course_selection')
         program = str(course_sel.get('program', '') or '')
 
-        # ── Fees data ────────────────────────────────────────────────
-        fees_payment = getattr(student, 'fees_payment', None)
+        # ── Fees structure lookup ─────────────────────────────────────
         from institution.models import FeesStructure
         total_fees = 0.0
         if student.department and student.batch and student.quota:
@@ -398,7 +395,47 @@ class StudentViewSet(viewsets.ModelViewSet):
             if fs:
                 total_fees = float(fs.fees)
 
-        fees_data = {}
+        # ── Admission Slip data (StudentAdmissionSlip) ────────────────
+        admission_slip = getattr(student, 'admission_slip', None)
+        if admission_slip:
+            admission_data = {
+                'id': admission_slip.id,
+                'aadhaar_number': admission_slip.aadhaar_number or aadhaar_number,
+                'emis_number': admission_slip.emis_number or '',
+                'umis_number': admission_slip.umis_number or '',
+                'qualification': admission_slip.qualification or '',
+                'community': admission_slip.community or '',
+                'marks_maths': admission_slip.marks_maths,
+                'marks_physics': admission_slip.marks_physics,
+                'marks_chemistry': admission_slip.marks_chemistry,
+                'marks_total': admission_slip.marks_total,
+                'marks_percentage': float(admission_slip.marks_percentage) if admission_slip.marks_percentage else None,
+                'mode_of_admission': admission_slip.mode_of_admission,
+                'certificates_surrendered': admission_slip.certificates_surrendered or {},
+                'recommendation_id': admission_slip.recommendation_id,
+                'recommendation_name': admission_slip.recommendation.name if admission_slip.recommendation else '',
+            }
+        else:
+            admission_data = {
+                'id': None,
+                'aadhaar_number': aadhaar_number,
+                'emis_number': '',
+                'umis_number': '',
+                'qualification': '',
+                'community': '',
+                'marks_maths': pcm.get('maths'),
+                'marks_physics': pcm.get('physics'),
+                'marks_chemistry': pcm.get('chemistry'),
+                'marks_total': None,
+                'marks_percentage': None,
+                'mode_of_admission': 'I Sem',
+                'certificates_surrendered': {},
+                'recommendation_id': None,
+                'recommendation_name': '',
+            }
+
+        # ── Fees data (StudentFees) ───────────────────────────────────
+        fees_payment = getattr(student, 'fees_payment', None)
         if fees_payment:
             fees_data = {
                 'id': fees_payment.id,
@@ -409,21 +446,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                 'books_fees_paid': float(fees_payment.books_fees_paid),
                 'due_date': fees_payment.due_date.isoformat() if fees_payment.due_date else None,
                 'payment_mode': fees_payment.payment_mode,
-                'aadhaar_number': fees_payment.aadhaar_number or aadhaar_number,
-                'emis_number': fees_payment.emis_number or '',
-                'umis_number': fees_payment.umis_number or '',
                 'remarks': fees_payment.remarks or '',
-                'certificates_surrendered': fees_payment.certificates_surrendered or {},
-                'qualification': fees_payment.qualification or '',
-                'community': fees_payment.community or '',
-                'marks_maths': fees_payment.marks_maths,
-                'marks_physics': fees_payment.marks_physics,
-                'marks_chemistry': fees_payment.marks_chemistry,
-                'marks_total': fees_payment.marks_total,
-                'marks_percentage': float(fees_payment.marks_percentage) if fees_payment.marks_percentage else None,
-                'mode_of_admission': fees_payment.mode_of_admission,
-                'recommendation_id': fees_payment.recommendation_id,
-                'recommendation_name': fees_payment.recommendation.name if fees_payment.recommendation else '',
             }
         else:
             fees_data = {
@@ -435,21 +458,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                 'books_fees_paid': 0.0,
                 'due_date': None,
                 'payment_mode': 'Cash',
-                'aadhaar_number': aadhaar_number,
-                'emis_number': '',
-                'umis_number': '',
                 'remarks': '',
-                'certificates_surrendered': {},
-                'qualification': '',
-                'community': '',
-                'marks_maths': pcm.get('maths'),
-                'marks_physics': pcm.get('physics'),
-                'marks_chemistry': pcm.get('chemistry'),
-                'marks_total': None,
-                'marks_percentage': None,
-                'mode_of_admission': 'I Sem',
-                'recommendation_id': None,
-                'recommendation_name': '',
             }
 
         # ── Users list (for recommendation dropdown) ─────────────────
@@ -490,32 +499,63 @@ class StudentViewSet(viewsets.ModelViewSet):
                     'academic_performance': pcm,
                     'documents': documents,
                 },
+                'admission': admission_data,
                 'fees': fees_data,
                 'users_list': users_list,
             }
         }, status=200)
 
     def admission_slip_save(self, request, *args, **kwargs):
-
+        """Save admission-specific fields into StudentAdmissionSlip."""
         student_id = request.data.get('student_id')
         if not student_id:
             return Response({"code": 400, "message": "student_id is required"}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         try:
             student = Student.objects.get(pk=student_id)
         except Student.DoesNotExist:
             return Response({"code": 404, "message": "Student not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        from .models import StudentFees
-        from .serializers import StudentFeesSerializer
-
-        fees_payment, created = StudentFees.objects.get_or_create(student=student)
-        serializer = StudentFeesSerializer(fees_payment, data=request.data, partial=True)
+        admission_slip, _ = StudentAdmissionSlip.objects.get_or_create(student=student)
+        serializer = StudentAdmissionSlipSerializer(admission_slip, data=request.data, partial=True)
         if serializer.is_valid():
-            serializer.save()
+            user = self.request.user if self.request.user and self.request.user.is_authenticated else None
+            from users.models import User as StandardUser
+            tracking_user = user if isinstance(user, StandardUser) else None
+            serializer.save(updated_by=tracking_user)
             return Response({
                 "code": 200,
-                "message": "Admission slip fees and credentials saved successfully",
+                "message": "Admission slip saved successfully",
+                "data": serializer.data
+            }, status=status.HTTP_200_OK)
+        else:
+            return Response({
+                "code": 400,
+                "message": "Validation failed",
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    def fees_save(self, request, *args, **kwargs):
+        """Save fee payment fields into StudentFees."""
+        student_id = request.data.get('student_id')
+        if not student_id:
+            return Response({"code": 400, "message": "student_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            student = Student.objects.get(pk=student_id)
+        except Student.DoesNotExist:
+            return Response({"code": 404, "message": "Student not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        fees_payment, _ = StudentFees.objects.get_or_create(student=student)
+        serializer = StudentFeesSerializer(fees_payment, data=request.data, partial=True)
+        if serializer.is_valid():
+            user = self.request.user if self.request.user and self.request.user.is_authenticated else None
+            from users.models import User as StandardUser
+            tracking_user = user if isinstance(user, StandardUser) else None
+            serializer.save(updated_by=tracking_user)
+            return Response({
+                "code": 200,
+                "message": "Student fees saved successfully",
                 "data": serializer.data
             }, status=status.HTTP_200_OK)
         else:
@@ -538,12 +578,12 @@ class StudentViewSet(viewsets.ModelViewSet):
         import urllib.request
         import datetime
 
-        from .models import Student, StudentFees
         from institution.models import CollegeHeader
 
         student = get_object_or_404(Student, pk=pk)
 
-        # Retrieve StudentFees record if exists, otherwise fallback to empty object
+        # Retrieve StudentAdmissionSlip and StudentFees records if they exist
+        admission_slip = getattr(student, 'admission_slip', None)
         fees_payment = getattr(student, 'fees_payment', None)
 
         # Fallback fields to user application form_data
@@ -571,26 +611,26 @@ class StudentViewSet(viewsets.ModelViewSet):
         pincode = get_app_val('pincode') or ''
         phone_number = student.user.phone_number if student.user else ''
 
-        # Qualification checkboxes
-        qualification = (fees_payment.qualification if fees_payment else get_app_val('qualification') or '').upper()
+        # Qualification checkboxes — read from StudentAdmissionSlip
+        qualification = (admission_slip.qualification if admission_slip else get_app_val('qualification') or '').upper()
         hsc_chk = "[X]" if "HSC" in qualification else "[   ]"
         cbse_chk = "[X]" if "CBSE" in qualification else "[   ]"
         diploma_chk = "[X]" if "DIPLOMA" in qualification or "DIP" in qualification else "[   ]"
 
-        # Community Checkboxes
-        community = (fees_payment.community if fees_payment else get_app_val('community') or '').upper()
+        # Community Checkboxes — read from StudentAdmissionSlip
+        community = (admission_slip.community if admission_slip else get_app_val('community') or '').upper()
         oc_chk = "[X]" if "OC" in community else "[   ]"
         bc_chk = "[X]" if "BC" in community else "[   ]"
         mbc_chk = "[X]" if "MBC" in community else "[   ]"
         sc_chk = "[X]" if "SC" in community else "[   ]"
         st_chk = "[X]" if "ST" in community else "[   ]"
 
-        # Marks details
-        marks_maths = fees_payment.marks_maths if fees_payment else None
-        marks_physics = fees_payment.marks_physics if fees_payment else None
-        marks_chemistry = fees_payment.marks_chemistry if fees_payment else None
-        marks_total = fees_payment.marks_total if fees_payment else None
-        marks_percentage = fees_payment.marks_percentage if fees_payment else None
+        # Marks details — read from StudentAdmissionSlip
+        marks_maths = admission_slip.marks_maths if admission_slip else None
+        marks_physics = admission_slip.marks_physics if admission_slip else None
+        marks_chemistry = admission_slip.marks_chemistry if admission_slip else None
+        marks_total = admission_slip.marks_total if admission_slip else None
+        marks_percentage = admission_slip.marks_percentage if admission_slip else None
 
         if marks_maths is None:
             # Fallback to application form
@@ -603,12 +643,12 @@ class StudentViewSet(viewsets.ModelViewSet):
             except ValueError:
                 pass
 
-        # Mode of Admission
-        moa = fees_payment.mode_of_admission if fees_payment else 'I Sem'
+        # Mode of Admission — read from StudentAdmissionSlip
+        moa = admission_slip.mode_of_admission if admission_slip else 'I Sem'
         sem1_chk = "[X]" if "I Sem" in moa or "1" in moa else "[   ]"
         sem3_chk = "[X]" if "III Sem" in moa or "3" in moa or "Lateral" in moa else "[   ]"
 
-        # Fees Details
+        # Fees Details — read from StudentFees
         total_fees = float(fees_payment.total_fees) if fees_payment else 0.0
         if total_fees == 0.0:
             # Fallback from matched FeesStructure
@@ -633,24 +673,25 @@ class StudentViewSet(viewsets.ModelViewSet):
         due_date_str = ''
         if fees_payment and fees_payment.due_date:
             due_date_str = fees_payment.due_date.strftime('%d/%m/%Y')
-        recommendation_name = ''
-        if fees_payment and fees_payment.recommendation:
-            recommendation_name = fees_payment.recommendation.name
 
-        # Payment Mode Chk
+        # Recommendation — read from StudentAdmissionSlip
+        recommendation_name = ''
+        if admission_slip and admission_slip.recommendation:
+            recommendation_name = admission_slip.recommendation.name
+
+        # Payment Mode — read from StudentFees
         pay_mode = (fees_payment.payment_mode if fees_payment else 'Cash').upper()
         cash_chk = "[X]" if "CASH" in pay_mode else "[   ]"
         dd_chk = "[X]" if "DD" in pay_mode or "D.D" in pay_mode else "[   ]"
         upi_chk = "[X]" if "UPI" in pay_mode else "[   ]"
 
-        # Credentials
-        aadhaar = fees_payment.aadhaar_number if fees_payment else ''
-        emis = fees_payment.emis_number if fees_payment else ''
-        umis = fees_payment.umis_number if fees_payment else ''
+        # Credentials — read from StudentAdmissionSlip
+        aadhaar = admission_slip.aadhaar_number if admission_slip else ''
+        emis = admission_slip.emis_number if admission_slip else ''
+        umis = admission_slip.umis_number if admission_slip else ''
 
-
-        # Certificates Surrendered checklist
-        certs = fees_payment.certificates_surrendered if (fees_payment and fees_payment.certificates_surrendered) else {}
+        # Certificates Surrendered checklist — read from StudentAdmissionSlip
+        certs = admission_slip.certificates_surrendered if (admission_slip and admission_slip.certificates_surrendered) else {}
         def cert_chk(name):
             return "[X]" if certs.get(name) else "[   ]"
 
