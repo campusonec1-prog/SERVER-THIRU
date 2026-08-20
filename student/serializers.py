@@ -350,6 +350,31 @@ class StudentAdmissionSlipSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
 
+    def validate(self, attrs):
+        student = attrs.get('student')
+        if not student and self.instance:
+            student = self.instance.student
+
+        if student:
+            is_pg = (student.department.program.program_level == 'PG') if (student.department and student.department.program) else False
+            
+            emis = attrs.get('emis_number')
+            if emis is None and self.instance:
+                emis = self.instance.emis_number
+            
+            umis = attrs.get('umis_number')
+            if umis is None and self.instance:
+                umis = self.instance.umis_number
+
+            if not emis or str(emis).strip() == '':
+                raise serializers.ValidationError({"emis_number": "EMIS Number is required."})
+
+            if is_pg:
+                if not umis or str(umis).strip() == '':
+                    raise serializers.ValidationError({"umis_number": "UMIS Number is required."})
+
+        return attrs
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         apply_default_error_messages(self.fields)

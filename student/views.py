@@ -397,12 +397,89 @@ class StudentViewSet(viewsets.ModelViewSet):
 
         # ── Admission Slip data (StudentAdmissionSlip) ────────────────
         admission_slip = getattr(student, 'admission_slip', None)
+        
+        is_pg = (student.department.program.program_level == 'PG') if (student.department and student.department.program) else False
+        emis_val = ""
+        umis_val = ""
+        scan_failed = False
+
+        # Scan uploaded documents (TC, HSC, SSLC, Consolidated Marksheets)
+        scanned_urls = []
+        for doc in documents:
+            ctype = str(doc.get('certificate_type', '')).lower()
+            if any(keyword in ctype for keyword in ['transfer', 'tc', 'marksheet', 'hsc', 'sslc', 'consolidated', 'degree']):
+                url = doc.get('document', '')
+                if url:
+                    scanned_urls.append(url)
+
+        # If we have URLs, try to parse with pypdf
+        parsed_text = ""
+        if scanned_urls:
+            import urllib.request
+            import io
+            from pypdf import PdfReader
+            for url in scanned_urls:
+                try:
+                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req, timeout=8) as response:
+                        pdf_data = response.read()
+                    
+                    reader = PdfReader(io.BytesIO(pdf_data))
+                    for page in reader.pages:
+                        t = page.extract_text()
+                        if t:
+                            parsed_text += t + "\n"
+                except Exception:
+                    pass
+
+        # Search in extracted text
+        if parsed_text:
+            import re
+            # Search for 12-16 digit numbers starting with 33
+            emis_matches = re.findall(r'\b(33\d{10,14})\b', parsed_text)
+            if emis_matches:
+                for m in emis_matches:
+                    if m.startswith('330'):
+                        emis_val = m
+                        break
+                if not emis_val:
+                    emis_val = emis_matches[0]
+            
+            # Search for UMIS
+            umis_match = re.search(r'\b(UMIS\d+)\b', parsed_text, re.IGNORECASE)
+            if umis_match:
+                umis_val = umis_match.group(1)
+
+        # If no EMIS or UMIS was extracted, mark scan_failed as True
+        if not emis_val and not umis_val:
+            scan_failed = True
+
+        pg_semester_marks = []
+        if is_pg:
+            saved_sem_marks = (admission_slip.certificates_surrendered.get('pg_semester_marks', [])
+                               if (admission_slip and isinstance(admission_slip.certificates_surrendered, dict))
+                               else [])
+            if saved_sem_marks:
+                pg_semester_marks = saved_sem_marks
+            else:
+                perf_rows = get_fd('academic_performance', 'academic_performance') or []
+                if isinstance(perf_rows, list):
+                    pg_semester_marks = [
+                        {
+                            'semester': row.get('semester', ''),
+                            'obtained_marks': row.get('obtained_marks', ''),
+                            'grading_system': row.get('grading_system', 'grade'),
+                        }
+                        for row in perf_rows
+                        if row.get('semester')
+                    ]
+
         if admission_slip:
             admission_data = {
                 'id': admission_slip.id,
                 'aadhaar_number': admission_slip.aadhaar_number or aadhaar_number,
-                'emis_number': admission_slip.emis_number or '',
-                'umis_number': admission_slip.umis_number or '',
+                'emis_number': admission_slip.emis_number or emis_val,
+                'umis_number': admission_slip.umis_number or umis_val,
                 'qualification': admission_slip.qualification or '',
                 'community': admission_slip.community or '',
                 'marks_maths': admission_slip.marks_maths,
@@ -414,13 +491,14 @@ class StudentViewSet(viewsets.ModelViewSet):
                 'certificates_surrendered': admission_slip.certificates_surrendered or {},
                 'recommendation_id': admission_slip.recommendation_id,
                 'recommendation_name': admission_slip.recommendation.name if admission_slip.recommendation else '',
+                'pg_semester_marks': pg_semester_marks,
             }
         else:
             admission_data = {
                 'id': None,
                 'aadhaar_number': aadhaar_number,
-                'emis_number': '',
-                'umis_number': '',
+                'emis_number': emis_val,
+                'umis_number': umis_val,
                 'qualification': '',
                 'community': '',
                 'marks_maths': pcm.get('maths'),
@@ -432,6 +510,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                 'certificates_surrendered': {},
                 'recommendation_id': None,
                 'recommendation_name': '',
+                'pg_semester_marks': pg_semester_marks,
             }
 
         # ── Fees data (StudentFees) ───────────────────────────────────
@@ -502,6 +581,8 @@ class StudentViewSet(viewsets.ModelViewSet):
                 'admission': admission_data,
                 'fees': fees_data,
                 'users_list': users_list,
+                'scan_failed': scan_failed,
+                'is_pg': is_pg,
             }
         }, status=200)
 
@@ -616,6 +697,7 @@ class StudentViewSet(viewsets.ModelViewSet):
         hsc_chk = "[X]" if "HSC" in qualification else "[   ]"
         cbse_chk = "[X]" if "CBSE" in qualification else "[   ]"
         diploma_chk = "[X]" if "DIPLOMA" in qualification or "DIP" in qualification else "[   ]"
+        ug_chk = "[X]" if "UG" in qualification or "UNDER" in qualification else "[   ]"
 
         # Community Checkboxes — read from StudentAdmissionSlip
         community = (admission_slip.community if admission_slip else get_app_val('community') or '').upper()
@@ -625,6 +707,34 @@ class StudentViewSet(viewsets.ModelViewSet):
         sc_chk = "[X]" if "SC" in community else "[   ]"
         st_chk = "[X]" if "ST" in community else "[   ]"
 
+        # Mode of Admission — read from StudentAdmissionSlip
+        is_pg = (student.department.program.program_level == 'PG') if (student.department and student.department.program) else False
+        
+        # Prepare Semester Marks if PG
+        sem_marks_str = ""
+        avg_val_str = "—"
+        if is_pg and app_fd:
+            perf_rows = app_fd.get('academic_performance', {}).get('academic_performance', [])
+            if isinstance(perf_rows, list):
+                sem_list = []
+                valid_marks = []
+                for r in perf_rows:
+                    sem = r.get('semester')
+                    obt = r.get('obtained_marks')
+                    if sem and obt:
+                        sem_short = sem.replace('Semester ', 'Sem ')
+                        sem_list.append(f"{sem_short}: {obt}")
+                        try:
+                            valid_marks.append(float(obt))
+                        except ValueError:
+                            pass
+                sem_marks_str = ", ".join(sem_list)
+                if valid_marks:
+                    avg_val = sum(valid_marks) / len(valid_marks)
+                    grading_system = perf_rows[0].get('grading_system', 'grade') if perf_rows else 'grade'
+                    unit = "" if grading_system == 'grade' else "%"
+                    avg_val_str = f"{avg_val:.2f}{unit} ({grading_system.capitalize()})"
+
         # Marks details — read from StudentAdmissionSlip
         marks_maths = admission_slip.marks_maths if admission_slip else None
         marks_physics = admission_slip.marks_physics if admission_slip else None
@@ -632,7 +742,7 @@ class StudentViewSet(viewsets.ModelViewSet):
         marks_total = admission_slip.marks_total if admission_slip else None
         marks_percentage = admission_slip.marks_percentage if admission_slip else None
 
-        if marks_maths is None:
+        if not is_pg and marks_maths is None:
             # Fallback to application form
             try:
                 marks_maths = int(get_app_val('marks_maths') or get_app_val('maths') or 0)
@@ -754,6 +864,31 @@ class StudentViewSet(viewsets.ModelViewSet):
             leading=10
         )
 
+        # Define Paragraph variables using styles
+        if is_pg:
+            qualifying_exam_label = Paragraph("<b>6. Semester Marks (UG):</b>", body_style)
+            qualifying_exam_val = Paragraph(sem_marks_str or '—', body_style)
+            total_pct_label = Paragraph("<b>Average / System:</b>", body_style)
+            total_pct_val = Paragraph(avg_val_str, body_bold)
+        else:
+            qualifying_exam_label = Paragraph("<b>6. Qualifying Examination Marks:</b>", body_style)
+            qualifying_exam_val = Paragraph(f"Maths: {marks_maths or '—'}/200 &nbsp;&nbsp; Physics: {marks_physics or '—'}/200 &nbsp;&nbsp; Chemistry: {marks_chemistry or '—'}/200", body_style)
+            total_pct_label = Paragraph("<b>Cutoff / 200:</b>", body_style)
+            
+            try:
+                m = float(marks_maths or 0)
+                p = float(marks_physics or 0)
+                c = float(marks_chemistry or 0)
+                # Cutoff calculation (out of 200)
+                cutoff_val = m + ((p + c) / 2)
+                cutoff_str = f"{cutoff_val:.1f}" if cutoff_val > 0 else '—'
+                if cutoff_str.endswith('.0'):
+                    cutoff_str = cutoff_str[:-2]
+            except (ValueError, TypeError):
+                cutoff_str = '—'
+                
+            total_pct_val = Paragraph(cutoff_str, body_bold)
+
         # Helper to load image
         def load_image(url_or_path, width, height):
             if not url_or_path:
@@ -851,7 +986,7 @@ class StudentViewSet(viewsets.ModelViewSet):
             ],
             [
                 Paragraph("<b>3. Qualification (Tick):</b>", body_style),
-                Paragraph(f"{hsc_chk} HSC &nbsp;&nbsp;&nbsp;&nbsp; {cbse_chk} CBSE &nbsp;&nbsp;&nbsp;&nbsp; {diploma_chk} DIPLOMA", body_style),
+                Paragraph(f"{hsc_chk} HSC &nbsp;&nbsp;&nbsp;&nbsp; {cbse_chk} CBSE &nbsp;&nbsp;&nbsp;&nbsp; {diploma_chk} DIPLOMA &nbsp;&nbsp;&nbsp;&nbsp; {ug_chk} UG", body_style),
                 Paragraph("", body_style),
                 Paragraph("", body_bold)
             ],
@@ -874,10 +1009,10 @@ class StudentViewSet(viewsets.ModelViewSet):
                 Paragraph("", body_bold)
             ],
             [
-                Paragraph("<b>6. Qualifying Examination Marks:</b>", body_style),
-                Paragraph(f"Maths: {marks_maths or '—'}/200 &nbsp;&nbsp; Physics: {marks_physics or '—'}/200 &nbsp;&nbsp; Chemistry: {marks_chemistry or '—'}/200", body_style),
-                Paragraph("<b>Total / %:</b>", body_style),
-                Paragraph(f"{marks_total or '—'}/600 &nbsp;&nbsp; ({marks_percentage or '—'}%)", body_bold)
+                qualifying_exam_label,
+                qualifying_exam_val,
+                total_pct_label,
+                total_pct_val
             ],
             [
                 Paragraph("<b>7. Mode of Admission:</b>", body_style),
