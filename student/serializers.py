@@ -166,6 +166,20 @@ class StudentSerializer(serializers.ModelSerializer):
                     fd = app.form_data
                     photo_url = fd.get('photo', '')
                     if not photo_url:
+                        # Check inside certificates list
+                        certs = fd.get('certificates') or []
+                        if isinstance(certs, dict) and 'certificates' in certs:
+                            certs = certs['certificates']
+                        if isinstance(certs, list):
+                            for c in certs:
+                                if c and isinstance(c, dict) and c.get('certificate_type') == 'Passport Size Photo':
+                                    doc_val = c.get('document')
+                                    if isinstance(doc_val, str) and doc_val.startswith('http'):
+                                        photo_url = doc_val
+                                    elif isinstance(doc_val, dict) and isinstance(doc_val.get('url'), str):
+                                        photo_url = doc_val.get('url')
+                                    break
+                    if not photo_url:
                         for key, val in fd.items():
                             if isinstance(val, dict) and val.get('photo'):
                                 photo_url = val.get('photo')

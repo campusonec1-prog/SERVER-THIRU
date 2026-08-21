@@ -190,7 +190,8 @@ class StudentViewSet(viewsets.ModelViewSet):
                 Q(user__name__icontains=search) |
                 Q(roll_number__icontains=search) |
                 Q(register_number__icontains=search) |
-                Q(user__email__icontains=search)
+                Q(user__email__icontains=search) |
+                Q(user__phone_number__icontains=search)
             )
 
         page = self.paginate_queryset(queryset)
@@ -540,6 +541,28 @@ class StudentViewSet(viewsets.ModelViewSet):
                 'remarks': '',
             }
 
+        # Resolve photo_url from application form_data
+        photo_url = fd.get('photo', '')
+        if not photo_url:
+            # Check inside certificates list
+            certs = fd.get('certificates') or []
+            if isinstance(certs, dict) and 'certificates' in certs:
+                certs = certs['certificates']
+            if isinstance(certs, list):
+                for c in certs:
+                    if c and isinstance(c, dict) and c.get('certificate_type') == 'Passport Size Photo':
+                        doc_val = c.get('document')
+                        if isinstance(doc_val, str) and doc_val.startswith('http'):
+                            photo_url = doc_val
+                        elif isinstance(doc_val, dict) and isinstance(doc_val.get('url'), str):
+                            photo_url = doc_val.get('url')
+                        break
+        if not photo_url:
+            for key, val in fd.items():
+                if isinstance(val, dict) and val.get('photo'):
+                    photo_url = val.get('photo')
+                    break
+
         # ── Users list (for recommendation dropdown) ─────────────────
         users_list = list(
             User.objects.select_related('role').values('id', 'name', 'role__role_name')
@@ -564,6 +587,8 @@ class StudentViewSet(viewsets.ModelViewSet):
                     'batch': student.batch.batch if student.batch else '',
                     'quota': student.quota.quota_name if student.quota else '',
                     'application_no': app.application_no if app else '',
+                    'user_id': student.user.id if student.user else None,
+                    'student_photo': photo_url,
                 },
                 'application': {
                     'candidate_name': candidate_name,
