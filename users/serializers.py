@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import User, UserDetails
 from role.models import Role
+from institution.models import Department
 from common.r2 import upload_file_to_r2
 import bcrypt
 
@@ -80,6 +81,13 @@ class UserDetailsSerializer(serializers.ModelSerializer):
         required=False,
         error_messages={'does_not_exist': 'User does not exist.'}
     )
+    department_id = serializers.PrimaryKeyRelatedField(
+        source='department',
+        queryset=Department.objects.all(),
+        required=False,
+        allow_null=True,
+        error_messages={'does_not_exist': 'Department does not exist.'}
+    )
     user_image_file = serializers.ImageField(
         write_only=True,
         required=False,
@@ -94,7 +102,7 @@ class UserDetailsSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user_id', 'faculty_code', 'qualification',
             'designation', 'date_of_joining', 'gender',
-            'user_image', 'user_image_file',
+            'dob', 'department_id', 'user_image', 'user_image_file',
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by', 'user_image']

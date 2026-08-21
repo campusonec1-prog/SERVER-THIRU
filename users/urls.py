@@ -8,6 +8,7 @@ urlpatterns = [
     path('edit/<int:pk>', UserViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='user-edit'),
     path('remove/<int:pk>', UserViewSet.as_view({'delete': 'destroy'}), name='user-remove'),
     path('login', UserViewSet.as_view({'post': 'login'}), name='user-login'),
+    path('bulk-import', UserViewSet.as_view({'post': 'bulk_import'}), name='user-bulk-import'),
 
     # User Details endpoints
     path('details/create', UserDetailsViewSet.as_view({'post': 'create'}), name='user-details-create'),

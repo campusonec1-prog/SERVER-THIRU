@@ -1,4 +1,5 @@
 from rest_framework import viewsets, status, permissions
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied, ValidationError
@@ -131,6 +132,243 @@ class UserViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_403_FORBIDDEN)
 
         return super().handle_exception(exc)
+
+    @action(detail=False, methods=['post'], url_path='bulk-import')
+    def bulk_import(self, request):
+        import bcrypt
+        from django.db import transaction
+        from role.models import Role
+        from institution.models import Department
+        from django.core.validators import validate_email
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from datetime import datetime
+        import datetime as dt
+
+        def parse_date(date_str):
+            if not date_str:
+                return None
+            if isinstance(date_str, datetime):
+                return date_str.date()
+            if isinstance(date_str, dt.date):
+                return date_str
+            date_str = str(date_str).strip()
+            if not date_str:
+                return None
+            # Strip time portion if present (e.g. "2024-05-12T00:00:00.000Z" -> "2024-05-12")
+            if 'T' in date_str:
+                date_str = date_str.split('T')[0]
+            elif ' ' in date_str:
+                date_str = date_str.split(' ')[0]
+            for fmt in ('%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%Y/%m/%d', '%m/%d/%Y'):
+                try:
+                    return datetime.strptime(date_str, fmt).date()
+                except ValueError:
+                    pass
+            return None
+
+        users_data = request.data.get('users', [])
+        if not users_data:
+            return Response({
+                "code": 400,
+                "message": "No user data provided."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Cache roles and departments for fast lookup
+        roles_map = {r.role_name.upper(): r.role_id for r in Role.objects.all()}
+        depts_map = {d.department_code.upper(): d for d in Department.objects.all()}
+        depts_name_map = {d.department_name.upper(): d for d in Department.objects.all()}
+
+        # Track uniqueness of values within the upload sheet
+        seen_usernames = set()
+        seen_emails = set()
+        seen_faculty_codes = set()
+
+        errors = []
+        validated_users = []
+
+        # 1. Validation Phase (No DB writes)
+        for idx, u in enumerate(users_data):
+            row_num = u.get('s_no', idx + 1)
+            name = str(u.get('name', '')).strip()
+            faculty_code = str(u.get('faculty_code', '')).strip()
+            mail = str(u.get('mail', '')).strip()
+            mobile_number = str(u.get('mobile_number', '')).strip()
+            role_name = str(u.get('role', '')).strip().upper()
+            qualification = str(u.get('qualification', '')).strip()
+            designation = str(u.get('designation', '')).strip()
+            gender = str(u.get('gender', '')).strip()
+
+            raw_doj = u.get('date_of_joining') or u.get('doj')
+            raw_dob = u.get('dob')
+
+            department_name = str(u.get('department', '')).strip()
+            password = str(u.get('password', '')).strip()
+            if not password:
+                password = mobile_number
+
+            row_errors = []
+
+            # Check required fields
+            if not name:
+                row_errors.append("Name is required.")
+            if not faculty_code:
+                row_errors.append("Faculty code is required.")
+            if not mail:
+                row_errors.append("Email is required.")
+            else:
+                try:
+                    validate_email(mail)
+                except DjangoValidationError:
+                    row_errors.append("Invalid email address format.")
+
+            if not mobile_number:
+                row_errors.append("Mobile number is required.")
+            elif not (mobile_number.isdigit() and len(mobile_number) == 10):
+                row_errors.append("Mobile number must be exactly 10 digits.")
+
+            if not role_name:
+                row_errors.append("Role is required.")
+            elif role_name not in roles_map:
+                row_errors.append(f"Role '{role_name}' does not exist in the system.")
+
+            if not qualification:
+                row_errors.append("Qualification is required.")
+            if not designation:
+                row_errors.append("Designation is required.")
+            if not gender:
+                row_errors.append("Gender is required.")
+            elif gender.capitalize() not in ['Male', 'Female', 'Other']:
+                row_errors.append("Gender must be 'Male', 'Female', or 'Other'.")
+
+            # Parse and validate dates
+            parsed_doj = parse_date(raw_doj)
+            if not raw_doj:
+                row_errors.append("Date of joining (DOJ) is required.")
+            elif not parsed_doj:
+                row_errors.append(f"Invalid date format for DOJ: '{raw_doj}'. Expected YYYY-MM-DD.")
+
+            parsed_dob = parse_date(raw_dob) if raw_dob else None
+            if raw_dob and not parsed_dob:
+                row_errors.append(f"Invalid date format for DOB: '{raw_dob}'. Expected YYYY-MM-DD.")
+
+            # Resolve Department
+            dept_instance = None
+            if department_name:
+                dept_key = department_name.upper()
+                if dept_key in depts_map:
+                    dept_instance = depts_map[dept_key]
+                elif dept_key in depts_name_map:
+                    dept_instance = depts_name_map[dept_key]
+                else:
+                    matched_dept = Department.objects.filter(short_name__iexact=department_name).first()
+                    if matched_dept:
+                        dept_instance = matched_dept
+                    else:
+                        row_errors.append(f"Department '{department_name}' does not exist in the system.")
+
+            # Check database-level uniqueness if no errors so far
+            if not row_errors:
+                username = faculty_code
+
+                # Check for duplicates in the current uploaded batch
+                if username in seen_usernames:
+                    row_errors.append(f"Duplicate Faculty Code '{username}' inside this sheet.")
+                if mail in seen_emails:
+                    row_errors.append(f"Duplicate Email '{mail}' inside this sheet.")
+                if faculty_code in seen_faculty_codes:
+                    row_errors.append(f"Duplicate Faculty Code '{faculty_code}' inside this sheet.")
+
+                # Check database records
+                if User.objects.filter(username=username).exists():
+                    row_errors.append(f"Username/Faculty Code '{username}' is already in use.")
+                if User.objects.filter(mail=mail).exists():
+                    row_errors.append(f"Email '{mail}' is already registered.")
+                if UserDetails.objects.filter(faculty_code=faculty_code).exists():
+                    row_errors.append(f"Faculty Code '{faculty_code}' is already registered.")
+
+                if not row_errors:
+                    seen_usernames.add(username)
+                    seen_emails.add(mail)
+                    seen_faculty_codes.add(faculty_code)
+
+                    validated_users.append({
+                        "name": name,
+                        "username": username,
+                        "mail": mail,
+                        "mobile_number": mobile_number,
+                        "password": password,
+                        "role_id": roles_map[role_name],
+                        "faculty_code": faculty_code,
+                        "qualification": qualification,
+                        "designation": designation,
+                        "gender": gender.capitalize(),
+                        "date_of_joining": parsed_doj,
+                        "dob": parsed_dob,
+                        "department": dept_instance
+                    })
+
+            if row_errors:
+                errors.append({
+                    "row": row_num,
+                    "faculty_code": faculty_code,
+                    "name": name,
+                    "errors": row_errors
+                })
+
+        # If any validation errors exist, fail and do not write to the DB
+        if errors:
+            return Response({
+                "code": 400,
+                "message": "Validation errors found in the import data.",
+                "errors": errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2. Writing Phase (Inside transaction for atomicity)
+        tracking_user = request.user if request.user and request.user.is_authenticated else None
+
+        try:
+            with transaction.atomic():
+                for item in validated_users:
+                    # Set password defaults to mobile_number if not provided
+                    default_pass = item.get("password") or item["mobile_number"]
+                    hashed_pass = bcrypt.hashpw(default_pass.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+                    user = User.objects.create(
+                        name=item["name"],
+                        username=item["username"],
+                        password=hashed_pass,
+                        mobile_number=item["mobile_number"],
+                        mail=item["mail"],
+                        role_id=item["role_id"],
+                        created_by=tracking_user,
+                        updated_by=tracking_user
+                    )
+
+                    UserDetails.objects.create(
+                        user=user,
+                        faculty_code=item["faculty_code"],
+                        qualification=item["qualification"],
+                        designation=item["designation"],
+                        date_of_joining=item["date_of_joining"],
+                        gender=item["gender"],
+                        dob=item["dob"],
+                        department=item["department"],
+                        created_by=tracking_user,
+                        updated_by=tracking_user
+                    )
+        except Exception as e:
+            return Response({
+                "code": 500,
+                "message": f"Database error during import: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({
+            "code": 201,
+            "message": f"Successfully imported {len(validated_users)} faculty members.",
+            "data": {
+                "count": len(validated_users)
+            }
+        }, status=status.HTTP_201_CREATED)
 
 
 class UserDetailsViewSet(viewsets.ModelViewSet):

@@ -37,6 +37,15 @@ class UserDetails(TrackingModel):
     date_of_joining = models.DateField()
     gender = models.CharField(max_length=20)
     user_image = models.CharField(max_length=500, blank=True, null=True)
+    dob = models.DateField(null=True, blank=True)
+    department = models.ForeignKey(
+        'institution.Department',
+        on_delete=models.SET_NULL,
+        db_column='department_id',
+        related_name='user_details',
+        null=True,
+        blank=True
+    )
 
     class Meta:
         db_table = 'user_details'
