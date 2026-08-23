@@ -15,6 +15,7 @@ urlpatterns = [
     path('get/<int:pk>', StudentViewSet.as_view({'get': 'retrieve'}), name='student-detail'),
     path('edit/<int:pk>', StudentViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='student-edit'),
     path('remove/<int:pk>', StudentViewSet.as_view({'delete': 'destroy'}), name='student-remove'),
+    path('bulk-import', StudentViewSet.as_view({'post': 'bulk_import'}), name='student-bulk-import'),
     path('admission-slip/save', StudentViewSet.as_view({'post': 'admission_slip_save'}), name='admission-slip-save'),
     path('admission-slip/data/<int:pk>', StudentViewSet.as_view({'get': 'admission_slip_data'}), name='admission-slip-data'),
     path('admission-slip/pdf/<int:pk>', StudentViewSet.as_view({'get': 'admission_slip_pdf'}), name='admission-slip-pdf'),

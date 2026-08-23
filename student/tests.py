@@ -365,5 +365,125 @@ class CounsellingReportViewSetTest(APITestCase):
         self.assertEqual(len(response.data['data']), 1)
 
 
+class StudentBulkImportTest(APITestCase):
+    def setUp(self):
+        from role.models import Role
+        from users.models import User as StandardUser
+        from institution.models import Quota
+
+        # Create roles and admin user
+        self.admin_role, _ = Role.objects.get_or_create(role_name="ADMIN")
+        self.admin_user = StandardUser.objects.create(
+            name="Admin User",
+            username="admin_import_test",
+            password="password123",
+            mobile_number="9998887770",
+            mail="admin_import@example.com",
+            role=self.admin_role
+        )
+        
+        # Create setup structure
+        self.status, _ = StudentStatus.objects.get_or_create(status_name="Active")
+        self.program = Program.objects.create(
+            program_name="Computer Science Engineering",
+            program_level="UG",
+            duration=4
+        )
+        self.department = Department.objects.create(
+            program=self.program,
+            department_name="Computer Science",
+            department_code="CSE",
+            short_name="CS"
+        )
+        self.batch = Batch.objects.create(
+            department=self.department,
+            batch="2022-2026"
+        )
+        self.quota = Quota.objects.create(quota_name="Government")
+
+    def test_bulk_import_unauthenticated_fails(self):
+        url = reverse('student-bulk-import')
+        response = self.client.post(url, {"students": []}, format='json')
+        self.assertEqual(response.status_code, 401)
+
+    @patch('channels.layers.get_channel_layer')
+    def test_bulk_import_success(self, mock_channel_layer):
+        self.client.force_authenticate(user=self.admin_user)
+        payload = {
+            "students": [
+                {
+                    "s_no": 1,
+                    "name": "Jane Doe",
+                    "email": "janedoe@example.com",
+                    "phone_number": "9876543211",
+                    "roll_number": "1002",
+                    "register_number": "REG1002",
+                    "department": "CSE",
+                    "batch": "2022-2026",
+                    "section": "",
+                    "quota": "Government",
+                    "lab_batch": "3",
+                    "is_hostler": "No",
+                    "is_day_scholar": "Yes",
+                    "is_bus": "No",
+                    "bus_from": "",
+                    "bus_to": ""
+                }
+            ]
+        }
+        
+        url = reverse('student-bulk-import')
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['code'], 201)
+        self.assertEqual(response.data['data']['count'], 1)
+
+        # Verify database entities created
+        from dynamic_forms.models import Application, ApplicationUser
+        self.assertTrue(ApplicationUser.objects.filter(email="janedoe@example.com").exists())
+        app_user = ApplicationUser.objects.get(email="janedoe@example.com")
+        self.assertEqual(app_user.name, "Jane Doe")
+        
+        self.assertTrue(Application.objects.filter(candidate=app_user).exists())
+        app = Application.objects.get(candidate=app_user)
+        self.assertEqual(app.status.status_name, "Approved")
+        
+        self.assertTrue(Student.objects.filter(user=app_user).exists())
+        student = Student.objects.get(user=app_user)
+        self.assertEqual(student.roll_number, "1002")
+        self.assertEqual(student.register_number, "REG1002")
+        self.assertEqual(student.quota, self.quota)
+        self.assertEqual(student.is_day_scholar, True)
+        self.assertEqual(student.is_hostler, False)
+
+    def test_bulk_import_validation_errors(self):
+        self.client.force_authenticate(user=self.admin_user)
+        # Test missing email/phone and invalid format
+        payload = {
+            "students": [
+                {
+                    "s_no": 1,
+                    "name": "Jane Doe",
+                    "email": "invalid_email",
+                    "phone_number": "123",
+                    "roll_number": "1002",
+                    "register_number": "REG1002",
+                    "department": "CSE",
+                    "batch": "2022-2026",
+                }
+            ]
+        }
+        url = reverse('student-bulk-import')
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("errors", response.data)
+        self.assertTrue(len(response.data['errors']) > 0)
+        
+        # Verify no database entities were created
+        from dynamic_forms.models import ApplicationUser
+        self.assertFalse(ApplicationUser.objects.filter(name="Jane Doe").exists())
+
+
+
 
 

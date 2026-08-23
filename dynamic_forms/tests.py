@@ -21,7 +21,7 @@ class DynamicFormArrayFieldTest(TestCase):
             phone_number="9876543210",
             password="password123"
         )
-        self.submitted_status = ApplicationStatus.objects.create(status_name="Submitted")
+        self.submitted_status, _ = ApplicationStatus.objects.get_or_create(status_name="Submitted")
 
     def test_create_array_form_field_serializer(self):
         data = {

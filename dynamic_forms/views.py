@@ -219,8 +219,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 raise PermissionDenied("You cannot modify a submitted or completed application.")
             
             new_status = serializer.validated_data.get('status')
-            if new_status and new_status.status_name.lower() in ['approved', 'rejected']:
-                raise PermissionDenied("You do not have permission to approve or reject applications.")
+            if new_status and new_status.status_name.lower() in ['approved', 'rejected', 'waiting list']:
+                raise PermissionDenied("You do not have permission to approve, reject, or waitlist applications.")
 
         from users.models import User as StandardUser
         tracking_user = user if isinstance(user, StandardUser) else None

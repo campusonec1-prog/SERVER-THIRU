@@ -1,4 +1,5 @@
 from rest_framework import viewsets, status, permissions
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied, ValidationError
@@ -1259,6 +1260,460 @@ class StudentViewSet(viewsets.ModelViewSet):
         response['Content-Disposition'] = f'attachment; filename="Admission_Slip_{student.id}.pdf"'
         response.write(pdf)
         return response
+
+    @action(detail=False, methods=['post'], url_path='bulk-import')
+    def bulk_import(self, request):
+        import bcrypt
+        from django.db import transaction
+        from django.core.validators import validate_email
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from datetime import datetime
+        import datetime as dt
+        from dynamic_forms.models import ApplicationUser, Application, ApplicationStatus
+        from institution.models import Department, Batch, Section, Quota
+        from student.models import Student, StudentStatus, StudentAdmissionSlip, StudentFees
+        from users.models import User as StandardUser
+
+        def parse_date(date_str):
+            if not date_str:
+                return None
+            if isinstance(date_str, datetime):
+                return date_str.date()
+            if isinstance(date_str, dt.date):
+                return date_str
+            date_str = str(date_str).strip()
+            if not date_str:
+                return None
+            if 'T' in date_str:
+                date_str = date_str.split('T')[0]
+            elif ' ' in date_str:
+                date_str = date_str.split(' ')[0]
+            for fmt in ('%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%Y/%m/%d', '%m/%d/%Y'):
+                try:
+                    return datetime.strptime(date_str, fmt).date()
+                except ValueError:
+                    pass
+            return None
+
+        students_data = request.data.get('students', [])
+        if not students_data:
+            return Response({
+                "code": 400,
+                "message": "No student data provided."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Cache lookups
+        depts_map = {d.department_code.upper(): d for d in Department.objects.all()}
+        depts_name_map = {d.department_name.upper(): d for d in Department.objects.all()}
+        depts_short_map = {d.short_name.upper(): d for d in Department.objects.all()}
+
+        batches_map = {b.batch.upper(): b for b in Batch.objects.all() if b.batch}
+        
+        sections_map = {}
+        for s in Section.objects.all():
+            if isinstance(s.sections, list):
+                for sec in s.sections:
+                    sections_map[(s.department_id, str(sec).upper())] = s
+            else:
+                sections_map[(s.department_id, str(s.sections).upper())] = s
+
+        quotas_map = {q.quota_name.upper(): q for q in Quota.objects.all()}
+        
+        # Staff maps for recommendation
+        staff_map_by_name = {u.name.upper(): u for u in StandardUser.objects.all()}
+        staff_map_by_username = {u.username.upper(): u for u in StandardUser.objects.all()}
+
+        # Student status
+        active_status, _ = StudentStatus.objects.get_or_create(status_name='Active')
+
+        seen_emails = set()
+        seen_rolls = set()
+        seen_registers = set()
+
+        errors = []
+        validated_students = []
+
+        # Helper parsers
+        def parse_int_or_none(val):
+            if val is None:
+                return None
+            val_str = str(val).strip()
+            if not val_str:
+                return None
+            try:
+                return int(float(val_str))
+            except (ValueError, TypeError):
+                return None
+
+        def parse_decimal_or_none(val):
+            if val is None:
+                return None
+            val_str = str(val).strip()
+            if not val_str:
+                return None
+            try:
+                return float(val_str)
+            except (ValueError, TypeError):
+                return None
+
+        # 1. Validation Phase (No DB writes)
+        for idx, s in enumerate(students_data):
+            row_num = s.get('s_no', idx + 1)
+            name = str(s.get('name', '')).strip()
+            email = str(s.get('email', '')).strip()
+            phone_number = str(s.get('phone_number', '')).strip()
+            roll_number = str(s.get('roll_number', '')).strip()
+            register_number = str(s.get('register_number', '')).strip()
+            
+            department_name = str(s.get('department', '')).strip()
+            batch_name = str(s.get('batch', '')).strip()
+            section_name = str(s.get('section', '')).strip().upper()
+            quota_name = str(s.get('quota', '')).strip()
+            lab_batch = str(s.get('lab_batch', '')).strip()
+
+            is_hostler_raw = str(s.get('is_hostler', '')).strip().lower()
+            is_day_scholar_raw = str(s.get('is_day_scholar', '')).strip().lower()
+            is_bus_raw = str(s.get('is_bus', '')).strip().lower()
+            bus_from = str(s.get('bus_from', '')).strip()
+            bus_to = str(s.get('bus_to', '')).strip()
+
+            # Additional Application Slip Details
+            parent_name = str(s.get('parent_name', '')).strip()
+            address = str(s.get('address', '')).strip()
+            pincode = str(s.get('pincode', '')).strip()
+            aadhaar_number = str(s.get('aadhaar_number', '')).strip()
+            emis_number = str(s.get('emis_number', '')).strip()
+            umis_number = str(s.get('umis_number', '')).strip()
+            community = str(s.get('community', '')).strip()
+            qualification = str(s.get('qualification', '')).strip()
+
+            marks_maths = parse_int_or_none(s.get('marks_maths'))
+            marks_physics = parse_int_or_none(s.get('marks_physics'))
+            marks_chemistry = parse_int_or_none(s.get('marks_chemistry'))
+            marks_total = parse_int_or_none(s.get('marks_total'))
+            marks_percentage = parse_decimal_or_none(s.get('marks_percentage'))
+            
+            mode_of_admission = str(s.get('mode_of_admission', '')).strip() or 'I Sem'
+            recommendation_name = str(s.get('recommendation', '')).strip()
+
+            row_errors = []
+
+            # Check required fields
+            if not name:
+                row_errors.append("Name is required.")
+            if not email:
+                row_errors.append("Email is required.")
+            else:
+                try:
+                    validate_email(email)
+                except DjangoValidationError:
+                    row_errors.append("Invalid email address format.")
+
+            if not phone_number:
+                row_errors.append("Phone number is required.")
+            elif not (phone_number.isdigit() and len(phone_number) == 10):
+                row_errors.append("Phone number must be exactly 10 digits.")
+
+            # Resolve Department
+            dept_instance = None
+            if not department_name:
+                row_errors.append("Department is required.")
+            else:
+                dept_key = department_name.upper()
+                if dept_key in depts_map:
+                    dept_instance = depts_map[dept_key]
+                elif dept_key in depts_name_map:
+                    dept_instance = depts_name_map[dept_key]
+                elif dept_key in depts_short_map:
+                    dept_instance = depts_short_map[dept_key]
+                else:
+                    row_errors.append(f"Department '{department_name}' does not exist.")
+
+            # Resolve Batch
+            batch_instance = None
+            if not batch_name:
+                row_errors.append("Batch is required.")
+            else:
+                batch_key = batch_name.upper()
+                if batch_key in batches_map:
+                    batch_instance = batches_map[batch_key]
+                else:
+                    row_errors.append(f"Batch '{batch_name}' does not exist.")
+
+            # Resolve Section (optional)
+            section_instance = None
+            if section_name and dept_instance:
+                sec_key = (dept_instance.id, section_name)
+                if sec_key in sections_map:
+                    section_instance = sections_map[sec_key]
+                else:
+                    matched_sec = Section.objects.filter(department=dept_instance, sections__contains=[section_name]).first()
+                    if matched_sec:
+                        section_instance = matched_sec
+                    else:
+                        row_errors.append(f"Section '{section_name}' does not exist for the resolved department.")
+
+            # Resolve Quota (optional)
+            quota_instance = None
+            if quota_name:
+                quota_key = quota_name.upper()
+                if quota_key in quotas_map:
+                    quota_instance = quotas_map[quota_key]
+                else:
+                    row_errors.append(f"Quota/Category '{quota_name}' does not exist.")
+
+            # Resolve recommendation staff (optional)
+            recommendation_user = None
+            if recommendation_name:
+                rec_key = recommendation_name.upper()
+                if rec_key in staff_map_by_name:
+                    recommendation_user = staff_map_by_name[rec_key]
+                elif rec_key in staff_map_by_username:
+                    recommendation_user = staff_map_by_username[rec_key]
+                else:
+                    # Let it slide as None, but print a warning/message if needed
+                    pass
+
+            # Resolve facilities flags
+            is_hostler = is_hostler_raw in ['yes', 'true', '1']
+            is_day_scholar = is_day_scholar_raw in ['yes', 'true', '1']
+            is_bus = is_bus_raw in ['yes', 'true', '1']
+
+            # Check database-level uniqueness if no errors so far
+            if not row_errors:
+                # Check for duplicates in current sheet
+                if email in seen_emails:
+                    row_errors.append(f"Duplicate email '{email}' inside this sheet.")
+                if roll_number and roll_number in seen_rolls:
+                    row_errors.append(f"Duplicate roll number '{roll_number}' inside this sheet.")
+                if register_number and register_number in seen_registers:
+                    row_errors.append(f"Duplicate register number '{register_number}' inside this sheet.")
+
+                # Check database records
+                if ApplicationUser.objects.filter(email=email).exists():
+                    row_errors.append(f"Email '{email}' is already registered as an application user.")
+                if roll_number and Student.objects.filter(roll_number=roll_number).exists():
+                    row_errors.append(f"Roll number '{roll_number}' is already assigned.")
+                if register_number and Student.objects.filter(register_number=register_number).exists():
+                    row_errors.append(f"Register number '{register_number}' is already assigned.")
+
+                if not row_errors:
+                    seen_emails.add(email)
+                    if roll_number:
+                        seen_rolls.add(roll_number)
+                    if register_number:
+                        seen_registers.add(register_number)
+
+                    validated_students.append({
+                        "name": name,
+                        "email": email,
+                        "phone_number": phone_number,
+                        "roll_number": roll_number or None,
+                        "register_number": register_number or None,
+                        "department": dept_instance,
+                        "batch": batch_instance,
+                        "section": section_instance,
+                        "quota": quota_instance,
+                        "lab_batch": lab_batch or None,
+                        "is_hostler": is_hostler,
+                        "is_day_scholar": is_day_scholar,
+                        "is_bus": is_bus,
+                        "bus_from": bus_from or None,
+                        "bus_to": bus_to or None,
+                        
+                        # Add slip fields
+                        "parent_name": parent_name,
+                        "address": address,
+                        "pincode": pincode,
+                        "aadhaar_number": aadhaar_number,
+                        "emis_number": emis_number,
+                        "umis_number": umis_number,
+                        "community": community,
+                        "qualification": qualification,
+                        "marks_maths": marks_maths,
+                        "marks_physics": marks_physics,
+                        "marks_chemistry": marks_chemistry,
+                        "marks_total": marks_total,
+                        "marks_percentage": marks_percentage,
+                        "mode_of_admission": mode_of_admission,
+                        "recommendation": recommendation_user
+                    })
+
+            if row_errors:
+                errors.append({
+                    "row": row_num,
+                    "roll_number": roll_number,
+                    "name": name,
+                    "errors": row_errors
+                })
+
+        # If any validation errors exist, fail and do not write to the DB
+        if errors:
+            return Response({
+                "code": 400,
+                "message": "Validation errors found in the import data.",
+                "errors": errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2. Writing Phase (transactional)
+        tracking_user = request.user if request.user and request.user.is_authenticated else None
+        tracking_user = tracking_user if isinstance(tracking_user, StandardUser) else None
+
+        # Resolve 'Approved' Application Status
+        approved_app_status, _ = ApplicationStatus.objects.get_or_create(status_name='Approved')
+
+        imported_students_count = 0
+        try:
+            with transaction.atomic():
+                program_indices = {}
+
+                for item in validated_students:
+                    app_user = ApplicationUser.objects.create(
+                        name=item["name"],
+                        email=item["email"],
+                        phone_number=item["phone_number"],
+                        password=item["phone_number"],
+                        created_by=tracking_user,
+                        updated_by=tracking_user
+                    )
+
+                    program = item["department"].program
+                    year = datetime.now().year
+                    year_str = str(year)[2:]
+                    prefix = f"{program.program_level}{year_str}"
+
+                    if prefix not in program_indices:
+                        last_app = Application.objects.filter(application_no__startswith=prefix).order_by('-application_no').first()
+                        next_num = 1
+                        if last_app and last_app.application_no:
+                            try:
+                                next_num = int(last_app.application_no[len(prefix):]) + 1
+                            except ValueError:
+                                pass
+                        program_indices[prefix] = next_num
+                    
+                    app_no = f"{prefix}{program_indices[prefix]:04d}"
+                    program_indices[prefix] += 1
+
+                    form_data = {
+                        "personal_information": {
+                            "applicant_name": item["name"],
+                            "student_mobile": item["phone_number"],
+                            "email": item["email"],
+                            "aadhaar_number": item["aadhaar_number"] or "",
+                            "community": item["community"] or "",
+                        },
+                        "parent_information": {
+                            "parent_name": item["parent_name"] or "",
+                            "address": item["address"] or "",
+                            "pincode": item["pincode"] or "",
+                        },
+                        "course_selection": {
+                            "program": program.program_name,
+                            "department": item["department"].department_name,
+                        },
+                        "academic_qualification": {
+                            "qualifications": [
+                                {
+                                    "qualification": item["qualification"] or "",
+                                }
+                            ]
+                        },
+                        "academic_performance": {
+                            "academic_performance": [
+                                {"subject": "Mathematics", "obtained_marks": str(item["marks_maths"]) if item["marks_maths"] is not None else ""},
+                                {"subject": "Physics", "obtained_marks": str(item["marks_physics"]) if item["marks_physics"] is not None else ""},
+                                {"subject": "Chemistry", "obtained_marks": str(item["marks_chemistry"]) if item["marks_chemistry"] is not None else ""}
+                            ]
+                        }
+                    }
+
+                    Application.objects.create(
+                        candidate=app_user,
+                        program=program,
+                        application_no=app_no,
+                        form_data=form_data,
+                        status=approved_app_status,
+                        created_by=tracking_user,
+                        updated_by=tracking_user
+                    )
+
+                    student = Student.objects.create(
+                        roll_number=item["roll_number"],
+                        register_number=item["register_number"],
+                        department=item["department"],
+                        section=item["section"],
+                        batch=item["batch"],
+                        user=app_user,
+                        lab_batch=item["lab_batch"],
+                        quota=item["quota"],
+                        is_hostler=item["is_hostler"],
+                        is_day_scholar=item["is_day_scholar"],
+                        is_bus=item["is_bus"],
+                        bus_from=item["bus_from"],
+                        bus_to=item["bus_to"],
+                        status=active_status,
+                        created_by=tracking_user,
+                        updated_by=tracking_user
+                    )
+
+                    # Create StudentAdmissionSlip eagerly
+                    StudentAdmissionSlip.objects.create(
+                        student=student,
+                        aadhaar_number=item["aadhaar_number"] or None,
+                        emis_number=item["emis_number"] or f"EMIS-{app_no}",
+                        umis_number=item["umis_number"] or None,
+                        qualification=item["qualification"] or None,
+                        community=item["community"] or None,
+                        marks_maths=item["marks_maths"],
+                        marks_physics=item["marks_physics"],
+                        marks_chemistry=item["marks_chemistry"],
+                        marks_total=item["marks_total"],
+                        marks_percentage=item["marks_percentage"],
+                        mode_of_admission=item["mode_of_admission"] or 'I Sem',
+                        recommendation=item["recommendation"],
+                        created_by=tracking_user,
+                        updated_by=tracking_user
+                    )
+
+                    # Create StudentFees eagerly from database Fee Structure
+                    from institution.models import FeesStructure
+                    total_fees = 0.0
+                    if student.department and student.batch and student.quota:
+                        fs = FeesStructure.objects.filter(
+                            department=student.department,
+                            batch=student.batch,
+                            quota=student.quota
+                        ).first()
+                        if fs:
+                            total_fees = float(fs.fees)
+
+                    StudentFees.objects.create(
+                        student=student,
+                        total_fees=total_fees,
+                        paid_amount=0.0,
+                        balance_amount=total_fees,
+                        created_by=tracking_user,
+                        updated_by=tracking_user
+                    )
+
+                    self._broadcast_change(student, 'student_created')
+                    imported_students_count += 1
+
+        except Exception as e:
+            return Response({
+                "code": 500,
+                "message": f"Database error during student import: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({
+            "code": 201,
+            "message": f"Successfully imported {imported_students_count} students.",
+            "data": {
+                "count": imported_students_count
+            }
+        }, status=status.HTTP_201_CREATED)
+
 
 
 
