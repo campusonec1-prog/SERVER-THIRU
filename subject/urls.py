@@ -7,4 +7,5 @@ urlpatterns = [
     path('get/<int:pk>', SubjectViewSet.as_view({'get': 'retrieve'}), name='subject-detail'),
     path('edit/<int:pk>', SubjectViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='subject-edit'),
     path('remove/<int:pk>', SubjectViewSet.as_view({'delete': 'destroy'}), name='subject-remove'),
+    path('bulk-import', SubjectViewSet.as_view({'post': 'bulk_import'}), name='subject-bulk-import'),
 ]
