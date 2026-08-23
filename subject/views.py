@@ -59,20 +59,107 @@ class SubjectViewSet(viewsets.ModelViewSet):
         user = self.request.user if self.request.user and self.request.user.is_authenticated else None
         from users.models import User as StandardUser
         tracking_user = user if isinstance(user, StandardUser) else None
-        serializer.save(created_by=tracking_user, updated_by=tracking_user)
+        instance = serializer.save(created_by=tracking_user, updated_by=tracking_user)
+        self._broadcast_change(instance, 'subject_created')
 
     def perform_update(self, serializer):
         user = self.request.user if self.request.user and self.request.user.is_authenticated else None
         from users.models import User as StandardUser
         tracking_user = user if isinstance(user, StandardUser) else None
-        serializer.save(updated_by=tracking_user)
+        instance = serializer.save(updated_by=tracking_user)
+        self._broadcast_change(instance, 'subject_updated')
+
+    def perform_destroy(self, instance):
+        subject_id = instance.id
+        instance.delete()
+        self._broadcast_delete(subject_id)
+
+    def _broadcast_change(self, instance, event_name):
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'realtime_updates',
+                    {
+                        'type': 'broadcast_update',
+                        'data': {
+                            'event': event_name,
+                            'payload': SubjectSerializer(instance).data
+                        }
+                    }
+                )
+        except Exception:
+            pass
+
+    def _broadcast_delete(self, subject_id):
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'realtime_updates',
+                    {
+                        'type': 'broadcast_update',
+                        'data': {
+                            'event': 'subject_deleted',
+                            'payload': {
+                                'id': subject_id
+                            }
+                        }
+                    }
+                )
+        except Exception:
+            pass
 
     def list(self, request, *args, **kwargs):
-        response = super().list(request, *args, **kwargs)
+        queryset = self.get_queryset()
+        
+        # Filtering parameters
+        department_id = request.query_params.get('department_id')
+        regulation_id = request.query_params.get('regulation_id')
+        semester_id = request.query_params.get('semester_id')
+        is_theory = request.query_params.get('is_theory')
+        is_lab = request.query_params.get('is_lab')
+        is_active = request.query_params.get('is_active')
+        search = request.query_params.get('search')
+
+        if department_id:
+            queryset = queryset.filter(department_id=department_id)
+        if regulation_id:
+            queryset = queryset.filter(regulation_id=regulation_id)
+        if semester_id:
+            queryset = queryset.filter(semester_id=semester_id)
+        if is_theory:
+            queryset = queryset.filter(is_theory=is_theory.lower() in ['true', 'yes', '1'])
+        if is_lab:
+            queryset = queryset.filter(is_lab=is_lab.lower() in ['true', 'yes', '1'])
+        if is_active:
+            queryset = queryset.filter(is_active=is_active.lower() in ['true', 'yes', '1'])
+        if search:
+            from django.db.models import Q
+            queryset = queryset.filter(
+                Q(subject_code__icontains=search) |
+                Q(subject_name__icontains=search)
+            )
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            paginated_response = self.get_paginated_response(serializer.data)
+            return Response({
+                "code": 200,
+                "message": "Subjects listed successfully",
+                "data": paginated_response.data
+            }, status=status.HTTP_200_OK)
+
+        serializer = self.get_serializer(queryset, many=True)
         return Response({
             "code": 200,
             "message": "Subjects listed successfully",
-            "data": response.data
+            "data": serializer.data
         }, status=status.HTTP_200_OK)
 
     def retrieve(self, request, *args, **kwargs):

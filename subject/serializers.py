@@ -30,7 +30,8 @@ class SubjectSerializer(serializers.ModelSerializer):
         model = Subject
         fields = [
             'id', 'subject_code', 'subject_name', 'credits', 
-            'regulation_id', 'department_id', 'semester_id', 'is_active',
+            'regulation_id', 'department_id', 'semester_id', 
+            'is_theory', 'is_lab', 'is_active',
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
@@ -39,6 +40,8 @@ class SubjectSerializer(serializers.ModelSerializer):
             'subject_name': {'required': True},
             'credits': {'required': True},
             'semester_id': {'required': True},
+            'is_theory': {'required': False},
+            'is_lab': {'required': False},
             'is_active': {'required': False},
         }
 
@@ -66,3 +69,18 @@ class SubjectSerializer(serializers.ModelSerializer):
         if value <= 0:
             raise serializers.ValidationError("Credits must be a positive number.")
         return value
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['regulation_code'] = instance.regulation.regulation_code if instance.regulation else None
+        ret['department_name'] = instance.department.department_name if instance.department else None
+        ret['department_code'] = instance.department.department_code if instance.department else None
+        
+        sec_str = ""
+        if instance.semester:
+            if isinstance(instance.semester.semesters, list):
+                sec_str = ", ".join(map(str, instance.semester.semesters))
+            else:
+                sec_str = str(instance.semester.semesters)
+        ret['semester_name'] = f"Semester {sec_str}" if sec_str else ""
+        return ret

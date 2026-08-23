@@ -23,6 +23,8 @@ class Subject(TrackingModel):
         db_column='semester_id',
         related_name='subjects'
     )
+    is_theory = models.BooleanField(default=True)
+    is_lab = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 
     class Meta:
