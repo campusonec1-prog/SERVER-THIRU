@@ -152,17 +152,26 @@ class StudentSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
-        ret['student_name'] = instance.user.name if instance.user else None
-        ret['student_email'] = instance.user.email if instance.user else None
         
-        photo_url = ""
+        # Resolve student name with fallback to application and form_data
+        name_val = instance.user.name if instance.user else None
         app_no = ""
+        photo_url = ""
+        
         if instance.user:
-            # Safely query the candidate's first application to access form_data photo and application_no
             app = instance.user.applications.first()
             if app:
                 app_no = app.application_no
+                if not name_val:
+                    name_val = app.candidate_name
                 if app.form_data and isinstance(app.form_data, dict):
+                    fd = app.form_data
+                    if not name_val:
+                        pd = fd.get('personal_details', {})
+                        if isinstance(pd, dict):
+                            name_val = pd.get('candidate_name') or pd.get('name')
+                        if not name_val:
+                            name_val = fd.get('candidate_name') or fd.get('name')
                     fd = app.form_data
                     photo_url = fd.get('photo', '')
                     if not photo_url:
@@ -184,6 +193,8 @@ class StudentSerializer(serializers.ModelSerializer):
                             if isinstance(val, dict) and val.get('photo'):
                                 photo_url = val.get('photo')
                                 break
+        ret['student_name'] = name_val or "Unknown"
+        ret['student_email'] = instance.user.email if instance.user else None
         ret['student_photo'] = photo_url
         ret['application_no'] = app_no
 
@@ -302,6 +313,45 @@ class MarksSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        
+        student = instance.student
+        if student:
+            ret['student_roll'] = student.roll_number
+            ret['student_register'] = student.register_number
+            if student.user:
+                ret['student_name'] = student.user.name
+            else:
+                ret['student_name'] = "Unknown"
+                
+            ret['department_id'] = student.department.id if student.department else None
+            ret['department_name'] = student.department.department_name if student.department else ""
+            
+            ret['batch_id'] = student.batch.id if student.batch else None
+            ret['batch_name'] = student.batch.batch if student.batch else ""
+            
+            ret['section_id'] = student.section.id if student.section else None
+            sec_str = ""
+            if student.section:
+                if isinstance(student.section.sections, list):
+                    sec_str = ", ".join(student.section.sections)
+                else:
+                    sec_str = str(student.section.sections)
+            ret['section_name'] = sec_str
+            
+        exam = instance.exam
+        if exam:
+            ret['exam_name'] = exam.exam_name
+            
+        subject = instance.subject
+        if subject:
+            ret['subject_name'] = subject.subject_name
+            ret['subject_code'] = subject.subject_code
+            ret['semester_id'] = subject.semester.id if subject.semester else None
+            
+        return ret
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

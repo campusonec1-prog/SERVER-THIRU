@@ -1,0 +1,117 @@
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+
