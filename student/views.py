@@ -1757,6 +1757,15 @@ class MarksViewSet(viewsets.ViewSet):
 
     def list(self, request):
         queryset = Marks.objects.all().order_by('id')
+        
+        user = request.user
+        role_name = ""
+        if user and user.is_authenticated and hasattr(user, 'role') and user.role:
+            role_name = user.role.role_name.upper().replace(' ', '_')
+            
+        if role_name not in ['ADMIN', 'ADMINISTRATOR']:
+            queryset = queryset.filter(created_by=user)
+
         exam_id = request.query_params.get('exam_id')
         subject_id = request.query_params.get('subject_id')
         batch_id = request.query_params.get('batch_id')

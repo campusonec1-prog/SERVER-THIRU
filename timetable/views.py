@@ -133,6 +133,40 @@ class ExamTimetableViewSet(viewsets.ModelViewSet):
             data = flat_records
             is_many = True
 
+        if is_many:
+            # 1. Check for duplicate subject in list of entries
+            seen_subjects = set()
+            for record in data:
+                subject_id = record.get('subject_id')
+                if subject_id:
+                    from subject.models import Subject
+                    try:
+                        subject_obj = Subject.objects.get(pk=subject_id)
+                        subject_display = f"{subject_obj.subject_code} - {subject_obj.subject_name}"
+                    except Subject.DoesNotExist:
+                        subject_display = f"ID {subject_id}"
+
+                    if subject_id in seen_subjects:
+                        raise ValidationError(f"Duplicate subject '{subject_display}' is scheduled multiple times in the timetable.")
+                    seen_subjects.add(subject_id)
+
+            # 2. Check for overlapping date and session
+            seen_slots = set()
+            for record in data:
+                date_val = record.get('exam_date')
+                session_id = record.get('session_id')
+                if date_val and session_id:
+                    slot_key = (date_val, session_id)
+                    if slot_key in seen_slots:
+                        from schedule.models import Session
+                        try:
+                            session_obj = Session.objects.get(pk=session_id)
+                            session_display = session_obj.session_name
+                        except Session.DoesNotExist:
+                            session_display = f"Session ID {session_id}"
+                        raise ValidationError(f"Overlapping schedule: Multiple exams scheduled on {date_val} for session {session_display}.")
+                    seen_slots.add(slot_key)
+
         serializer = self.get_serializer(data=data, many=is_many)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)

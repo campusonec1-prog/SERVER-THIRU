@@ -351,6 +351,11 @@ class MarksSerializer(serializers.ModelSerializer):
             ret['subject_code'] = subject.subject_code
             ret['semester_id'] = subject.semester.id if subject.semester else None
             
+        if instance.created_by:
+            ret['entered_by_name'] = instance.created_by.name
+        else:
+            ret['entered_by_name'] = "—"
+            
         return ret
 
     def __init__(self, *args, **kwargs):

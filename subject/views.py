@@ -279,17 +279,40 @@ class SubjectViewSet(viewsets.ModelViewSet):
             if semester_raw is None or str(semester_raw).strip() == "":
                 row_errors.append("Semester is required.")
             else:
-                try:
-                    semester_num = int(float(str(semester_raw).strip()))
-                    if semester_num <= 0:
-                        row_errors.append("Semester must be a positive integer.")
+                val_str = str(semester_raw).strip().upper()
+                roman_map = {
+                    'I': 1, 'II': 2, 'III': 3, 'IV': 4, 'V': 5, 'VI': 6, 'VII': 7, 'VIII': 8,
+                    'IX': 9, 'X': 10
+                }
+                semester_num = None
+                if val_str in roman_map:
+                    semester_num = roman_map[val_str]
+                else:
+                    try:
+                        semester_num = int(float(val_str))
+                    except (ValueError, TypeError):
+                        pass
+                
+                if semester_num is None or semester_num <= 0:
+                    row_errors.append(f"Invalid semester number: '{semester_raw}'. Must be an integer or Roman numeral (I, II, etc.).")
+                else:
+                    if department_obj:
+                        semester_objs = Semester.objects.filter(department=department_obj)
+                        is_valid_sem = False
+                        for sem_rec in semester_objs:
+                            if isinstance(sem_rec.semesters, list) and (semester_num in sem_rec.semesters or str(semester_num) in sem_rec.semesters):
+                                is_valid_sem = True
+                                break
+                        
+                        if is_valid_sem:
+                            try:
+                                semester_obj = Semester.objects.get(id=semester_num)
+                            except Semester.DoesNotExist:
+                                row_errors.append(f"Semester '{semester_num}' is not configured in the system.")
+                        else:
+                            row_errors.append(f"Semester '{semester_num}' is not configured for department '{department_raw}'.")
                     else:
-                        try:
-                            semester_obj = Semester.objects.get(id=semester_num)
-                        except Semester.DoesNotExist:
-                            row_errors.append(f"Semester '{semester_num}' is not configured in the system.")
-                except (ValueError, TypeError):
-                    row_errors.append(f"Invalid semester number: '{semester_raw}'. Must be an integer.")
+                        row_errors.append("Department must be valid to map semester.")
 
             # Handle booleans
             def parse_bool(val, default):

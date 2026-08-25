@@ -89,3 +89,66 @@ class ExamTimetableSerializer(serializers.ModelSerializer):
             })
             
         return data
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        
+        # 1. academic_year details
+        if instance.academic_year:
+            ret['academic_year_name'] = instance.academic_year.academic_year
+        else:
+            ret['academic_year_name'] = ''
+            
+        # 2. department details
+        if instance.department:
+            ret['department_name'] = instance.department.department_name
+            ret['department_code'] = instance.department.department_code
+        else:
+            ret['department_name'] = ''
+            ret['department_code'] = ''
+            
+        # 3. batch details
+        if instance.batch:
+            ret['batch_name'] = instance.batch.batch
+        else:
+            ret['batch_name'] = ''
+            
+        # 4. section details
+        if instance.section:
+            sec_str = ""
+            if isinstance(instance.section.sections, list):
+                sec_str = ", ".join(map(str, instance.section.sections))
+            else:
+                sec_str = str(instance.section.sections)
+            ret['section_name'] = sec_str
+        else:
+            ret['section_name'] = ''
+            
+        # 5. semester details
+        if instance.semester:
+            ret['semester_name'] = f"Semester {instance.semester_id}"
+        else:
+            ret['semester_name'] = ''
+            
+        # 6. exam details
+        if instance.exam:
+            ret['exam_name'] = instance.exam.exam_name
+        else:
+            ret['exam_name'] = ''
+            
+        # 7. subject details
+        if instance.subject:
+            ret['subject_name'] = instance.subject.subject_name
+            ret['subject_code'] = instance.subject.subject_code
+        else:
+            ret['subject_name'] = ''
+            ret['subject_code'] = ''
+            
+        # 8. session details
+        if instance.session:
+            ret['session_name'] = instance.session.session_name
+        else:
+            ret['session_name'] = ''
+            
+        return ret
+

@@ -1,117 +1,174 @@
 {
-  "path": "/api/users/login",
+  "path": "/api/subject/bulk-import",
   "method": "POST",
   "response_content": {
     "code": 400,
-    "message": "Invalid username or password."
+    "message": "Validation failed for some rows.",
+    "errors": [
+      {
+        "row": 1,
+        "subject_code": "MC25101",
+        "errors": [
+          "Invalid semester number: 'I'. Must be an integer."
+        ]
+      },
+      {
+        "row": 2,
+        "subject_code": "MC25102",
+        "errors": [
+          "Invalid semester number: 'I'. Must be an integer."
+        ]
+      },
+      {
+        "row": 3,
+        "subject_code": "MC25103",
+        "errors": [
+          "Invalid semester number: 'I'. Must be an integer."
+        ]
+      },
+      {
+        "row": 4,
+        "subject_code": "MC25104",
+        "errors": [
+          "Invalid semester number: 'I'. Must be an integer."
+        ]
+      },
+      {
+        "row": 5,
+        "subject_code": "MC25105",
+        "errors": [
+          "Invalid semester number: 'I'. Must be an integer."
+        ]
+      },
+      {
+        "row": 6,
+        "subject_code": "MC25106",
+        "errors": [
+          "Invalid semester number: 'I'. Must be an integer."
+        ]
+      },
+      {
+        "row": 7,
+        "subject_code": "MC25107",
+        "errors": [
+          "Invalid semester number: 'I'. Must be an integer."
+        ]
+      },
+      {
+        "row": 8,
+        "subject_code": "MC25201",
+        "errors": [
+          "Invalid semester number: 'II'. Must be an integer."
+        ]
+      },
+      {
+        "row": 9,
+        "subject_code": "MC25002",
+        "errors": [
+          "Invalid semester number: 'II'. Must be an integer."
+        ]
+      },
+      {
+        "row": 10,
+        "subject_code": "MC25202",
+        "errors": [
+          "Invalid semester number: 'II'. Must be an integer."
+        ]
+      },
+      {
+        "row": 11,
+        "subject_code": "MC25203",
+        "errors": [
+          "Invalid semester number: 'II'. Must be an integer."
+        ]
+      },
+      {
+        "row": 12,
+        "subject_code": "MC25204",
+        "errors": [
+          "Invalid semester number: 'II'. Must be an integer."
+        ]
+      },
+      {
+        "row": 13,
+        "subject_code": "MC25205",
+        "errors": [
+          "Invalid semester number: 'II'. Must be an integer."
+        ]
+      },
+      {
+        "row": 14,
+        "subject_code": "MC25206",
+        "errors": [
+          "Invalid semester number: 'II'. Must be an integer."
+        ]
+      },
+      {
+        "row": 15,
+        "subject_code": "MC25301",
+        "errors": [
+          "Invalid semester number: 'III'. Must be an integer."
+        ]
+      },
+      {
+        "row": 16,
+        "subject_code": "MC25302",
+        "errors": [
+          "Invalid semester number: 'III'. Must be an integer."
+        ]
+      },
+      {
+        "row": 17,
+        "subject_code": "MC25303",
+        "errors": [
+          "Invalid semester number: 'III'. Must be an integer."
+        ]
+      },
+      {
+        "row": 18,
+        "subject_code": "MC25001",
+        "errors": [
+          "Invalid semester number: 'III'. Must be an integer."
+        ]
+      },
+      {
+        "row": 19,
+        "subject_code": "MC25008",
+        "errors": [
+          "Invalid semester number: 'III'. Must be an integer."
+        ]
+      },
+      {
+        "row": 20,
+        "subject_code": "MC25014",
+        "errors": [
+          "Invalid semester number: 'III'. Must be an integer."
+        ]
+      },
+      {
+        "row": 21,
+        "subject_code": "MC25019",
+        "errors": [
+          "Invalid semester number: 'III'. Must be an integer."
+        ]
+      },
+      {
+        "row": 22,
+        "subject_code": "MC25401",
+        "errors": [
+          "Invalid semester number: 'IV'. Must be an integer."
+        ]
+      }
+    ]
   }
 }
 
 {
-  "path": "/api/users/login",
+  "path": "/api/timetable/exam/create",
   "method": "POST",
   "response_content": {
     "code": 400,
-    "message": "Invalid username or password."
-  }
-}
-
-{
-  "path": "/api/users/login",
-  "method": "POST",
-  "response_content": {
-    "code": 400,
-    "message": "Invalid username or password."
-  }
-}
-
-{
-  "path": "/api/users/login",
-  "method": "POST",
-  "response_content": {
-    "code": 400,
-    "message": "Invalid username or password."
-  }
-}
-
-{
-  "path": "/api/users/login",
-  "method": "POST",
-  "response_content": {
-    "code": 400,
-    "message": "Invalid username or password."
-  }
-}
-
-{
-  "path": "/api/users/login",
-  "method": "POST",
-  "response_content": {
-    "code": 400,
-    "message": "Invalid username or password."
-  }
-}
-
-{
-  "path": "/api/users/login",
-  "method": "POST",
-  "response_content": {
-    "code": 400,
-    "message": "Invalid username or password."
-  }
-}
-
-{
-  "path": "/api/users/login",
-  "method": "POST",
-  "response_content": {
-    "code": 400,
-    "message": "Invalid username or password."
-  }
-}
-
-{
-  "path": "/api/users/login",
-  "method": "POST",
-  "response_content": {
-    "code": 400,
-    "message": "Invalid username or password."
-  }
-}
-
-{
-  "path": "/api/users/login",
-  "method": "POST",
-  "response_content": {
-    "code": 400,
-    "message": "Invalid username or password."
-  }
-}
-
-{
-  "path": "/api/users/login",
-  "method": "POST",
-  "response_content": {
-    "code": 400,
-    "message": "Invalid username or password."
-  }
-}
-
-{
-  "path": "/api/users/login",
-  "method": "POST",
-  "response_content": {
-    "code": 400,
-    "message": "Invalid username or password."
-  }
-}
-
-{
-  "path": "/api/users/login",
-  "method": "POST",
-  "response_content": {
-    "code": 400,
-    "message": "Invalid username or password."
+    "message": "Duplicate subject 'MC25102 - Networking and Communication Systems' is scheduled multiple times in the timetable."
   }
 }
 
