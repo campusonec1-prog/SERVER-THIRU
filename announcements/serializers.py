@@ -17,16 +17,21 @@ class NoticeBoardSerializer(serializers.ModelSerializer):
         source='faculty',
         read_only=True
     )
+    faculty_name = serializers.CharField(
+        source='faculty.name',
+        read_only=True,
+        default=''
+    )
 
     class Meta:
         model = NoticeBoard
         fields = [
             'id', 'notice_title', 'notice_type', 'priority', 
             'publish_date', 'expire_date', 'description', 
-            'is_active', 'faculty_id', 
+            'is_active', 'faculty_id', 'faculty_name',
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by', 'faculty_id']
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by', 'faculty_id', 'faculty_name']
         extra_kwargs = {
             'notice_title': {'required': True},
             'notice_type': {
