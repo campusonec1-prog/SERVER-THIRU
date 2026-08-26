@@ -469,3 +469,93 @@
   }
 }
 
+{
+  "path": "/api/timetable/class/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "HOD User is already assigned to PH on Monday, Period 1."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Academic year does not exist or is not active."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
+{
+  "path": "/api/timetable/class/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "HOD User is already assigned to PH on Monday, Period 1."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Academic year does not exist or is not active."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
+{
+  "path": "/api/timetable/class/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "HOD User is already assigned to PH on Monday, Period 1."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Academic year does not exist or is not active."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
