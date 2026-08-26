@@ -8,7 +8,7 @@ from .permissions import NoticeBoardPermission
 
 
 class NoticeBoardViewSet(viewsets.ModelViewSet):
-    queryset = NoticeBoard.objects.all().order_by('-publish_date')
+    queryset = NoticeBoard.objects.all().order_by('-id')
     serializer_class = NoticeBoardSerializer
     permission_classes = [NoticeBoardPermission]
 
