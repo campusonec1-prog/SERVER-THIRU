@@ -77,3 +77,78 @@ class ExamTimetable(TrackingModel):
     def save(self, *args, **kwargs):
         self.full_clean()
         super().save(*args, **kwargs)
+
+
+class ClassTimetable(TrackingModel):
+    academic_year = models.ForeignKey(
+        'institution.AcademicYear',
+        on_delete=models.CASCADE,
+        db_column='academic_year_id',
+        related_name='class_timetables'
+    )
+    day = models.ForeignKey(
+        'schedule.Day',
+        on_delete=models.CASCADE,
+        db_column='day_id',
+        related_name='class_timetables'
+    )
+    period = models.ForeignKey(
+        'schedule.Period',
+        on_delete=models.CASCADE,
+        db_column='period_id',
+        related_name='class_timetables'
+    )
+    department = models.ForeignKey(
+        'institution.Department',
+        on_delete=models.CASCADE,
+        db_column='department_id',
+        related_name='class_timetables'
+    )
+    faculty = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        db_column='faculty_id',
+        related_name='class_timetables'
+    )
+    section = models.ForeignKey(
+        'institution.Section',
+        on_delete=models.CASCADE,
+        db_column='section_id',
+        related_name='class_timetables'
+    )
+    semester = models.ForeignKey(
+        'institution.Semester',
+        on_delete=models.CASCADE,
+        db_column='semester_id',
+        related_name='class_timetables'
+    )
+    subject = models.ForeignKey(
+        'subject.Subject',
+        on_delete=models.CASCADE,
+        db_column='subject_id',
+        related_name='class_timetables'
+    )
+    batch = models.ForeignKey(
+        'institution.Batch',
+        on_delete=models.CASCADE,
+        db_column='batch_id',
+        related_name='class_timetables'
+    )
+    is_lab = models.BooleanField(default=False, blank=True)
+    room_no = models.CharField(max_length=50, null=True, blank=True)
+
+    class Meta:
+        db_table = 'class_timetables'
+        unique_together = ('academic_year', 'day', 'period', 'department', 'batch', 'semester', 'section')
+
+    def __str__(self):
+        return f"{self.department.department_code} - Sem {self.semester_id} - Section {self.section_id} ({self.day.day_code} P{self.period.period_no})"
+
+    def clean(self):
+        super().clean()
+        if hasattr(self, 'academic_year') and self.academic_year and not self.academic_year.is_active:
+            raise ValidationError({'academic_year': 'Academic year must be active.'})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)

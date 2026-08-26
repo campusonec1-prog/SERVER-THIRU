@@ -3,9 +3,12 @@ from rest_framework.response import Response
 from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
-from .models import ExamTimetable
-from .serializers import ExamTimetableSerializer
-from .permissions import ExamTimetablePermission
+from django.db import transaction
+from .models import ExamTimetable, ClassTimetable
+from .serializers import ExamTimetableSerializer, ClassTimetableSerializer
+from .permissions import ExamTimetablePermission, ClassTimetablePermission
+from schedule.models import Day, Period
+from users.models import User as FacultyUser
 
 class ExamTimetableViewSet(viewsets.ModelViewSet):
     queryset = ExamTimetable.objects.all().order_by('id')
@@ -228,6 +231,413 @@ class ExamTimetableViewSet(viewsets.ModelViewSet):
             "code": 200,
             "message": "Exam timetable deleted successfully"
         }, status=status.HTTP_200_OK)
+
+    def _broadcast_change(self, payload, event_name):
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'realtime_updates',
+                    {
+                        'type': 'broadcast_update',
+                        'data': {
+                            'event': event_name,
+                            'payload': payload
+                        }
+                    }
+                )
+        except Exception:
+            pass
+
+
+class ClassTimetableViewSet(viewsets.ModelViewSet):
+    queryset = ClassTimetable.objects.all().order_by('day__id', 'period__period_no')
+    serializer_class = ClassTimetableSerializer
+    permission_classes = [ClassTimetablePermission]
+    model_label = "Class timetable"
+
+    def handle_exception(self, exc):
+        if isinstance(exc, (Http404, NotFound)):
+            return Response({
+                "code": 404,
+                "message": f"{self.model_label} not found"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if isinstance(exc, NotAuthenticated):
+            return Response({
+                "code": 401,
+                "message": "You don't have access to this resource."
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        if isinstance(exc, PermissionDenied):
+            return Response({
+                "code": 403,
+                "message": "You don't have access to this resource."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        if isinstance(exc, ValidationError):
+            errors = exc.detail
+            if isinstance(errors, list):
+                for err in errors:
+                    if err:
+                        errors = err
+                        break
+            
+            first_msg = ""
+            if isinstance(errors, dict):
+                first_key = next(iter(errors))
+                val = errors[first_key]
+                if isinstance(val, list) and len(val) > 0:
+                    first_msg = str(val[0])
+                else:
+                    first_msg = str(val)
+            elif isinstance(errors, list) and len(errors) > 0:
+                first_msg = str(errors[0])
+            else:
+                first_msg = str(errors)
+
+            return Response({
+                "code": 400,
+                "message": first_msg
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        return super().handle_exception(exc)
+
+    def perform_create(self, serializer):
+        user = self.request.user if self.request.user and self.request.user.is_authenticated else None
+        serializer.save(created_by=user, updated_by=user)
+
+    def perform_update(self, serializer):
+        user = self.request.user if self.request.user and self.request.user.is_authenticated else None
+        serializer.save(updated_by=user)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        
+        academic_year_id = request.query_params.get('academic_year_id')
+        department_id = request.query_params.get('department_id')
+        batch_id = request.query_params.get('batch_id')
+        semester_id = request.query_params.get('semester_id')
+        section_id = request.query_params.get('section_id')
+        day_id = request.query_params.get('day_id')
+        period_id = request.query_params.get('period_id')
+        faculty_id = request.query_params.get('faculty_id')
+        
+        if academic_year_id:
+            queryset = queryset.filter(academic_year_id=academic_year_id)
+        if department_id:
+            queryset = queryset.filter(department_id=department_id)
+        if batch_id:
+            queryset = queryset.filter(batch_id=batch_id)
+        if semester_id:
+            queryset = queryset.filter(semester_id=semester_id)
+        if section_id:
+            queryset = queryset.filter(section_id=section_id)
+        if day_id:
+            queryset = queryset.filter(day_id=day_id)
+        if period_id:
+            queryset = queryset.filter(period_id=period_id)
+        if faculty_id:
+            queryset = queryset.filter(faculty_id=faculty_id)
+            
+        disable_pagination = request.query_params.get('pagination') == 'false'
+        if not disable_pagination:
+            page = self.paginate_queryset(queryset)
+            if page is not None:
+                serializer = self.get_serializer(page, many=True)
+                paginated_response = self.get_paginated_response(serializer.data)
+                return Response({
+                    "code": 200,
+                    "message": "Class timetables listed successfully.",
+                    "data": paginated_response.data
+                }, status=status.HTTP_200_OK)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            "code": 200,
+            "message": "Class timetables listed successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Class timetable slot retrieved successfully.",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        data = request.data
+        
+        # Support weekly timetable bulk save format:
+        # {
+        #   academic_year_id, department_id, batch_id, semester_id, section_id,
+        #   class_timetables: [ { day_id, period_id, subject_id, faculty_id, is_lab, room_no }, ... ]
+        # }
+        if isinstance(data, dict) and 'class_timetables' in data and isinstance(data['class_timetables'], list):
+            academic_year_id = data.get('academic_year_id')
+            department_id = data.get('department_id')
+            batch_id = data.get('batch_id')
+            semester_id = data.get('semester_id')
+            section_id = data.get('section_id')
+
+            if not all([academic_year_id, department_id, batch_id, semester_id, section_id]):
+                raise ValidationError("academic_year_id, department_id, batch_id, semester_id, and section_id are required in the root payload.")
+
+            flat_records = []
+            for item in data['class_timetables']:
+                if isinstance(item, dict):
+                    record = {
+                        'academic_year_id': academic_year_id,
+                        'department_id': department_id,
+                        'batch_id': batch_id,
+                        'semester_id': semester_id,
+                        'section_id': section_id,
+                        'day_id': item.get('day_id'),
+                        'period_id': item.get('period_id'),
+                        'subject_id': item.get('subject_id'),
+                        'faculty_id': item.get('faculty_id'),
+                        'is_lab': item.get('is_lab', False),
+                        'room_no': item.get('room_no', '')
+                    }
+                    flat_records.append(record)
+
+            # ── Faculty double-booking validation ──────────────────────────────────
+            # For each slot being saved, check whether the chosen faculty is already
+            # assigned to that same (academic_year, day, period) in ANY OTHER
+            # class timetable group (different dept / batch / semester / section).
+
+            conflicts = []
+            for rec in flat_records:
+                f_id   = rec.get('faculty_id')
+                d_id   = rec.get('day_id')
+                p_id   = rec.get('period_id')
+                if not (f_id and d_id and p_id):
+                    continue
+
+                clash = ClassTimetable.objects.filter(
+                    academic_year_id=academic_year_id,
+                    faculty_id=f_id,
+                    day_id=d_id,
+                    period_id=p_id,
+                ).exclude(
+                    department_id=department_id,
+                    batch_id=batch_id,
+                    semester_id=semester_id,
+                    section_id=section_id,
+                ).select_related('faculty', 'day', 'period', 'department', 'section').first()
+
+                if clash:
+                    try:
+                        faculty_name = clash.faculty.name
+                    except Exception:
+                        faculty_name = f"Faculty #{f_id}"
+                    try:
+                        day_label = clash.day.day_name
+                    except Exception:
+                        day_label = f"Day #{d_id}"
+                    try:
+                        period_label = f"Period {clash.period.period_no}"
+                    except Exception:
+                        period_label = f"Period #{p_id}"
+                    try:
+                        dept_label = clash.department.short_name
+                    except Exception:
+                        dept_label = "another department"
+
+                    conflicts.append(
+                        f"{faculty_name} is already assigned to {dept_label} on {day_label}, {period_label}."
+                    )
+
+            if conflicts:
+                raise ValidationError(conflicts[0])
+            # ──────────────────────────────────────────────────────────────────────
+
+            with transaction.atomic():
+                # Delete existing weekly timetable slots matching the filters
+                ClassTimetable.objects.filter(
+                    academic_year_id=academic_year_id,
+                    department_id=department_id,
+                    batch_id=batch_id,
+                    semester_id=semester_id,
+                    section_id=section_id
+                ).delete()
+
+                if flat_records:
+                    serializer = self.get_serializer(data=flat_records, many=True)
+                    serializer.is_valid(raise_exception=True)
+                    self.perform_create(serializer)
+                    saved_data = serializer.data
+                else:
+                    saved_data = []
+
+            self._broadcast_change(saved_data, 'class_timetable_created')
+            return Response({
+                "code": 201,
+                "message": "Weekly timetable saved successfully.",
+                "data": saved_data
+            }, status=status.HTTP_201_CREATED)
+
+        # Fallback to single slot create
+        is_many = isinstance(data, list)
+        serializer = self.get_serializer(data=data, many=is_many)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        self._broadcast_change(serializer.data, 'class_timetable_created')
+        return Response({
+            "code": 201,
+            "message": "Class timetable slot created successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        data = request.data
+
+        serializer = self.get_serializer(instance, data=data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        if getattr(instance, '_prefetched_objects_cache', None):
+            instance._prefetched_objects_cache = {}
+
+        self._broadcast_change(serializer.data, 'class_timetable_updated')
+        return Response({
+            "code": 200,
+            "message": "Class timetable slot updated successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        instance_id = instance.id
+        super().destroy(request, *args, **kwargs)
+        
+        self._broadcast_change({'id': instance_id}, 'class_timetable_deleted')
+        return Response({
+            "code": 200,
+            "message": "Class timetable slot deleted successfully."
+        }, status=status.HTTP_200_OK)
+
+    def assign_slot(self, request, *args, **kwargs):
+        """
+        Immediately persist one or more selected slots (no bulk-delete of other slots).
+        Payload:
+        {
+          "academic_year_id": <int>,
+          "department_id":    <int>,
+          "batch_id":         <int>,
+          "semester_id":      <int>,
+          "section_id":       <int>,
+          "room_no":          <str|null>,
+          "slots": [
+            { "day_id": <int>, "period_id": <int>, "subject_id": <int>,
+              "faculty_id": <int>, "is_lab": <bool> },
+            ...
+          ]
+        }
+        """
+        data = request.data
+        academic_year_id = data.get('academic_year_id')
+        department_id    = data.get('department_id')
+        batch_id         = data.get('batch_id')
+        semester_id      = data.get('semester_id')
+        section_id       = data.get('section_id')
+        room_no          = data.get('room_no', '')
+        slots            = data.get('slots', [])
+
+        if not all([academic_year_id, department_id, batch_id, semester_id, section_id]):
+            raise ValidationError(
+                "academic_year_id, department_id, batch_id, semester_id, and section_id are required."
+            )
+        if not slots or not isinstance(slots, list):
+            raise ValidationError("slots must be a non-empty list.")
+
+        # ── Faculty double-booking validation ──────────────────────────────────
+        for slot in slots:
+            f_id = slot.get('faculty_id')
+            d_id = slot.get('day_id')
+            p_id = slot.get('period_id')
+            if not (f_id and d_id and p_id):
+                continue
+
+            clash = (
+                ClassTimetable.objects
+                .filter(
+                    academic_year_id=academic_year_id,
+                    faculty_id=f_id,
+                    day_id=d_id,
+                    period_id=p_id,
+                )
+                .exclude(
+                    department_id=department_id,
+                    batch_id=batch_id,
+                    semester_id=semester_id,
+                    section_id=section_id,
+                )
+                .select_related('faculty', 'day', 'period', 'department')
+                .first()
+            )
+            if clash:
+                try:    faculty_name = clash.faculty.name
+                except Exception: faculty_name = f"Faculty #{f_id}"
+                try:    day_label = clash.day.day_name
+                except Exception: day_label = f"Day #{d_id}"
+                try:    period_label = f"Period {clash.period.period_no}"
+                except Exception: period_label = f"Period #{p_id}"
+                try:    dept_label = clash.department.short_name
+                except Exception: dept_label = "another department"
+
+                raise ValidationError(
+                    f"{faculty_name} is already assigned to {dept_label} on {day_label}, {period_label}."
+                )
+        # ──────────────────────────────────────────────────────────────────────
+
+        saved_slots = []
+        with transaction.atomic():
+            for slot in slots:
+                day_id     = slot.get('day_id')
+                period_id  = slot.get('period_id')
+                subject_id = slot.get('subject_id')
+                faculty_id = slot.get('faculty_id')
+                is_lab     = slot.get('is_lab', False)
+
+                if not all([day_id, period_id, subject_id, faculty_id]):
+                    raise ValidationError(
+                        "Each slot must include day_id, period_id, subject_id, and faculty_id."
+                    )
+
+                instance, _ = ClassTimetable.objects.update_or_create(
+                    academic_year_id=academic_year_id,
+                    department_id=department_id,
+                    batch_id=batch_id,
+                    semester_id=semester_id,
+                    section_id=section_id,
+                    day_id=day_id,
+                    period_id=period_id,
+                    defaults={
+                        'subject_id':  subject_id,
+                        'faculty_id':  faculty_id,
+                        'is_lab':      is_lab,
+                        'room_no':     room_no or '',
+                        'created_by':  request.user if request.user.is_authenticated else None,
+                        'updated_by':  request.user if request.user.is_authenticated else None,
+                    }
+                )
+                serializer = self.get_serializer(instance)
+                saved_slots.append(serializer.data)
+
+        self._broadcast_change(saved_slots, 'class_timetable_assigned')
+        return Response({
+            "code": 201,
+            "message": f"{len(saved_slots)} slot(s) assigned successfully.",
+            "data": saved_slots
+        }, status=status.HTTP_201_CREATED)
+
 
     def _broadcast_change(self, payload, event_name):
         try:

@@ -1,8 +1,9 @@
 from rest_framework import serializers
-from .models import ExamTimetable
+from .models import ExamTimetable, ClassTimetable
 from institution.models import AcademicYear, Batch, Department, Exam, Section, Semester
-from schedule.models import Session
+from schedule.models import Session, Day, Period
 from subject.models import Subject
+from users.models import User as StandardUser
 
 def apply_default_error_messages(fields):
     """Apply standard required/blank/null error messages to all fields."""
@@ -149,6 +150,153 @@ class ExamTimetableSerializer(serializers.ModelSerializer):
             ret['session_name'] = instance.session.session_name
         else:
             ret['session_name'] = ''
+            
+        return ret
+
+
+class ClassTimetableSerializer(serializers.ModelSerializer):
+    academic_year_id = serializers.PrimaryKeyRelatedField(
+        source='academic_year',
+        queryset=AcademicYear.objects.filter(is_active=True),
+        error_messages={'does_not_exist': 'Academic year does not exist or is not active.'}
+    )
+    day_id = serializers.PrimaryKeyRelatedField(
+        source='day',
+        queryset=Day.objects.all(),
+        error_messages={'does_not_exist': 'Day does not exist.'}
+    )
+    period_id = serializers.PrimaryKeyRelatedField(
+        source='period',
+        queryset=Period.objects.all(),
+        error_messages={'does_not_exist': 'Period does not exist.'}
+    )
+    department_id = serializers.PrimaryKeyRelatedField(
+        source='department',
+        queryset=Department.objects.all(),
+        error_messages={'does_not_exist': 'Department does not exist.'}
+    )
+    faculty_id = serializers.PrimaryKeyRelatedField(
+        source='faculty',
+        queryset=StandardUser.objects.all(),
+        error_messages={'does_not_exist': 'Faculty does not exist.'}
+    )
+    section_id = serializers.PrimaryKeyRelatedField(
+        source='section',
+        queryset=Section.objects.all(),
+        error_messages={'does_not_exist': 'Section does not exist.'}
+    )
+    semester_id = serializers.PrimaryKeyRelatedField(
+        source='semester',
+        queryset=Semester.objects.all(),
+        error_messages={'does_not_exist': 'Semester does not exist.'}
+    )
+    subject_id = serializers.PrimaryKeyRelatedField(
+        source='subject',
+        queryset=Subject.objects.all(),
+        error_messages={'does_not_exist': 'Subject does not exist.'}
+    )
+    batch_id = serializers.PrimaryKeyRelatedField(
+        source='batch',
+        queryset=Batch.objects.all(),
+        error_messages={'does_not_exist': 'Batch does not exist.'}
+    )
+
+    class Meta:
+        model = ClassTimetable
+        fields = [
+            'id', 'academic_year_id', 'day_id', 'period_id', 'department_id',
+            'faculty_id', 'section_id', 'semester_id', 'subject_id', 'batch_id',
+            'is_lab', 'room_no', 'created_at', 'updated_at', 'created_by', 'updated_by'
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+    def validate(self, data):
+        academic_year = data.get('academic_year')
+        if academic_year and not academic_year.is_active:
+            raise serializers.ValidationError({
+                "academic_year_id": "Academic year must be active."
+            })
+        return data
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        
+        # 1. academic_year details
+        if instance.academic_year:
+            ret['academic_year_name'] = instance.academic_year.academic_year
+        else:
+            ret['academic_year_name'] = ''
+            
+        # 2. day details
+        if instance.day:
+            ret['day_name'] = instance.day.day_name
+            ret['day_code'] = instance.day.day_code
+        else:
+            ret['day_name'] = ''
+            ret['day_code'] = ''
+
+        # 3. period details
+        if instance.period:
+            ret['period_no'] = instance.period.period_no
+            ret['start_time'] = instance.period.start_time.strftime('%H:%M:%S') if instance.period.start_time else ''
+            ret['end_time'] = instance.period.end_time.strftime('%H:%M:%S') if instance.period.end_time else ''
+        else:
+            ret['period_no'] = None
+            ret['start_time'] = ''
+            ret['end_time'] = ''
+
+        # 4. department details
+        if instance.department:
+            ret['department_name'] = instance.department.department_name
+            ret['department_code'] = instance.department.department_code
+            ret['short_name'] = instance.department.short_name
+        else:
+            ret['department_name'] = ''
+            ret['department_code'] = ''
+            ret['short_name'] = ''
+            
+        # 5. batch details
+        if instance.batch:
+            ret['batch_name'] = instance.batch.batch
+        else:
+            ret['batch_name'] = ''
+            
+        # 6. section details
+        if instance.section:
+            sec_str = ""
+            if isinstance(instance.section.sections, list):
+                sec_str = ", ".join(map(str, instance.section.sections))
+            else:
+                sec_str = str(instance.section.sections)
+            ret['section_name'] = sec_str
+        else:
+            ret['section_name'] = ''
+            
+        # 7. semester details
+        if instance.semester:
+            ret['semester_name'] = f"Semester {instance.semester_id}"
+        else:
+            ret['semester_name'] = ''
+            
+        # 8. subject details
+        if instance.subject:
+            ret['subject_name'] = instance.subject.subject_name
+            ret['subject_code'] = instance.subject.subject_code
+        else:
+            ret['subject_name'] = ''
+            ret['subject_code'] = ''
+            
+        # 9. faculty details
+        if instance.faculty:
+            ret['faculty_name'] = instance.faculty.name
+            ret['faculty_email'] = instance.faculty.mail
+        else:
+            ret['faculty_name'] = ''
+            ret['faculty_email'] = ''
             
         return ret
 
