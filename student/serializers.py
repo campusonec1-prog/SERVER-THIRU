@@ -386,6 +386,33 @@ class CounsellingReportSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
 
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        
+        student = instance.student
+        if student:
+            name_val = student.user.name if student.user else None
+            if not name_val and student.user:
+                app = student.user.applications.first()
+                if app:
+                    name_val = app.candidate_name
+            ret['student_name'] = name_val or "Unknown"
+            ret['student_roll'] = student.roll_number
+            ret['student_register'] = student.register_number
+            ret['department_name'] = student.department.department_name if student.department else None
+            ret['batch_name'] = student.batch.batch if student.batch else None
+            
+        semester = instance.semester
+        if semester:
+            ret['semester_name'] = f"Semester JSON ({semester.id})"
+            
+        if instance.created_by:
+            ret['counselor_name'] = instance.created_by.name
+        else:
+            ret['counselor_name'] = "System"
+            
+        return ret
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         apply_default_error_messages(self.fields)

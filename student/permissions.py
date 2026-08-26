@@ -35,8 +35,8 @@ class CounsellingReportPermission(BaseRolePermission):
             return False
 
         if view.action == 'create':
-            allowed = ['HOD', 'FACULTY', 'PRINCIPAL', 'VICE_PRINCIPAL']
+            allowed = ['HOD', 'FACULTY', 'PRINCIPAL', 'VICE_PRINCIPAL', 'ADMIN', 'ADMINISTRATOR', 'ADMINISTRATIVE_OFFICER', 'ADMINISTRATION_OFFICER', 'ADMISSIONS_OFFICER']
         else:  # update, partial_update, destroy
-            allowed = ['HOD', 'FACULTY', 'PRINCIPAL', 'VICE_PRINCIPAL', 'ADMIN', 'ADMINISTRATOR']
+            allowed = ['HOD', 'FACULTY', 'PRINCIPAL', 'VICE_PRINCIPAL', 'ADMIN', 'ADMINISTRATOR', 'ADMINISTRATIVE_OFFICER', 'ADMINISTRATION_OFFICER', 'ADMISSIONS_OFFICER']
 
         return user_role in allowed
