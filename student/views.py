@@ -185,7 +185,10 @@ class StudentViewSet(viewsets.ModelViewSet):
         if batch_id:
             queryset = queryset.filter(batch_id=batch_id)
         if section_id:
-            queryset = queryset.filter(section_id=section_id)
+            if str(section_id).isdigit():
+                queryset = queryset.filter(section_id=section_id)
+            else:
+                queryset = queryset.filter(section__sections__iexact=section_id)
         if search:
             queryset = queryset.filter(
                 Q(user__name__icontains=search) |
@@ -1434,11 +1437,13 @@ class StudentViewSet(viewsets.ModelViewSet):
             if not batch_name:
                 row_errors.append("Batch is required.")
             else:
-                batch_key = batch_name.upper()
-                if batch_key in batches_map:
-                    batch_instance = batches_map[batch_key]
+                if dept_instance:
+                    from institution.models import Batch
+                    batch_instance = Batch.objects.filter(department=dept_instance, batch__iexact=batch_name).first()
+                    if not batch_instance:
+                        row_errors.append(f"Batch '{batch_name}' does not exist for the resolved department.")
                 else:
-                    row_errors.append(f"Batch '{batch_name}' does not exist.")
+                    row_errors.append("Department must be valid to map batch.")
 
             # Resolve Section (optional)
             section_instance = None
@@ -1447,7 +1452,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                 if sec_key in sections_map:
                     section_instance = sections_map[sec_key]
                 else:
-                    matched_sec = Section.objects.filter(department=dept_instance, sections__contains=[section_name]).first()
+                    matched_sec = Section.objects.filter(department=dept_instance, sections__iexact=section_name).first()
                     if matched_sec:
                         section_instance = matched_sec
                     else:
@@ -1779,7 +1784,10 @@ class MarksViewSet(viewsets.ViewSet):
         if batch_id:
             queryset = queryset.filter(student__batch_id=batch_id)
         if section_id:
-            queryset = queryset.filter(student__section_id=section_id)
+            if str(section_id).isdigit():
+                queryset = queryset.filter(student__section_id=section_id)
+            else:
+                queryset = queryset.filter(student__section__sections__iexact=section_id)
 
         serializer = MarksSerializer(queryset, many=True)
         return Response({
@@ -2163,10 +2171,35 @@ class FacultyActivityViewSet(viewsets.ModelViewSet):
         role_name = ""
         if user and user.is_authenticated and hasattr(user, 'role') and user.role:
             role_name = user.role.role_name.upper().replace(' ', '_')
-            
+
+        # For non-admin users, restrict to their own activities
+        # UNLESS they are querying by a date range (dashboard schedule view)
+        date_from = request.query_params.get('date_from')
+        date_to = request.query_params.get('date_to')
+        date = request.query_params.get('date')
+        timetable_id = request.query_params.get('timetable_id')
+        timetable_ids = request.query_params.get('timetable_ids')  # comma-separated bulk lookup
+
+        # Only enforce created_by filter when no date-range query is made
+        # (date-range queries are used for dashboard completion status checks)
         if role_name not in ['ADMIN', 'ADMINISTRATOR']:
-            queryset = queryset.filter(created_by=user)
-            
+            if not (date_from or date_to or date or timetable_id or timetable_ids):
+                queryset = queryset.filter(created_by=user)
+
+        # Apply date filters
+        if date:
+            queryset = queryset.filter(date=date)
+        if date_from:
+            queryset = queryset.filter(date__gte=date_from)
+        if date_to:
+            queryset = queryset.filter(date__lte=date_to)
+        if timetable_id:
+            queryset = queryset.filter(timetable_id=timetable_id)
+        if timetable_ids:
+            id_list = [tid.strip() for tid in timetable_ids.split(',') if tid.strip().isdigit()]
+            if id_list:
+                queryset = queryset.filter(timetable_id__in=id_list)
+
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)

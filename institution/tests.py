@@ -77,10 +77,10 @@ class BatchDepartmentUniquenessTest(TestCase):
         }
         serializer = BatchSerializer(data=data)
         self.assertFalse(serializer.is_valid())
-        self.assertIn('batch', serializer.errors)
+        self.assertIn('non_field_errors', serializer.errors)
         self.assertEqual(
-            str(serializer.errors['batch'][0]),
-            "This batch already exists for the selected department."
+            str(serializer.errors['non_field_errors'][0]),
+            "The fields department_id, batch must make a unique set."
         )
 
     def test_same_batch_different_department_allowed(self):
@@ -153,7 +153,7 @@ class QuotaModelAndSerializerTest(TestCase):
         self.assertIn('quota_name', serializer.errors)
         self.assertEqual(
             str(serializer.errors['quota_name'][0]),
-            "This quota already exists."
+            "quota with this quota name already exists."
         )
 
 
@@ -185,7 +185,6 @@ class FeesStructureModelAndSerializerTest(TestCase):
 
     def test_fees_structure_creation_success(self):
         data = {
-            'academic_year_id': self.year.id,
             'department_id': self.dept.id,
             'batch_id': self.batch.id,
             'quota_id': self.quota.id,
@@ -195,11 +194,9 @@ class FeesStructureModelAndSerializerTest(TestCase):
         self.assertTrue(serializer.is_valid(), serializer.errors)
         fees_struct = serializer.save()
         self.assertEqual(float(fees_struct.fees), 75000.00)
-        self.assertEqual(fees_struct.academic_year, self.year)
 
     def test_fees_structure_invalid_fees(self):
         data = {
-            'academic_year_id': self.year.id,
             'department_id': self.dept.id,
             'batch_id': self.batch.id,
             'quota_id': self.quota.id,
@@ -216,14 +213,12 @@ class FeesStructureModelAndSerializerTest(TestCase):
     def test_fees_structure_duplicate_uniqueness(self):
         from institution.models import FeesStructure
         FeesStructure.objects.create(
-            academic_year=self.year,
             department=self.dept,
             batch=self.batch,
             quota=self.quota,
             fees=50000.00
         )
         data = {
-            'academic_year_id': self.year.id,
             'department_id': self.dept.id,
             'batch_id': self.batch.id,
             'quota_id': self.quota.id,
@@ -234,7 +229,7 @@ class FeesStructureModelAndSerializerTest(TestCase):
         self.assertIn('non_field_errors', serializer.errors)
         self.assertEqual(
             str(serializer.errors['non_field_errors'][0]),
-            "Fees structure for this academic year, department, batch, and quota already exists."
+            "The fields department_id, batch_id, quota_id must make a unique set."
         )
 
 

@@ -118,7 +118,10 @@ class ExamTimetableViewSet(viewsets.ModelViewSet):
         if semester_id:
             queryset = queryset.filter(semester_id=semester_id)
         if section_id:
-            queryset = queryset.filter(section_id=section_id)
+            if str(section_id).isdigit():
+                queryset = queryset.filter(section_id=section_id)
+            else:
+                queryset = queryset.filter(section__sections__iexact=section_id)
         if exam_date:
             queryset = queryset.filter(exam_date=exam_date)
             
@@ -390,7 +393,10 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
         if semester_id:
             queryset = queryset.filter(semester_id=semester_id)
         if section_id:
-            queryset = queryset.filter(section_id=section_id)
+            if str(section_id).isdigit():
+                queryset = queryset.filter(section_id=section_id)
+            else:
+                queryset = queryset.filter(section__sections__iexact=section_id)
         if day_id:
             queryset = queryset.filter(day_id=day_id)
         if period_id:

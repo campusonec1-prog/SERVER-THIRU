@@ -1552,3 +1552,632 @@
   }
 }
 
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "CSE2026001",
+        "name": "Suriya Iyer",
+        "errors": [
+          "Email 'suriya.iyer1@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 2,
+        "roll_number": "CSE2026002",
+        "name": "Vignesh Prasad",
+        "errors": [
+          "Email 'vignesh.prasad2@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 3,
+        "roll_number": "CSE2026003",
+        "name": "Swathi Rao",
+        "errors": [
+          "Email 'swathi.rao3@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 4,
+        "roll_number": "CSE2026004",
+        "name": "Kiara Rao",
+        "errors": [
+          "Email 'kiara.rao4@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 5,
+        "roll_number": "CSE2026005",
+        "name": "Ananya Raj",
+        "errors": [
+          "Email 'ananya.raj5@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 6,
+        "roll_number": "CSE2026006",
+        "name": "Nithya Balan",
+        "errors": [
+          "Email 'nithya.balan6@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 7,
+        "roll_number": "CSE2026007",
+        "name": "Varun Prasad",
+        "errors": [
+          "Email 'varun.prasad7@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 8,
+        "roll_number": "CSE2026008",
+        "name": "Manoj Narayan",
+        "errors": [
+          "Email 'manoj.narayan8@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 9,
+        "roll_number": "CSE2026009",
+        "name": "Suresh Chandran",
+        "errors": [
+          "Email 'suresh.chandran9@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 10,
+        "roll_number": "CSE2026010",
+        "name": "Meera Murthy",
+        "errors": [
+          "Email 'meera.murthy10@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 11,
+        "roll_number": "CSE2026011",
+        "name": "Sneha Reddy",
+        "errors": [
+          "Email 'sneha.reddy11@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 12,
+        "roll_number": "CSE2026012",
+        "name": "Vignesh Iyer",
+        "errors": [
+          "Email 'vignesh.iyer12@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 13,
+        "roll_number": "CSE2026013",
+        "name": "Vignesh Prasad",
+        "errors": [
+          "Email 'vignesh.prasad13@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 14,
+        "roll_number": "CSE2026014",
+        "name": "Ira Prasad",
+        "errors": [
+          "Email 'ira.prasad14@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 15,
+        "roll_number": "CSE2026015",
+        "name": "Arjun Sundaram",
+        "errors": [
+          "Email 'arjun.sundaram15@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 16,
+        "roll_number": "CSE2026016",
+        "name": "Varun Venkatesh",
+        "errors": [
+          "Email 'varun.venkatesh16@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 17,
+        "roll_number": "CSE2026017",
+        "name": "Harish Menon",
+        "errors": [
+          "Email 'harish.menon17@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 18,
+        "roll_number": "CSE2026018",
+        "name": "Diya Pillai",
+        "errors": [
+          "Email 'diya.pillai18@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 19,
+        "roll_number": "CSE2026019",
+        "name": "Aarav Iyer",
+        "errors": [
+          "Email 'aarav.iyer19@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 20,
+        "roll_number": "CSE2026020",
+        "name": "Reyansh Subramanian",
+        "errors": [
+          "Email 'reyansh.subramanian20@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 21,
+        "roll_number": "CSE2026021",
+        "name": "Aditya Chandran",
+        "errors": [
+          "Email 'aditya.chandran21@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 22,
+        "roll_number": "CSE2026022",
+        "name": "Pooja Krishnan",
+        "errors": [
+          "Email 'pooja.krishnan22@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 23,
+        "roll_number": "CSE2026023",
+        "name": "Karthik Rao",
+        "errors": [
+          "Email 'karthik.rao23@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 24,
+        "roll_number": "CSE2026024",
+        "name": "Harish Prasad",
+        "errors": [
+          "Email 'harish.prasad24@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 25,
+        "roll_number": "CSE2026025",
+        "name": "Sara Murthy",
+        "errors": [
+          "Email 'sara.murthy25@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 26,
+        "roll_number": "CSE2026026",
+        "name": "Aditya Reddy",
+        "errors": [
+          "Email 'aditya.reddy26@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 27,
+        "roll_number": "CSE2026027",
+        "name": "Meera Murthy",
+        "errors": [
+          "Email 'meera.murthy27@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 28,
+        "roll_number": "CSE2026028",
+        "name": "Varun Reddy",
+        "errors": [
+          "Email 'varun.reddy28@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 29,
+        "roll_number": "CSE2026029",
+        "name": "Kiara Nair",
+        "errors": [
+          "Email 'kiara.nair29@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 30,
+        "roll_number": "CSE2026030",
+        "name": "Saanvi Gupta",
+        "errors": [
+          "Email 'saanvi.gupta30@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 31,
+        "roll_number": "CSE2026031",
+        "name": "Kabir Murthy",
+        "errors": [
+          "Email 'kabir.murthy31@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 32,
+        "roll_number": "CSE2026032",
+        "name": "Diya Venkatesh",
+        "errors": [
+          "Email 'diya.venkatesh32@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 33,
+        "roll_number": "CSE2026033",
+        "name": "Rohan Reddy",
+        "errors": [
+          "Email 'rohan.reddy33@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 34,
+        "roll_number": "CSE2026034",
+        "name": "Ramesh Pillai",
+        "errors": [
+          "Email 'ramesh.pillai34@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 35,
+        "roll_number": "CSE2026035",
+        "name": "Divya Iyer",
+        "errors": [
+          "Email 'divya.iyer35@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 36,
+        "roll_number": "CSE2026036",
+        "name": "Sara Reddy",
+        "errors": [
+          "Email 'sara.reddy36@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 37,
+        "roll_number": "CSE2026037",
+        "name": "Aarav Narayan",
+        "errors": [
+          "Email 'aarav.narayan37@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 38,
+        "roll_number": "CSE2026038",
+        "name": "Dinesh Varma",
+        "errors": [
+          "Email 'dinesh.varma38@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 39,
+        "roll_number": "CSE2026039",
+        "name": "Dhruv Chandran",
+        "errors": [
+          "Email 'dhruv.chandran39@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 40,
+        "roll_number": "CSE2026040",
+        "name": "Ishaan Chandran",
+        "errors": [
+          "Email 'ishaan.chandran40@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 41,
+        "roll_number": "CSE2026041",
+        "name": "Rohan Varma",
+        "errors": [
+          "Email 'rohan.varma41@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 42,
+        "roll_number": "CSE2026042",
+        "name": "Prakash Iyer",
+        "errors": [
+          "Email 'prakash.iyer42@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 43,
+        "roll_number": "CSE2026043",
+        "name": "Nikhil Gupta",
+        "errors": [
+          "Email 'nikhil.gupta43@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 44,
+        "roll_number": "CSE2026044",
+        "name": "Swathi Varma",
+        "errors": [
+          "Email 'swathi.varma44@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 45,
+        "roll_number": "CSE2026045",
+        "name": "Karthika Varma",
+        "errors": [
+          "Email 'karthika.varma45@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 46,
+        "roll_number": "CSE2026046",
+        "name": "Saanvi Balan",
+        "errors": [
+          "Email 'saanvi.balan46@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 47,
+        "roll_number": "CSE2026047",
+        "name": "Aarav Prasad",
+        "errors": [
+          "Email 'aarav.prasad47@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 48,
+        "roll_number": "CSE2026048",
+        "name": "Swathi Reddy",
+        "errors": [
+          "Email 'swathi.reddy48@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 49,
+        "roll_number": "CSE2026049",
+        "name": "Priya Chandran",
+        "errors": [
+          "Email 'priya.chandran49@example.com' is already registered as an application user."
+        ]
+      },
+      {
+        "row": 50,
+        "roll_number": "CSE2026050",
+        "name": "Nithya Chandran",
+        "errors": [
+          "Email 'nithya.chandran50@example.com' is already registered as an application user."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 50,
+        "roll_number": "CSE2026050",
+        "name": "Nithya Chandran",
+        "errors": [
+          "Email 'nithya.chandran50@example.com' is already registered as an application user."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, and subject ID 2."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, and subject ID 2."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, and subject ID 2."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, and subject ID 2."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, and subject ID 2."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/institution/academic-years/edit/3",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "Is Display: Only one academic year can be set as display."
+  }
+}
+

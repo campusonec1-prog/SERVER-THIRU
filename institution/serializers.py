@@ -309,30 +309,24 @@ class SectionSerializer(serializers.ModelSerializer):
         apply_default_error_messages(self.fields)
 
     def validate_sections(self, value):
-        """Validate that sections is a non-empty list of unique non-empty strings."""
-        if not isinstance(value, list):
-            raise serializers.ValidationError("Sections must be an array, e.g. [\"A\", \"B\", \"C\"].")
-        if len(value) == 0:
-            raise serializers.ValidationError("Sections array cannot be empty.")
-        
-        seen_sections = set()
-        cleaned_value = []
-        for item in value:
-            if not isinstance(item, str):
-                raise serializers.ValidationError(
-                    f"Each section must be a string. Got '{item}' which is not valid."
-                )
-            stripped_item = item.strip()
-            if not stripped_item:
-                raise serializers.ValidationError("Section name cannot be empty.")
-            
-            upper_item = stripped_item.upper()
-            if upper_item in seen_sections:
-                raise serializers.ValidationError(f"Duplicate section name '{stripped_item}' is not allowed.")
-            seen_sections.add(upper_item)
-            cleaned_value.append(stripped_item)
-            
-        return cleaned_value
+        """Validate that sections is a non-empty string."""
+        if not value or not str(value).strip():
+            raise serializers.ValidationError("Section name cannot be empty.")
+        return str(value).strip().upper()
+
+    def validate(self, attrs):
+        department = attrs.get('department')
+        sections_val = attrs.get('sections')
+        if department and sections_val:
+            sections_val = str(sections_val).strip().upper()
+            qs = Section.objects.filter(department=department, sections__iexact=sections_val)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({
+                    "sections": "This section already exists for the selected department."
+                })
+        return attrs
 
 
 # ─── College Header ────────────────────────────────────────────

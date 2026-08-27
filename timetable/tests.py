@@ -71,7 +71,7 @@ class ExamTimetableAPITests(APITestCase):
         self.exam = Exam.objects.create(exam_name="End Semester Nov 2026", exam_type=self.exam_type)
         
         # Section and Semester
-        self.section = Section.objects.create(department=self.department, sections=["A", "B"])
+        self.section = Section.objects.create(department=self.department, sections="A")
         self.semester = Semester.objects.create(department=self.department, semesters=[1, 2, 3])
         
         # Create URLs
@@ -439,7 +439,7 @@ class ClassTimetableAPITests(APITestCase):
             short_name="EN"
         )
         self.batch = Batch.objects.create(department=self.department, batch="2024-2027")
-        self.section = Section.objects.create(department=self.department, sections=["A"])
+        self.section = Section.objects.create(department=self.department, sections="A")
         self.semester = Semester.objects.create(department=self.department, semesters=[1, 2])
         
         from subject.models import Subject
@@ -530,7 +530,7 @@ class ClassTimetableAPITests(APITestCase):
             short_name="PH"
         )
         batch2 = Batch.objects.create(department=dept2, batch="2024-2027")
-        section2 = Section.objects.create(department=dept2, sections=["B"])
+        section2 = Section.objects.create(department=dept2, sections="B")
         semester2 = Semester.objects.create(department=dept2, semesters=[1, 2])
         subject2 = Subject.objects.create(
             subject_name="Mechanics", subject_code="PHY101",

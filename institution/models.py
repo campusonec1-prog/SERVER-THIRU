@@ -167,13 +167,14 @@ class Section(TrackingModel):
         db_column='department_id',
         related_name='sections'
     )
-    sections = models.JSONField(default=list)
+    sections = models.CharField(max_length=50)
 
     class Meta:
         db_table = 'sections'
+        unique_together = ('department', 'sections')
 
     def __str__(self):
-        return f"Sections for {self.department.department_name}"
+        return f"{self.sections} - {self.department.department_name}"
 
 
 class CollegeHeader(TrackingModel):

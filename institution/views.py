@@ -245,16 +245,118 @@ class SectionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         return Response({"code": 200, "message": "Section retrieved successfully", "data": response.data}, status=status.HTTP_200_OK)
 
     def create(self, request, *args, **kwargs):
-        response = super().create(request, *args, **kwargs)
-        return Response({"code": 201, "message": "Section created successfully", "data": response.data}, status=status.HTTP_201_CREATED)
+        from django.db import transaction
+        data = request.data
+        department_id = data.get('department_id')
+        sections_data = data.get('sections')
+
+        if not department_id:
+            return Response({"code": 400, "message": "department_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            dept = Department.objects.get(id=department_id)
+        except Department.DoesNotExist:
+            return Response({"code": 404, "message": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not isinstance(sections_data, list):
+            sections_list = [sections_data] if sections_data else []
+        else:
+            sections_list = sections_data
+
+        sections_list = [str(s).strip().upper() for s in sections_list if str(s).strip()]
+
+        if not sections_list:
+            return Response({"code": 400, "message": "At least one section letter must be provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user if request.user and request.user.is_authenticated else None
+
+        with transaction.atomic():
+            existing_sections = Section.objects.filter(department=dept)
+            existing_names = {s.sections.upper(): s for s in existing_sections}
+
+            # Delete sections no longer selected
+            for name, inst in list(existing_names.items()):
+                if name not in sections_list:
+                    inst.delete()
+
+            # Create new ones
+            for name in sections_list:
+                if name not in existing_names:
+                    Section.objects.create(
+                        department=dept,
+                        sections=name,
+                        created_by=user,
+                        updated_by=user
+                    )
+
+            updated_sections = Section.objects.filter(department=dept).order_by('sections')
+            serializer = self.get_serializer(updated_sections, many=True)
+
+        return Response({
+            "code": 201,
+            "message": "Sections created successfully",
+            "data": serializer.data[0] if serializer.data else None
+        }, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
-        response = super().update(request, *args, **kwargs)
-        return Response({"code": 200, "message": "Section updated successfully", "data": response.data}, status=status.HTTP_200_OK)
+        from django.db import transaction
+        data = request.data
+        department_id = data.get('department_id')
+        sections_data = data.get('sections')
+
+        if not department_id:
+            instance = self.get_object()
+            dept = instance.department
+        else:
+            try:
+                dept = Department.objects.get(id=department_id)
+            except Department.DoesNotExist:
+                return Response({"code": 404, "message": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not isinstance(sections_data, list):
+            sections_list = [sections_data] if sections_data else []
+        else:
+            sections_list = sections_data
+
+        sections_list = [str(s).strip().upper() for s in sections_list if str(s).strip()]
+
+        if not sections_list:
+            return Response({"code": 400, "message": "At least one section letter must be provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user if request.user and request.user.is_authenticated else None
+
+        with transaction.atomic():
+            existing_sections = Section.objects.filter(department=dept)
+            existing_names = {s.sections.upper(): s for s in existing_sections}
+
+            # Delete sections no longer selected
+            for name, inst in list(existing_names.items()):
+                if name not in sections_list:
+                    inst.delete()
+
+            # Create new ones
+            for name in sections_list:
+                if name not in existing_names:
+                    Section.objects.create(
+                        department=dept,
+                        sections=name,
+                        created_by=user,
+                        updated_by=user
+                    )
+
+            updated_sections = Section.objects.filter(department=dept).order_by('sections')
+            serializer = self.get_serializer(updated_sections, many=True)
+
+        return Response({
+            "code": 200,
+            "message": "Sections updated successfully",
+            "data": serializer.data[0] if serializer.data else None
+        }, status=status.HTTP_200_OK)
 
     def destroy(self, request, *args, **kwargs):
-        super().destroy(request, *args, **kwargs)
-        return Response({"code": 200, "message": "Section deleted successfully"}, status=status.HTTP_200_OK)
+        instance = self.get_object()
+        Section.objects.filter(department=instance.department).delete()
+        return Response({"code": 200, "message": "Sections deleted successfully"}, status=status.HTTP_200_OK)
 
 
 # ─── College Header ────────────────────────────────────────────────

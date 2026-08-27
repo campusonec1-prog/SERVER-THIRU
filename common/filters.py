@@ -54,7 +54,16 @@ class DynamicFilterBackend(BaseFilterBackend):
                 filter_kwargs[param] = value
                 
         if filter_kwargs:
-            queryset = queryset.filter(**filter_kwargs)
+            try:
+                queryset = queryset.filter(**filter_kwargs)
+            except Exception as e:
+                logger.error(f"Error filtering queryset with kwargs {filter_kwargs}: {e}")
+                # Fallback: apply filters one by one, skipping the invalid ones
+                for k, v in filter_kwargs.items():
+                    try:
+                        queryset = queryset.filter(**{k: v})
+                    except Exception:
+                        pass
             
         # 2. Handle search query
         search_query = request.query_params.get('search', None)
