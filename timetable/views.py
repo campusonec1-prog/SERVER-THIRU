@@ -300,7 +300,17 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
                 pass
                 
         if not is_admin:
-            queryset = queryset.filter(created_by=user)
+            faculty_id = self.request.query_params.get('faculty_id')
+            department_id = self.request.query_params.get('department_id')
+            batch_id = self.request.query_params.get('batch_id')
+            section_id = self.request.query_params.get('section_id')
+            
+            if faculty_id and str(faculty_id) == str(user.id):
+                pass
+            elif department_id and batch_id and section_id:
+                pass
+            else:
+                queryset = queryset.filter(created_by=user)
             
         return queryset
 

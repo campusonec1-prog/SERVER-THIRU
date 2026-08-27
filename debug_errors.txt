@@ -613,3 +613,178 @@
   }
 }
 
+{
+  "path": "/api/timetable/class/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "HOD User is already assigned to PH on Monday, Period 1."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Academic year does not exist or is not active."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+
+{
+  "path": "/api/timetable/class/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "HOD User is already assigned to PH on Monday, Period 1."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Academic year does not exist or is not active."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
+{
+  "path": "/api/timetable/class/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "HOD User is already assigned to PH on Monday, Period 1."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Academic year does not exist or is not active."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, and subject ID 2."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/student/marks/edit",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "You do not have permission to edit the marks for student ID 1 since they were entered by Mrs S ANANDHI."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, and subject ID 2."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+

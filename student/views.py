@@ -1763,13 +1763,14 @@ class MarksViewSet(viewsets.ViewSet):
         if user and user.is_authenticated and hasattr(user, 'role') and user.role:
             role_name = user.role.role_name.upper().replace(' ', '_')
             
-        if role_name not in ['ADMIN', 'ADMINISTRATOR']:
-            queryset = queryset.filter(created_by=user)
-
         exam_id = request.query_params.get('exam_id')
         subject_id = request.query_params.get('subject_id')
         batch_id = request.query_params.get('batch_id')
         section_id = request.query_params.get('section_id')
+
+        if role_name not in ['ADMIN', 'ADMINISTRATOR']:
+            if not (exam_id or subject_id):
+                queryset = queryset.filter(created_by=user)
 
         if exam_id:
             queryset = queryset.filter(exam_id=exam_id)
@@ -1886,6 +1887,20 @@ class MarksViewSet(viewsets.ViewSet):
                     )
 
                     if not created:
+                        is_admin = getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)
+                        if not is_admin:
+                            try:
+                                role = getattr(user, 'role', None)
+                                if role:
+                                    user_role = role.role_name.upper().replace(' ', '_')
+                                    if user_role in ['ADMIN', 'ADMINISTRATOR']:
+                                        is_admin = True
+                            except AttributeError:
+                                pass
+                        
+                        if marks_instance.created_by and marks_instance.created_by != tracking_user and not is_admin:
+                            raise ValidationError(f"You do not have permission to edit the marks for student ID {student_id} since they were entered by {marks_instance.created_by.name or marks_instance.created_by.username}.")
+
                         marks_instance.marks_obtained = marks_obtained
                         marks_instance.updated_by = tracking_user
                         marks_instance.save()
