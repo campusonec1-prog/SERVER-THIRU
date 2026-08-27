@@ -788,3 +788,767 @@
   }
 }
 
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, and subject ID 2."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/timetable/class/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "HOD User is already assigned to PH on Monday, Period 1."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Academic year does not exist or is not active."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, and subject ID 2."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/timetable/class/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "HOD User is already assigned to PH on Monday, Period 1."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Academic year does not exist or is not active."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, and subject ID 2."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/timetable/class/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "HOD User is already assigned to PH on Monday, Period 1."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Academic year does not exist or is not active."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, and subject ID 2."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/timetable/class/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "HOD User is already assigned to PH on Monday, Period 1."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Academic year does not exist or is not active."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, and subject ID 2."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/timetable/class/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "HOD User is already assigned to PH on Monday, Period 1."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Academic year does not exist or is not active."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, and subject ID 2."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/timetable/class/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "HOD User is already assigned to PH on Monday, Period 1."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Academic year does not exist or is not active."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, and subject ID 2."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/timetable/class/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "HOD User is already assigned to PH on Monday, Period 1."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Academic year does not exist or is not active."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, and subject ID 2."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/timetable/class/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "HOD User is already assigned to PH on Monday, Period 1."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Academic year does not exist or is not active."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, and subject ID 2."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/timetable/class/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "HOD User is already assigned to PH on Monday, Period 1."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Academic year does not exist or is not active."
+  }
+}
+
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
+{
+  "path": "/api/subject/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation failed for some rows.",
+    "errors": [
+      {
+        "row": 28,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 35,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 37,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 38,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 39,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 40,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 41,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 42,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 43,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 44,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 45,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 46,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 47,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 48,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 49,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 50,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 51,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 52,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 53,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 54,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 55,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 56,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 57,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      },
+      {
+        "row": 58,
+        "subject_code": "\u2014",
+        "errors": [
+          "Duplicate subject code '\u2014' in sheet."
+        ]
+      }
+    ]
+  }
+}
+

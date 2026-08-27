@@ -79,6 +79,18 @@ class ExamTimetable(TrackingModel):
         super().save(*args, **kwargs)
 
 
+class ActivityType(TrackingModel):
+    activity_name = models.CharField(max_length=100, unique=True)
+    display_subject = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'activity_types'
+
+    def __str__(self):
+        return self.activity_name
+
+
 class ClassTimetable(TrackingModel):
     academic_year = models.ForeignKey(
         'institution.AcademicYear',
@@ -124,15 +136,25 @@ class ClassTimetable(TrackingModel):
     )
     subject = models.ForeignKey(
         'subject.Subject',
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         db_column='subject_id',
-        related_name='class_timetables'
+        related_name='class_timetables',
+        null=True,
+        blank=True
     )
     batch = models.ForeignKey(
         'institution.Batch',
         on_delete=models.CASCADE,
         db_column='batch_id',
         related_name='class_timetables'
+    )
+    activity_type = models.ForeignKey(
+        ActivityType,
+        on_delete=models.SET_NULL,
+        db_column='activity_type_id',
+        related_name='class_timetables',
+        null=True,
+        blank=True
     )
     is_lab = models.BooleanField(default=False, blank=True)
     room_no = models.CharField(max_length=50, null=True, blank=True)
@@ -142,7 +164,9 @@ class ClassTimetable(TrackingModel):
         unique_together = ('academic_year', 'day', 'period', 'department', 'batch', 'semester', 'section')
 
     def __str__(self):
-        return f"{self.department.department_code} - Sem {self.semester_id} - Section {self.section_id} ({self.day.day_code} P{self.period.period_no})"
+        subject_str = f" - {self.subject.subject_code}" if self.subject else ""
+        activity_str = f" ({self.activity_type.activity_name})" if self.activity_type else ""
+        return f"{self.department.department_code} - Sem {self.semester_id} - Section {self.section_id} ({self.day.day_code} P{self.period.period_no}{subject_str}){activity_str}"
 
     def clean(self):
         super().clean()

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import ExamTimetable, ClassTimetable
+from .models import ExamTimetable, ClassTimetable, ActivityType
 from institution.models import AcademicYear, Batch, Department, Exam, Section, Semester
 from schedule.models import Session, Day, Period
 from subject.models import Subject
@@ -160,6 +160,17 @@ class ExamTimetableSerializer(serializers.ModelSerializer):
         return ret
 
 
+class ActivityTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ActivityType
+        fields = ['id', 'activity_name', 'display_subject', 'is_active', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+
 class ClassTimetableSerializer(serializers.ModelSerializer):
     academic_year_id = serializers.PrimaryKeyRelatedField(
         source='academic_year',
@@ -199,6 +210,8 @@ class ClassTimetableSerializer(serializers.ModelSerializer):
     subject_id = serializers.PrimaryKeyRelatedField(
         source='subject',
         queryset=Subject.objects.all(),
+        required=False,
+        allow_null=True,
         error_messages={'does_not_exist': 'Subject does not exist.'}
     )
     batch_id = serializers.PrimaryKeyRelatedField(
@@ -206,13 +219,21 @@ class ClassTimetableSerializer(serializers.ModelSerializer):
         queryset=Batch.objects.all(),
         error_messages={'does_not_exist': 'Batch does not exist.'}
     )
+    activity_type_id = serializers.PrimaryKeyRelatedField(
+        source='activity_type',
+        queryset=ActivityType.objects.all(),
+        required=False,
+        allow_null=True,
+        error_messages={'does_not_exist': 'Activity Type does not exist.'}
+    )
 
     class Meta:
         model = ClassTimetable
         fields = [
             'id', 'academic_year_id', 'day_id', 'period_id', 'department_id',
             'faculty_id', 'section_id', 'semester_id', 'subject_id', 'batch_id',
-            'is_lab', 'room_no', 'created_at', 'updated_at', 'created_by', 'updated_by'
+            'activity_type_id', 'is_lab', 'room_no', 'created_at', 'updated_at', 
+            'created_by', 'updated_by'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
 
@@ -226,6 +247,16 @@ class ClassTimetableSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 "academic_year_id": "Academic year must be active."
             })
+        
+        activity_type = data.get('activity_type')
+        subject = data.get('subject')
+        if activity_type:
+            if activity_type.display_subject and not subject:
+                raise serializers.ValidationError({
+                    "subject_id": "Subject is required for this activity type."
+                })
+            elif not activity_type.display_subject:
+                data['subject'] = None
         return data
 
     def to_representation(self, instance):
@@ -310,5 +341,13 @@ class ClassTimetableSerializer(serializers.ModelSerializer):
         else:
             ret['created_by_name'] = 'System'
             
+        # 11. activity type details
+        if instance.activity_type:
+            ret['activity_type_name'] = instance.activity_type.activity_name
+            ret['display_subject'] = instance.activity_type.display_subject
+        else:
+            ret['activity_type_name'] = ''
+            ret['display_subject'] = True
+
         return ret
 

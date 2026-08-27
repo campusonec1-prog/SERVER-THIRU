@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import StudentStatusViewSet, StudentViewSet, MarksViewSet, CounsellingReportViewSet
+from .views import StudentStatusViewSet, StudentViewSet, MarksViewSet, CounsellingReportViewSet, FacultyActivityViewSet, StudentAttendanceViewSet
 
 urlpatterns = [
     # Student Status endpoints
@@ -26,6 +26,15 @@ urlpatterns = [
     path('marks/list', MarksViewSet.as_view({'get': 'list'}), name='marks-list'),
     path('marks/get/<int:pk>', MarksViewSet.as_view({'get': 'retrieve'}), name='marks-detail'),
     path('marks/edit', MarksViewSet.as_view({'put': 'update'}), name='marks-edit'),
+
+    # Attendance endpoints
+    path('attendance/activity/create', FacultyActivityViewSet.as_view({'post': 'create'}), name='attendance-activity-create'),
+    path('attendance/activity/list', FacultyActivityViewSet.as_view({'get': 'list'}), name='attendance-activity-list'),
+    path('attendance/activity/get/<int:pk>', FacultyActivityViewSet.as_view({'get': 'retrieve'}), name='attendance-activity-detail'),
+    path('attendance/activity/edit/<int:pk>', FacultyActivityViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='attendance-activity-edit'),
+    path('attendance/activity/remove/<int:pk>', FacultyActivityViewSet.as_view({'delete': 'destroy'}), name='attendance-activity-remove'),
+    path('attendance/submit', StudentAttendanceViewSet.as_view({'post': 'bulk_submit'}), name='attendance-submit'),
+    path('attendance/list', StudentAttendanceViewSet.as_view({'get': 'list'}), name='attendance-list'),
 
     # Counselling Report endpoints
     path('counselling/create', CounsellingReportViewSet.as_view({'post': 'create'}), name='counselling-create'),

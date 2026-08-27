@@ -59,3 +59,8 @@ class CounsellingReportPermission(BaseRolePermission):
             return obj.created_by == request.user
 
         return True
+
+
+class AttendancePermission(BaseRolePermission):
+    read_roles = ['authenticated']
+    write_roles = ['admin', 'administrator', 'hod', 'faculty', 'principal', 'vice principal']

@@ -4,9 +4,9 @@ from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from django.db import transaction
-from .models import ExamTimetable, ClassTimetable
-from .serializers import ExamTimetableSerializer, ClassTimetableSerializer
-from .permissions import ExamTimetablePermission, ClassTimetablePermission
+from .models import ExamTimetable, ClassTimetable, ActivityType
+from .serializers import ExamTimetableSerializer, ClassTimetableSerializer, ActivityTypeSerializer
+from .permissions import ExamTimetablePermission, ClassTimetablePermission, ActivityTypePermission
 from schedule.models import Day, Period
 from users.models import User as FacultyUser
 
@@ -759,3 +759,105 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
                 )
         except Exception:
             pass
+
+
+class ActivityTypeViewSet(viewsets.ModelViewSet):
+    queryset = ActivityType.objects.all().order_by('id')
+    serializer_class = ActivityTypeSerializer
+    permission_classes = [ActivityTypePermission]
+
+    def handle_exception(self, exc):
+        if isinstance(exc, (Http404, NotFound)):
+            return Response({
+                "code": 404,
+                "message": "Activity Type not found"
+            }, status=status.HTTP_404_NOT_FOUND)
+        if isinstance(exc, NotAuthenticated):
+            return Response({
+                "code": 401,
+                "message": "You don't have access to this resource."
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        if isinstance(exc, PermissionDenied):
+            return Response({
+                "code": 403,
+                "message": "You don't have access to this resource."
+            }, status=status.HTTP_403_FORBIDDEN)
+        if isinstance(exc, ValidationError):
+            return Response({
+                "code": 400,
+                "message": str(exc.detail[0] if isinstance(exc.detail, list) else exc.detail)
+            }, status=status.HTTP_400_BAD_REQUEST)
+        return super().handle_exception(exc)
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        from users.models import User as StandardUser
+        tracking_user = user if isinstance(user, StandardUser) else None
+        serializer.save(created_by=tracking_user, updated_by=tracking_user)
+
+    def perform_update(self, serializer):
+        user = self.request.user
+        from users.models import User as StandardUser
+        tracking_user = user if isinstance(user, StandardUser) else None
+        serializer.save(updated_by=tracking_user)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        
+        active_only = request.query_params.get('active_only')
+        if active_only == 'true':
+            queryset = queryset.filter(is_active=True)
+            
+        search = request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(activity_name__icontains=search)
+
+        disable_pagination = request.query_params.get('pagination') == 'false'
+        if not disable_pagination:
+            page = self.paginate_queryset(queryset)
+            if page is not None:
+                serializer = self.get_serializer(page, many=True)
+                paginated_response = self.get_paginated_response(serializer.data)
+                return Response({
+                    "code": 200,
+                    "message": "Activity Types listed successfully.",
+                    "data": paginated_response.data
+                }, status=status.HTTP_200_OK)
+                
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            "code": 200,
+            "message": "Activity Types listed successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Activity Type retrieved successfully.",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        return Response({
+            "code": 201,
+            "message": "Activity Type created successfully.",
+            "data": response.data
+        }, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        response = super().update(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Activity Type updated successfully.",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        super().destroy(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Activity Type deleted successfully."
+        }, status=status.HTTP_200_OK)

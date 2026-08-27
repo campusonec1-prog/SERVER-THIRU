@@ -194,4 +194,63 @@ class StudentFees(TrackingModel):
         return f"Fees Payment for {self.student.user.name if self.student.user else 'Student'}"
 
 
+class FacultyActivity(TrackingModel):
+    ACTIVITY_CHOICES = [
+        ('lecture', 'Lecture'),
+        ('laboratory', 'Laboratory'),
+        ('discussion', 'Discussion'),
+        ('test_or_exam', 'Test or exam'),
+        ('seminar', 'Seminar'),
+        ('others', 'Others'),
+    ]
+    timetable = models.ForeignKey(
+        'timetable.ClassTimetable',
+        on_delete=models.CASCADE,
+        db_column='timetable_id',
+        related_name='activities'
+    )
+    date = models.DateField()
+    activity_type = models.CharField(max_length=30, choices=ACTIVITY_CHOICES)
+    other_activity = models.CharField(max_length=255, null=True, blank=True)
+    remarks = models.TextField(null=True, blank=True)
+    total_students = models.IntegerField(default=0)
+    total_present = models.IntegerField(default=0)
+    total_absentees = models.IntegerField(default=0)
+    total_od = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = 'faculty_activities'
+
+    def __str__(self):
+        return f"Activity on {self.date} for {self.timetable}"
+
+
+class StudentAttendance(TrackingModel):
+    STATUS_CHOICES = [
+        ('P', 'Present'),
+        ('AB', 'Absent'),
+        ('OD', 'On Duty'),
+    ]
+    faculty_activity = models.ForeignKey(
+        FacultyActivity,
+        on_delete=models.CASCADE,
+        db_column='faculty_activity_id',
+        related_name='attendances'
+    )
+    student = models.ForeignKey(
+        Student,
+        on_delete=models.CASCADE,
+        db_column='student_id',
+        related_name='attendances'
+    )
+    status = models.CharField(max_length=5, choices=STATUS_CHOICES, default='P')
+
+    class Meta:
+        db_table = 'student_attendances'
+        unique_together = ('faculty_activity', 'student')
+
+    def __str__(self):
+        return f"{self.student.roll_number} - {self.status} (Activity {self.faculty_activity.id})"
+
+
 

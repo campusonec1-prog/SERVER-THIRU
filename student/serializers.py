@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import StudentStatus, Student
+from .models import StudentStatus, Student, FacultyActivity, StudentAttendance
 from institution.models import Department, Section, Batch, Quota
 from users.models import User
 from dynamic_forms.models import ApplicationUser
@@ -496,3 +496,107 @@ class StudentFeesSerializer(serializers.ModelSerializer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         apply_default_error_messages(self.fields)
+
+
+class FacultyActivitySerializer(serializers.ModelSerializer):
+    timetable_id = serializers.PrimaryKeyRelatedField(
+        source='timetable',
+        queryset=FacultyActivity._meta.get_field('timetable').remote_field.model.objects.all(),
+        error_messages={'does_not_exist': 'Timetable entry does not exist.'}
+    )
+
+    class Meta:
+        model = FacultyActivity
+        fields = [
+            'id', 'timetable_id', 'date', 'activity_type', 'other_activity',
+            'remarks', 'total_students', 'total_present', 'total_absentees', 'total_od',
+            'created_at', 'updated_at', 'created_by', 'updated_by'
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+    def validate(self, attrs):
+        timetable = attrs.get('timetable')
+        date = attrs.get('date')
+        if timetable and date:
+            qs = FacultyActivity.objects.filter(timetable=timetable, date=date)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError("Attendance has already been recorded for this class on the selected date.")
+        return attrs
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        if instance.timetable:
+            subject_name = ""
+            subject_code = ""
+            if instance.timetable.subject:
+                subject_name = instance.timetable.subject.subject_name
+                subject_code = instance.timetable.subject.subject_code
+            elif getattr(instance.timetable, 'activity_type', None):
+                subject_name = instance.timetable.activity_type.activity_name
+                subject_code = "—"
+            
+            period_str = f"Period {instance.timetable.period.period_no}" if instance.timetable.period else "Period —"
+            ret['timetable_info'] = f"{period_str} - {subject_name}" if subject_name else period_str
+            ret['subject_code'] = subject_code
+            ret['subject_name'] = subject_name
+            ret['department_name'] = instance.timetable.department.department_name if instance.timetable.department else ""
+            ret['department_id'] = instance.timetable.department_id
+            ret['batch_name'] = instance.timetable.batch.batch if instance.timetable.batch else ""
+            ret['batch_id'] = instance.timetable.batch_id
+            ret['section_id'] = instance.timetable.section_id
+            
+            sec_str = ""
+            if instance.timetable.section:
+                if isinstance(instance.timetable.section.sections, list):
+                    sec_str = ", ".join(instance.timetable.section.sections)
+                else:
+                    sec_str = str(instance.timetable.section.sections)
+            ret['section_name'] = sec_str
+            ret['day_name'] = instance.timetable.day.day_name if instance.timetable.day else ""
+            ret['day_code'] = instance.timetable.day.day_code if instance.timetable.day else ""
+            ret['period_no'] = instance.timetable.period.period_no if instance.timetable.period else ""
+
+        if instance.created_by:
+            ret['entered_by_name'] = instance.created_by.name
+        else:
+            ret['entered_by_name'] = "—"
+        return ret
+
+
+class StudentAttendanceSerializer(serializers.ModelSerializer):
+    faculty_activity_id = serializers.PrimaryKeyRelatedField(
+        source='faculty_activity',
+        queryset=FacultyActivity.objects.all(),
+        error_messages={'does_not_exist': 'Faculty activity does not exist.'}
+    )
+    student_id = serializers.PrimaryKeyRelatedField(
+        source='student',
+        queryset=Student.objects.all(),
+        error_messages={'does_not_exist': 'Student does not exist.'}
+    )
+
+    class Meta:
+        model = StudentAttendance
+        fields = [
+            'id', 'faculty_activity_id', 'student_id', 'status',
+            'created_at', 'updated_at', 'created_by', 'updated_by'
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        if instance.student:
+            ret['student_name'] = instance.student.user.name if instance.student.user else "Unknown"
+            ret['student_roll'] = instance.student.roll_number
+            ret['student_register'] = instance.student.register_number
+        return ret
