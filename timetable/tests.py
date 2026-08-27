@@ -91,7 +91,8 @@ class ExamTimetableAPITests(APITestCase):
             start_time="09:30:00", end_time="12:30:00",
             academic_year=self.active_academic_year, batch=self.batch,
             department=self.department, exam=self.exam,
-            section=self.section, semester=self.semester
+            section=self.section, semester=self.semester,
+            created_by=self.student_user
         )
         
         # Authenticate as student
@@ -461,7 +462,8 @@ class ClassTimetableAPITests(APITestCase):
             academic_year=self.active_academic_year, day=self.day_mon, period=self.period_1,
             department=self.department, faculty=self.hod_user, section=self.section,
             semester=self.semester, subject=self.subject, batch=self.batch,
-            is_lab=False, room_no="Room 303"
+            is_lab=False, room_no="Room 303",
+            created_by=self.student_user
         )
         self.client.force_authenticate(user=self.student_user)
         response = self.client.get(self.list_url + '?pagination=false')

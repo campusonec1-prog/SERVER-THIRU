@@ -16,6 +16,29 @@ class ExamTimetableViewSet(viewsets.ModelViewSet):
     permission_classes = [ExamTimetablePermission]
     model_label = "Exam timetable"
 
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return ExamTimetable.objects.none()
+            
+        queryset = ExamTimetable.objects.all().order_by('id')
+        
+        is_admin = getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)
+        if not is_admin:
+            try:
+                role = getattr(user, 'role', None)
+                if role:
+                    user_role = role.role_name.upper().replace(' ', '_')
+                    if user_role in ['ADMIN', 'ADMINISTRATOR']:
+                        is_admin = True
+            except AttributeError:
+                pass
+                
+        if not is_admin:
+            queryset = queryset.filter(created_by=user)
+            
+        return queryset
+
     def handle_exception(self, exc):
         if isinstance(exc, (Http404, NotFound)):
             return Response({
@@ -258,6 +281,29 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
     permission_classes = [ClassTimetablePermission]
     model_label = "Class timetable"
 
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return ClassTimetable.objects.none()
+            
+        queryset = ClassTimetable.objects.all().order_by('day__id', 'period__period_no')
+        
+        is_admin = getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)
+        if not is_admin:
+            try:
+                role = getattr(user, 'role', None)
+                if role:
+                    user_role = role.role_name.upper().replace(' ', '_')
+                    if user_role in ['ADMIN', 'ADMINISTRATOR']:
+                        is_admin = True
+            except AttributeError:
+                pass
+                
+        if not is_admin:
+            queryset = queryset.filter(created_by=user)
+            
+        return queryset
+
     def handle_exception(self, exc):
         if isinstance(exc, (Http404, NotFound)):
             return Response({
@@ -456,15 +502,30 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
                 raise ValidationError(conflicts[0])
             # ──────────────────────────────────────────────────────────────────────
 
+            user = self.request.user
+            is_admin = getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)
+            if not is_admin and user and user.is_authenticated:
+                try:
+                    role = getattr(user, 'role', None)
+                    if role:
+                        user_role = role.role_name.upper().replace(' ', '_')
+                        if user_role in ['ADMIN', 'ADMINISTRATOR']:
+                            is_admin = True
+                except AttributeError:
+                    pass
+
             with transaction.atomic():
                 # Delete existing weekly timetable slots matching the filters
-                ClassTimetable.objects.filter(
+                delete_query = ClassTimetable.objects.filter(
                     academic_year_id=academic_year_id,
                     department_id=department_id,
                     batch_id=batch_id,
                     semester_id=semester_id,
                     section_id=section_id
-                ).delete()
+                )
+                if not is_admin and user:
+                    delete_query = delete_query.filter(created_by=user)
+                delete_query.delete()
 
                 if flat_records:
                     serializer = self.get_serializer(data=flat_records, many=True)
@@ -597,6 +658,19 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
                 )
         # ──────────────────────────────────────────────────────────────────────
 
+        # Check if user is admin
+        user = request.user
+        is_admin = getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)
+        if not is_admin and user and user.is_authenticated:
+            try:
+                role = getattr(user, 'role', None)
+                if role:
+                    user_role = role.role_name.upper().replace(' ', '_')
+                    if user_role in ['ADMIN', 'ADMINISTRATOR']:
+                        is_admin = True
+            except AttributeError:
+                pass
+
         saved_slots = []
         with transaction.atomic():
             for slot in slots:
@@ -611,6 +685,31 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
                         "Each slot must include day_id, period_id, subject_id, and faculty_id."
                     )
 
+                defaults = {
+                    'subject_id':  subject_id,
+                    'faculty_id':  faculty_id,
+                    'is_lab':      is_lab,
+                    'room_no':     room_no or '',
+                    'updated_by':  request.user if request.user.is_authenticated else None,
+                }
+                
+                # Check if it already exists and belongs to someone else
+                existing = ClassTimetable.objects.filter(
+                    academic_year_id=academic_year_id,
+                    department_id=department_id,
+                    batch_id=batch_id,
+                    semester_id=semester_id,
+                    section_id=section_id,
+                    day_id=day_id,
+                    period_id=period_id,
+                ).first()
+                
+                if existing:
+                    if not is_admin and existing.created_by != request.user:
+                        raise ValidationError("This slot is already scheduled by another user and you do not have permission to overwrite it.")
+                else:
+                    defaults['created_by'] = request.user if request.user.is_authenticated else None
+
                 instance, _ = ClassTimetable.objects.update_or_create(
                     academic_year_id=academic_year_id,
                     department_id=department_id,
@@ -619,14 +718,7 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
                     section_id=section_id,
                     day_id=day_id,
                     period_id=period_id,
-                    defaults={
-                        'subject_id':  subject_id,
-                        'faculty_id':  faculty_id,
-                        'is_lab':      is_lab,
-                        'room_no':     room_no or '',
-                        'created_by':  request.user if request.user.is_authenticated else None,
-                        'updated_by':  request.user if request.user.is_authenticated else None,
-                    }
+                    defaults=defaults
                 )
                 serializer = self.get_serializer(instance)
                 saved_slots.append(serializer.data)

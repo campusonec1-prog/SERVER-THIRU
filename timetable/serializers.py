@@ -151,6 +151,12 @@ class ExamTimetableSerializer(serializers.ModelSerializer):
         else:
             ret['session_name'] = ''
             
+        # 9. creator details
+        if instance.created_by:
+            ret['created_by_name'] = instance.created_by.name or instance.created_by.username
+        else:
+            ret['created_by_name'] = 'System'
+            
         return ret
 
 
@@ -297,6 +303,12 @@ class ClassTimetableSerializer(serializers.ModelSerializer):
         else:
             ret['faculty_name'] = ''
             ret['faculty_email'] = ''
+            
+        # 10. creator details
+        if instance.created_by:
+            ret['created_by_name'] = instance.created_by.name or instance.created_by.username
+        else:
+            ret['created_by_name'] = 'System'
             
         return ret
 
