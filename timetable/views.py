@@ -11,7 +11,9 @@ from schedule.models import Day, Period
 from users.models import User as FacultyUser
 
 class ExamTimetableViewSet(viewsets.ModelViewSet):
-    queryset = ExamTimetable.objects.all().order_by('id')
+    queryset = ExamTimetable.objects.select_related(
+        'academic_year', 'department', 'batch', 'section', 'semester', 'exam', 'subject', 'session', 'created_by'
+    ).order_by('id')
     serializer_class = ExamTimetableSerializer
     permission_classes = [ExamTimetablePermission]
     model_label = "Exam timetable"
@@ -21,7 +23,9 @@ class ExamTimetableViewSet(viewsets.ModelViewSet):
         if not user or not user.is_authenticated:
             return ExamTimetable.objects.none()
             
-        queryset = ExamTimetable.objects.all().order_by('id')
+        queryset = ExamTimetable.objects.select_related(
+            'academic_year', 'department', 'batch', 'section', 'semester', 'exam', 'subject', 'session', 'created_by'
+        ).order_by('id')
         
         is_admin = getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)
         if not is_admin:
@@ -279,7 +283,9 @@ class ExamTimetableViewSet(viewsets.ModelViewSet):
 
 
 class ClassTimetableViewSet(viewsets.ModelViewSet):
-    queryset = ClassTimetable.objects.all().order_by('day__id', 'period__period_no')
+    queryset = ClassTimetable.objects.select_related(
+        'academic_year', 'department', 'batch', 'section', 'semester', 'day', 'period', 'subject', 'faculty', 'activity_type', 'created_by'
+    ).order_by('day__id', 'period__period_no')
     serializer_class = ClassTimetableSerializer
     permission_classes = [ClassTimetablePermission]
     model_label = "Class timetable"
@@ -289,7 +295,9 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
         if not user or not user.is_authenticated:
             return ClassTimetable.objects.none()
             
-        queryset = ClassTimetable.objects.all().order_by('day__id', 'period__period_no')
+        queryset = ClassTimetable.objects.select_related(
+            'academic_year', 'department', 'batch', 'section', 'semester', 'day', 'period', 'subject', 'faculty', 'activity_type', 'created_by'
+        ).order_by('day__id', 'period__period_no')
         
         is_admin = getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)
         if not is_admin:
