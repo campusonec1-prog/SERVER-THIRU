@@ -2,6 +2,13 @@ from django.core.validators import RegexValidator
 from django.db import models
 from common.models import TrackingModel
 
+class UserStatus(models.TextChoices):
+    ACTIVE = 'ACTIVE', 'Active'
+    INACTIVE = 'INACTIVE', 'Inactive'
+    LEFT = 'LEFT', 'Left / Relieved'
+    SUSPENDED = 'SUSPENDED', 'Suspended'
+    ON_LEAVE = 'ON_LEAVE', 'On Leave'
+
 class User(TrackingModel):
     name = models.CharField(max_length=150)
     username = models.CharField(max_length=150, unique=True)
@@ -12,6 +19,12 @@ class User(TrackingModel):
     )
     mail = models.EmailField(unique=True)
     role = models.ForeignKey('role.Role', on_delete=models.CASCADE, db_column='role_id', related_name='users')
+    status = models.CharField(
+        max_length=30,
+        choices=UserStatus.choices,
+        default=UserStatus.ACTIVE,
+        db_index=True
+    )
 
     class Meta:
         db_table = 'users'
