@@ -50,6 +50,13 @@ class ExamTimetable(TrackingModel):
         null=True,
         blank=True
     )
+    subject_category = models.CharField(
+        max_length=20,
+        choices=[('THEORY', 'Theory'), ('LAB', 'Lab')],
+        default='THEORY',
+        null=True,
+        blank=True
+    )
     semester = models.ForeignKey(
         'institution.Semester',
         on_delete=models.CASCADE,
@@ -156,14 +163,20 @@ class ClassTimetable(TrackingModel):
         null=True,
         blank=True
     )
-    is_lab = models.BooleanField(default=False, blank=True)
+    subject_category = models.CharField(
+        max_length=20,
+        choices=[('THEORY', 'Theory'), ('LAB', 'Lab')],
+        default='THEORY',
+        null=True,
+        blank=True
+    )
     room_no = models.CharField(max_length=50, null=True, blank=True)
     from_date = models.DateField(null=True, blank=True)
     to_date = models.DateField(null=True, blank=True)
 
     class Meta:
         db_table = 'class_timetables'
-        unique_together = ('academic_year', 'day', 'period', 'department', 'batch', 'semester', 'section')
+        unique_together = ('academic_year', 'day', 'period', 'department', 'batch', 'semester', 'section', 'from_date')
 
     def __str__(self):
         subject_str = f" - {self.subject.subject_code}" if self.subject else ""

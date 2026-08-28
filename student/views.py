@@ -1770,6 +1770,7 @@ class MarksViewSet(viewsets.ViewSet):
             
         exam_id = request.query_params.get('exam_id')
         subject_id = request.query_params.get('subject_id')
+        subject_category = request.query_params.get('subject_category')
         batch_id = request.query_params.get('batch_id')
         section_id = request.query_params.get('section_id')
 
@@ -1781,6 +1782,8 @@ class MarksViewSet(viewsets.ViewSet):
             queryset = queryset.filter(exam_id=exam_id)
         if subject_id:
             queryset = queryset.filter(subject_id=subject_id)
+        if subject_category:
+            queryset = queryset.filter(subject_category=subject_category)
         if batch_id:
             queryset = queryset.filter(student__batch_id=batch_id)
         if section_id:
@@ -1823,6 +1826,7 @@ class MarksViewSet(viewsets.ViewSet):
     def _save_marks(self, request, is_create):
         exam_id = request.data.get('exam_id')
         subject_id = request.data.get('subject_id')
+        subject_category = request.data.get('subject_category', 'THEORY')
         marks_entries = request.data.get('marks_entries')
 
         if not exam_id or not subject_id or not isinstance(marks_entries, list):
@@ -1879,14 +1883,15 @@ class MarksViewSet(viewsets.ViewSet):
                         raise ValidationError(f"Student with ID {student_id} does not exist.")
 
                     if is_create:
-                        if Marks.objects.filter(student=student, exam=exam, subject=subject).exists():
-                            raise ValidationError(f"Marks record already exists for student ID {student_id}, exam ID {exam_id}, and subject ID {subject_id}.")
+                        if Marks.objects.filter(student=student, exam=exam, subject=subject, subject_category=subject_category).exists():
+                            raise ValidationError(f"Marks record already exists for student ID {student_id}, exam ID {exam_id}, subject ID {subject_id}, and category {subject_category}.")
 
                     # Create or update marks record
                     marks_instance, created = Marks.objects.get_or_create(
                         student=student,
                         exam=exam,
                         subject=subject,
+                        subject_category=subject_category,
                         defaults={
                             'marks_obtained': marks_obtained,
                             'created_by': tracking_user,

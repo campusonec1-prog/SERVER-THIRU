@@ -66,7 +66,7 @@ class ExamTimetableSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'exam_date', 'session_id', 'start_time', 'end_time',
             'academic_year_id', 'batch_id', 'department_id', 'exam_id',
-            'section_id', 'semester_id', 'subject_id', 'created_at', 'updated_at',
+            'section_id', 'semester_id', 'subject_id', 'subject_category', 'created_at', 'updated_at',
             'created_by', 'updated_by'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
@@ -239,8 +239,8 @@ class ClassTimetableSerializer(serializers.ModelSerializer):
         model = ClassTimetable
         fields = [
             'id', 'academic_year_id', 'day_id', 'period_id', 'department_id',
-            'faculty_id', 'section_id', 'semester_id', 'subject_id', 'batch_id',
-            'activity_type_id', 'is_lab', 'room_no', 'from_date', 'to_date',
+            'faculty_id', 'section_id', 'semester_id', 'subject_id', 'subject_category', 'batch_id',
+            'activity_type_id', 'room_no', 'from_date', 'to_date',
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']

@@ -89,11 +89,18 @@ class Marks(TrackingModel):
         db_column='subject_id',
         related_name='marks'
     )
+    subject_category = models.CharField(
+        max_length=20,
+        choices=[('THEORY', 'Theory'), ('LAB', 'Lab')],
+        default='THEORY',
+        null=True,
+        blank=True
+    )
     marks_obtained = models.CharField(max_length=50)
 
     class Meta:
         db_table = 'marks'
-        unique_together = ('student', 'exam', 'subject')
+        unique_together = ('student', 'exam', 'subject', 'subject_category')
 
     def __str__(self):
         return f"{self.student.roll_number} - {self.subject.subject_code} ({self.exam.exam_name}): {self.marks_obtained}"

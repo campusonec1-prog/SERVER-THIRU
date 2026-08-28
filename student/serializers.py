@@ -309,7 +309,7 @@ class MarksSerializer(serializers.ModelSerializer):
     class Meta:
         model = Marks
         fields = [
-            'id', 'student_id', 'exam_id', 'subject_id', 'marks_obtained',
+            'id', 'student_id', 'exam_id', 'subject_id', 'subject_category', 'marks_obtained',
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
