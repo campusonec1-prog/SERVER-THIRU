@@ -2181,3 +2181,175 @@
   }
 }
 
+{
+  "path": "/api/users/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "faculty_code": "2697291981",
+        "name": "S.VENMAL",
+        "errors": [
+          "Faculty Code '2697291981' is already registered."
+        ]
+      },
+      {
+        "row": 2,
+        "faculty_code": "2629091988",
+        "name": "Mrs AMBIGA A",
+        "errors": [
+          "Faculty Code '2629091988' is already registered."
+        ]
+      },
+      {
+        "row": 3,
+        "faculty_code": "2661691992",
+        "name": "Mr BHARATHIRAJA R",
+        "errors": [
+          "Faculty Code '2661691992' is already registered."
+        ]
+      },
+      {
+        "row": 4,
+        "faculty_code": "2619412001",
+        "name": "Mrs INDU MATHY",
+        "errors": [
+          "Faculty Code '2619412001' is already registered."
+        ]
+      },
+      {
+        "row": 5,
+        "faculty_code": "2651221990",
+        "name": "Mrs M. JAGADEESWARI",
+        "errors": [
+          "Faculty Code '2651221990' is already registered."
+        ]
+      },
+      {
+        "row": 6,
+        "faculty_code": "2617661992",
+        "name": "Mr LOKESHBABU RAJA",
+        "errors": [
+          "Faculty Code '2617661992' is already registered."
+        ]
+      },
+      {
+        "row": 7,
+        "faculty_code": "2678272001",
+        "name": "Mrs MENAGA E",
+        "errors": [
+          "Faculty Code '2678272001' is already registered."
+        ]
+      },
+      {
+        "row": 8,
+        "faculty_code": "2616931992",
+        "name": "Mrs MONISHA S",
+        "errors": [
+          "Faculty Code '2616931992' is already registered."
+        ]
+      },
+      {
+        "row": 9,
+        "faculty_code": "2625811982",
+        "name": "Mr PARTHIPAN VIJAYARAGAVAN",
+        "errors": [
+          "Faculty Code '2625811982' is already registered."
+        ]
+      },
+      {
+        "row": 10,
+        "faculty_code": "2645841984",
+        "name": "Mrs PORKODI T",
+        "errors": [
+          "Faculty Code '2645841984' is already registered."
+        ]
+      },
+      {
+        "row": 11,
+        "faculty_code": "2632991991",
+        "name": "Mrs SARANYA B",
+        "errors": [
+          "Faculty Code '2632991991' is already registered."
+        ]
+      },
+      {
+        "row": 12,
+        "faculty_code": "2695471984",
+        "name": "Mrs SINDHU D",
+        "errors": [
+          "Faculty Code '2695471984' is already registered."
+        ]
+      },
+      {
+        "row": 13,
+        "faculty_code": "2649781988",
+        "name": "Mrs SUDHASARANYA KUPPUSAMY",
+        "errors": [
+          "Faculty Code '2649781988' is already registered."
+        ]
+      },
+      {
+        "row": 14,
+        "faculty_code": "2623191989",
+        "name": "Mr THANIGAIVEL M",
+        "errors": [
+          "Faculty Code '2623191989' is already registered."
+        ]
+      },
+      {
+        "row": 15,
+        "faculty_code": "2639951999",
+        "name": "Mr VASU DEVAN",
+        "errors": [
+          "Faculty Code '2639951999' is already registered."
+        ]
+      },
+      {
+        "row": 16,
+        "faculty_code": "2685491992",
+        "name": "Mr R PONSELVAN RAJAKUMAR",
+        "errors": [
+          "Faculty Code '2685491992' is already registered."
+        ]
+      },
+      {
+        "row": 17,
+        "faculty_code": "2679671989",
+        "name": "Mrs GEETHA PRIYADHARSHINI S",
+        "errors": [
+          "Faculty Code '2679671989' is already registered."
+        ]
+      },
+      {
+        "row": 18,
+        "faculty_code": "2752431990",
+        "name": "Mrs KOTHAKOTA BALASARASWATHI",
+        "errors": [
+          "Faculty Code '2752431990' is already registered."
+        ]
+      },
+      {
+        "row": 19,
+        "faculty_code": "2783971993",
+        "name": "Mrs PADIRI SWATHI",
+        "errors": [
+          "Faculty Code '2783971993' is already registered."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/users/edit/2",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "Password: Password is required."
+  }
+}
+

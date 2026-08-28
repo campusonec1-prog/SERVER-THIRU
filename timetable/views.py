@@ -383,6 +383,8 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
         day_id = request.query_params.get('day_id')
         period_id = request.query_params.get('period_id')
         faculty_id = request.query_params.get('faculty_id')
+        from_date = request.query_params.get('from_date')
+        to_date = request.query_params.get('to_date')
         
         if academic_year_id:
             queryset = queryset.filter(academic_year_id=academic_year_id)
@@ -403,6 +405,10 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(period_id=period_id)
         if faculty_id:
             queryset = queryset.filter(faculty_id=faculty_id)
+        if from_date:
+            queryset = queryset.filter(from_date=from_date)
+        if to_date:
+            queryset = queryset.filter(to_date=to_date)
             
         disable_pagination = request.query_params.get('pagination') == 'false'
         if not disable_pagination:
@@ -445,9 +451,27 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
             batch_id = data.get('batch_id')
             semester_id = data.get('semester_id')
             section_id = data.get('section_id')
+            from_date = data.get('from_date')
+            to_date = data.get('to_date')
 
             if not all([academic_year_id, department_id, batch_id, semester_id, section_id]):
                 raise ValidationError("academic_year_id, department_id, batch_id, semester_id, and section_id are required in the root payload.")
+
+            if not from_date:
+                raise ValidationError("from_date is required.")
+            if not to_date:
+                raise ValidationError("to_date is required.")
+
+            from django.utils.dateparse import parse_date
+            parsed_from = parse_date(str(from_date)) if isinstance(from_date, str) else from_date
+            parsed_to = parse_date(str(to_date)) if isinstance(to_date, str) else to_date
+
+            if not parsed_from:
+                raise ValidationError("from_date must be a valid date.")
+            if not parsed_to:
+                raise ValidationError("to_date must be a valid date.")
+            if parsed_to < parsed_from:
+                raise ValidationError("to_date must be after or equal to from_date.")
 
             flat_records = []
             for item in data['class_timetables']:
@@ -463,14 +487,17 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
                         'subject_id': item.get('subject_id'),
                         'faculty_id': item.get('faculty_id'),
                         'is_lab': item.get('is_lab', False),
-                        'room_no': item.get('room_no', '')
+                        'room_no': item.get('room_no', ''),
+                        'from_date': from_date,
+                        'to_date': to_date,
                     }
                     flat_records.append(record)
 
             # ── Faculty double-booking validation ──────────────────────────────────
             # For each slot being saved, check whether the chosen faculty is already
             # assigned to that same (academic_year, day, period) in ANY OTHER
-            # class timetable group (different dept / batch / semester / section).
+            # class timetable group (different dept / batch / semester / section)
+            # during an overlapping date range.
 
             conflicts = []
             for rec in flat_records:
@@ -485,6 +512,8 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
                     faculty_id=f_id,
                     day_id=d_id,
                     period_id=p_id,
+                    from_date__lte=to_date,
+                    to_date__gte=from_date
                 ).exclude(
                     department_id=department_id,
                     batch_id=batch_id,
@@ -625,14 +654,71 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
         semester_id      = data.get('semester_id')
         section_id       = data.get('section_id')
         room_no          = data.get('room_no', '')
+        from_date        = data.get('from_date')
+        to_date          = data.get('to_date')
         slots            = data.get('slots', [])
 
         if not all([academic_year_id, department_id, batch_id, semester_id, section_id]):
             raise ValidationError(
                 "academic_year_id, department_id, batch_id, semester_id, and section_id are required."
             )
-        if not slots or not isinstance(slots, list):
-            raise ValidationError("slots must be a non-empty list.")
+        if not from_date:
+            raise ValidationError("from_date is required.")
+        if not to_date:
+            raise ValidationError("to_date is required.")
+
+        from django.utils.dateparse import parse_date
+        parsed_from = parse_date(str(from_date)) if isinstance(from_date, str) else from_date
+        parsed_to = parse_date(str(to_date)) if isinstance(to_date, str) else to_date
+
+        if not parsed_from:
+            raise ValidationError("from_date must be a valid date.")
+        if not parsed_to:
+            raise ValidationError("to_date must be a valid date.")
+        if parsed_to < parsed_from:
+            raise ValidationError("to_date must be after or equal to from_date.")
+
+        # Check if user is admin
+        user = request.user
+        is_admin = getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)
+        if not is_admin and user and user.is_authenticated:
+            try:
+                role = getattr(user, 'role', None)
+                if role:
+                    user_role = role.role_name.upper().replace(' ', '_')
+                    if user_role in ['ADMIN', 'ADMINISTRATOR']:
+                        is_admin = True
+            except AttributeError:
+                pass
+
+        if not isinstance(slots, list):
+            raise ValidationError("slots must be a list.")
+
+        # Handle metadata update if slots is empty
+        if not slots:
+            existing_slots = ClassTimetable.objects.filter(
+                academic_year_id=academic_year_id,
+                department_id=department_id,
+                batch_id=batch_id,
+                semester_id=semester_id,
+                section_id=section_id
+            )
+            if not is_admin and user:
+                non_owned = existing_slots.exclude(created_by=user)
+                if non_owned.exists():
+                    raise ValidationError("Some slots in this timetable belong to another user. You do not have permission to modify settings.")
+
+            updated_count = existing_slots.update(
+                room_no=room_no or '',
+                from_date=from_date,
+                to_date=to_date,
+                updated_by=user if user and user.is_authenticated else None
+            )
+            return Response({
+                "code": 200,
+                "message": f"Timetable settings updated successfully. Updated {updated_count} slot(s).",
+                "data": []
+            }, status=status.HTTP_200_OK)
 
         # ── Faculty double-booking validation ──────────────────────────────────
         for slot in slots:
@@ -649,6 +735,8 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
                     faculty_id=f_id,
                     day_id=d_id,
                     period_id=p_id,
+                    from_date__lte=to_date,
+                    to_date__gte=from_date
                 )
                 .exclude(
                     department_id=department_id,
@@ -674,19 +762,6 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
                 )
         # ──────────────────────────────────────────────────────────────────────
 
-        # Check if user is admin
-        user = request.user
-        is_admin = getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)
-        if not is_admin and user and user.is_authenticated:
-            try:
-                role = getattr(user, 'role', None)
-                if role:
-                    user_role = role.role_name.upper().replace(' ', '_')
-                    if user_role in ['ADMIN', 'ADMINISTRATOR']:
-                        is_admin = True
-            except AttributeError:
-                pass
-
         saved_slots = []
         with transaction.atomic():
             for slot in slots:
@@ -695,10 +770,11 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
                 subject_id = slot.get('subject_id')
                 faculty_id = slot.get('faculty_id')
                 is_lab     = slot.get('is_lab', False)
+                activity_type_id = slot.get('activity_type_id')
 
-                if not all([day_id, period_id, subject_id, faculty_id]):
+                if not all([day_id, period_id, faculty_id]):
                     raise ValidationError(
-                        "Each slot must include day_id, period_id, subject_id, and faculty_id."
+                        "Each slot must include day_id, period_id, and faculty_id."
                     )
 
                 defaults = {
@@ -706,6 +782,9 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
                     'faculty_id':  faculty_id,
                     'is_lab':      is_lab,
                     'room_no':     room_no or '',
+                    'from_date':   from_date,
+                    'to_date':     to_date,
+                    'activity_type_id': activity_type_id,
                     'updated_by':  request.user if request.user.is_authenticated else None,
                 }
                 
@@ -738,6 +817,20 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
                 )
                 serializer = self.get_serializer(instance)
                 saved_slots.append(serializer.data)
+
+            # Synchronize metadata (from_date, to_date, room_no) to all other slots in the same group
+            ClassTimetable.objects.filter(
+                academic_year_id=academic_year_id,
+                department_id=department_id,
+                batch_id=batch_id,
+                semester_id=semester_id,
+                section_id=section_id
+            ).update(
+                room_no=room_no or '',
+                from_date=from_date,
+                to_date=to_date,
+                updated_by=request.user if request.user.is_authenticated else None
+            )
 
         self._broadcast_change(saved_slots, 'class_timetable_assigned')
         return Response({

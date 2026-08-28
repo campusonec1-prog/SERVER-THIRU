@@ -226,14 +226,22 @@ class ClassTimetableSerializer(serializers.ModelSerializer):
         allow_null=True,
         error_messages={'does_not_exist': 'Activity Type does not exist.'}
     )
+    from_date = serializers.DateField(
+        input_formats=['%Y-%m-%d', '%d-%m-%Y'],
+        error_messages={'invalid': 'Date has wrong format. Use YYYY-MM-DD or DD-MM-YYYY.'}
+    )
+    to_date = serializers.DateField(
+        input_formats=['%Y-%m-%d', '%d-%m-%Y'],
+        error_messages={'invalid': 'Date has wrong format. Use YYYY-MM-DD or DD-MM-YYYY.'}
+    )
 
     class Meta:
         model = ClassTimetable
         fields = [
             'id', 'academic_year_id', 'day_id', 'period_id', 'department_id',
             'faculty_id', 'section_id', 'semester_id', 'subject_id', 'batch_id',
-            'activity_type_id', 'is_lab', 'room_no', 'created_at', 'updated_at', 
-            'created_by', 'updated_by'
+            'activity_type_id', 'is_lab', 'room_no', 'from_date', 'to_date',
+            'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
 
@@ -242,6 +250,21 @@ class ClassTimetableSerializer(serializers.ModelSerializer):
         apply_default_error_messages(self.fields)
 
     def validate(self, data):
+        from_date = data.get('from_date')
+        to_date = data.get('to_date')
+        if not from_date:
+            raise serializers.ValidationError({
+                "from_date": "From date is required."
+            })
+        if not to_date:
+            raise serializers.ValidationError({
+                "to_date": "To date is required."
+            })
+        if from_date and to_date and to_date < from_date:
+            raise serializers.ValidationError({
+                "to_date": "To date must be after or equal to from date."
+            })
+
         academic_year = data.get('academic_year')
         if academic_year and not academic_year.is_active:
             raise serializers.ValidationError({

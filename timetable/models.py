@@ -158,6 +158,8 @@ class ClassTimetable(TrackingModel):
     )
     is_lab = models.BooleanField(default=False, blank=True)
     room_no = models.CharField(max_length=50, null=True, blank=True)
+    from_date = models.DateField(null=True, blank=True)
+    to_date = models.DateField(null=True, blank=True)
 
     class Meta:
         db_table = 'class_timetables'
@@ -172,6 +174,8 @@ class ClassTimetable(TrackingModel):
         super().clean()
         if hasattr(self, 'academic_year') and self.academic_year and not self.academic_year.is_active:
             raise ValidationError({'academic_year': 'Academic year must be active.'})
+        if self.from_date and self.to_date and self.to_date < self.from_date:
+            raise ValidationError({'to_date': 'To date must be after or equal to from date.'})
 
     def save(self, *args, **kwargs):
         self.full_clean()
