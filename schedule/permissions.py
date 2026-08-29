@@ -13,3 +13,9 @@ class PeriodPermission(BaseRolePermission):
 class SessionPermission(BaseRolePermission):
     read_roles = ['authenticated']
     write_roles = ['admin', 'administrator', 'hod', 'principal']
+
+
+class AcademicCalendarPermission(BaseRolePermission):
+    read_roles = ['anyone']
+    write_roles = ['admin', 'administrator', 'hod', 'principal']
+

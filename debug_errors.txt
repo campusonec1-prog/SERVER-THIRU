@@ -2461,3 +2461,41 @@
   }
 }
 
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, subject ID 2, and category THEORY."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+

@@ -124,13 +124,14 @@ class SessionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 from .models import AcademicCalendarEvent
 from .serializers import AcademicCalendarEventSerializer
-from rest_framework.permissions import IsAuthenticated
+from .permissions import DayPermission, PeriodPermission, SessionPermission, AcademicCalendarPermission
 
 class AcademicCalendarEventViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = AcademicCalendarEvent.objects.all().order_by('-date')
     serializer_class = AcademicCalendarEventSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AcademicCalendarPermission]
     model_label = "Academic Calendar Event"
+
 
     def get_queryset(self):
         qs = super().get_queryset()
