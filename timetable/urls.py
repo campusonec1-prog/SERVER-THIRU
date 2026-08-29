@@ -11,11 +11,13 @@ urlpatterns = [
 
     # Class Timetable endpoints
     path('class/list', ClassTimetableViewSet.as_view({'get': 'list'}), name='class-timetable-list'),
+    path('class/daily-schedule', ClassTimetableViewSet.as_view({'get': 'resolve_daily_schedule'}), name='class-timetable-daily-schedule'),
     path('class/create', ClassTimetableViewSet.as_view({'post': 'create'}), name='class-timetable-create'),
     path('class/assign', ClassTimetableViewSet.as_view({'post': 'assign_slot'}), name='class-timetable-assign'),
     path('class/get/<int:pk>', ClassTimetableViewSet.as_view({'get': 'retrieve'}), name='class-timetable-detail'),
     path('class/edit/<int:pk>', ClassTimetableViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='class-timetable-edit'),
     path('class/remove/<int:pk>', ClassTimetableViewSet.as_view({'delete': 'destroy'}), name='class-timetable-remove'),
+
 
     # Activity Type endpoints
     path('activity-types/list', ActivityTypeViewSet.as_view({'get': 'list'}), name='activity-type-list'),

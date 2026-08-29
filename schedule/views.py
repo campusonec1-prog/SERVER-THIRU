@@ -122,3 +122,73 @@ class SessionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         return Response({"code": 200, "message": "Session deleted successfully"}, status=status.HTTP_200_OK)
 
 
+from .models import AcademicCalendarEvent
+from .serializers import AcademicCalendarEventSerializer
+from rest_framework.permissions import IsAuthenticated
+
+class AcademicCalendarEventViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+    queryset = AcademicCalendarEvent.objects.all().order_by('-date')
+    serializer_class = AcademicCalendarEventSerializer
+    permission_classes = [IsAuthenticated]
+    model_label = "Academic Calendar Event"
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        event_type = self.request.query_params.get('event_type')
+        date_from = self.request.query_params.get('from_date')
+        date_to = self.request.query_params.get('to_date')
+        if event_type:
+            qs = qs.filter(event_type=event_type)
+        if date_from:
+            qs = qs.filter(date__gte=date_from)
+        if date_to:
+            qs = qs.filter(date__lte=date_to)
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return Response({"code": 200, "message": "Academic calendar events listed successfully", "data": response.data}, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        return Response({"code": 200, "message": "Academic calendar event retrieved successfully", "data": response.data}, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        self._broadcast_change(response.data.get('data'), 'calendar_event_created')
+        return Response({"code": 201, "message": "Academic calendar event created successfully", "data": response.data}, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        response = super().update(request, *args, **kwargs)
+        self._broadcast_change(response.data.get('data'), 'calendar_event_updated')
+        return Response({"code": 200, "message": "Academic calendar event updated successfully", "data": response.data}, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        instance_id = kwargs.get('pk')
+        super().destroy(request, *args, **kwargs)
+        self._broadcast_change({'id': instance_id}, 'calendar_event_deleted')
+        return Response({"code": 200, "message": "Academic calendar event deleted successfully"}, status=status.HTTP_200_OK)
+
+    def _broadcast_change(self, payload, event_name):
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'realtime_updates',
+                    {
+                        'type': 'broadcast_update',
+                        'data': {
+                            'event': event_name,
+                            'model': 'AcademicCalendarEvent',
+                            'payload': payload
+                        }
+                    }
+                )
+        except Exception:
+            pass
+
+
+
+

@@ -509,10 +509,11 @@ class FacultyActivitySerializer(serializers.ModelSerializer):
         model = FacultyActivity
         fields = [
             'id', 'timetable_id', 'date', 'activity_type', 'other_activity',
-            'remarks', 'total_students', 'total_present', 'total_absentees', 'total_od',
+            'remarks', 'status', 'suspension_reason', 'total_students', 'total_present', 'total_absentees', 'total_od',
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

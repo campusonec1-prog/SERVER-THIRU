@@ -210,6 +210,12 @@ class FacultyActivity(TrackingModel):
         ('seminar', 'Seminar'),
         ('others', 'Others'),
     ]
+    STATUS_CHOICES = [
+        ('CONDUCTED', 'Conducted'),
+        ('SUSPENDED', 'Suspended'),
+        ('CANCELLED', 'Cancelled'),
+        ('HOLIDAY', 'Holiday'),
+    ]
     timetable = models.ForeignKey(
         'timetable.ClassTimetable',
         on_delete=models.CASCADE,
@@ -220,10 +226,13 @@ class FacultyActivity(TrackingModel):
     activity_type = models.CharField(max_length=30, choices=ACTIVITY_CHOICES)
     other_activity = models.CharField(max_length=255, null=True, blank=True)
     remarks = models.TextField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='CONDUCTED')
+    suspension_reason = models.CharField(max_length=255, null=True, blank=True)
     total_students = models.IntegerField(default=0)
     total_present = models.IntegerField(default=0)
     total_absentees = models.IntegerField(default=0)
     total_od = models.IntegerField(default=0)
+
 
     class Meta:
         db_table = 'faculty_activities'

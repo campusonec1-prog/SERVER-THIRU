@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import DayViewSet, PeriodViewSet, SessionViewSet
+from .views import DayViewSet, PeriodViewSet, SessionViewSet, AcademicCalendarEventViewSet
 
 urlpatterns = [
     path('days/list', DayViewSet.as_view({'get': 'list'}), name='day-list'),
@@ -21,4 +21,12 @@ urlpatterns = [
     path('sessions/get/<int:pk>', SessionViewSet.as_view({'get': 'retrieve'}), name='session-detail'),
     path('sessions/edit/<int:pk>', SessionViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='session-edit'),
     path('sessions/remove/<int:pk>', SessionViewSet.as_view({'delete': 'destroy'}), name='session-remove'),
+
+    # Academic Calendar Event / Day Order Override / Holiday endpoints
+    path('calendar-events/list', AcademicCalendarEventViewSet.as_view({'get': 'list'}), name='calendar-event-list'),
+    path('calendar-events/create', AcademicCalendarEventViewSet.as_view({'post': 'create'}), name='calendar-event-create'),
+    path('calendar-events/get/<int:pk>', AcademicCalendarEventViewSet.as_view({'get': 'retrieve'}), name='calendar-event-detail'),
+    path('calendar-events/edit/<int:pk>', AcademicCalendarEventViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='calendar-event-edit'),
+    path('calendar-events/remove/<int:pk>', AcademicCalendarEventViewSet.as_view({'delete': 'destroy'}), name='calendar-event-remove'),
 ]
+

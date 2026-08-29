@@ -462,7 +462,7 @@ class ClassTimetableAPITests(APITestCase):
             academic_year=self.active_academic_year, day=self.day_mon, period=self.period_1,
             department=self.department, faculty=self.hod_user, section=self.section,
             semester=self.semester, subject=self.subject, batch=self.batch,
-            is_lab=False, room_no="Room 303",
+            from_date="2026-06-01", to_date="2026-12-31", room_no="Room 303",
             created_by=self.student_user
         )
         self.client.force_authenticate(user=self.student_user)
@@ -482,6 +482,8 @@ class ClassTimetableAPITests(APITestCase):
             "semester_id": self.semester.id,
             "subject_id": self.subject.id,
             "batch_id": self.batch.id,
+            "from_date": "2026-06-01",
+            "to_date": "2026-12-31",
             "room_no": "Room 303"
         }
         response = self.client.post(self.create_url, payload, format='json')
@@ -498,20 +500,21 @@ class ClassTimetableAPITests(APITestCase):
             "batch_id": self.batch.id,
             "semester_id": self.semester.id,
             "section_id": self.section.id,
+            "from_date": "2026-06-01",
+            "to_date": "2026-12-31",
             "class_timetables": [
                 {
                     "day_id": self.day_mon.id,
                     "period_id": self.period_1.id,
                     "subject_id": self.subject.id,
                     "faculty_id": self.hod_user.id,
-                    "is_lab": True,
                     "room_no": "Room 305"
                 }
             ]
         }
         response = self.client.post(self.create_url, payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertTrue(ClassTimetable.objects.filter(room_no="Room 305", is_lab=True).exists())
+        self.assertTrue(ClassTimetable.objects.filter(room_no="Room 305").exists())
         self.assertTrue(mock_channel_layer.group_send.called)
 
     @patch('channels.layers.get_channel_layer')
@@ -549,7 +552,8 @@ class ClassTimetableAPITests(APITestCase):
             semester=semester2,
             subject=subject2,
             batch=batch2,
-            is_lab=False,
+            from_date="2026-06-01",
+            to_date="2026-12-31",
         )
 
         # Now try to assign the same hod_user to Monday Period 1 for dept1 (conflict!)
@@ -560,13 +564,14 @@ class ClassTimetableAPITests(APITestCase):
             "batch_id": self.batch.id,
             "semester_id": self.semester.id,
             "section_id": self.section.id,
+            "from_date": "2026-06-01",
+            "to_date": "2026-12-31",
             "class_timetables": [
                 {
                     "day_id": self.day_mon.id,
                     "period_id": self.period_1.id,
                     "subject_id": self.subject.id,
                     "faculty_id": self.hod_user.id,
-                    "is_lab": False,
                     "room_no": "Room 101"
                 }
             ]
@@ -578,3 +583,4 @@ class ClassTimetableAPITests(APITestCase):
         self.assertIn("HOD User", message)
         self.assertIn("Monday", message)
         self.assertIn("Period 1", message)
+

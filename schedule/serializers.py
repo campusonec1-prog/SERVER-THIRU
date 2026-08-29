@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import Day, Period, Session
+from .models import Day, Period, Session, AcademicCalendarEvent
+
 
 
 def apply_default_error_messages(fields):
@@ -103,5 +104,23 @@ class SessionSerializer(serializers.ModelSerializer):
         if not value.strip():
             raise serializers.ValidationError("Session name cannot be empty.")
         return value.strip()
+
+
+class AcademicCalendarEventSerializer(serializers.ModelSerializer):
+    target_day_name = serializers.CharField(source='target_day.day_name', read_only=True)
+    target_day_code = serializers.CharField(source='target_day.day_code', read_only=True)
+    department_name = serializers.CharField(source='department.department_name', read_only=True)
+    batch_name = serializers.CharField(source='batch.batch', read_only=True)
+
+    class Meta:
+        model = AcademicCalendarEvent
+        fields = [
+            'id', 'date', 'event_type', 'target_day', 'target_day_name', 'target_day_code',
+            'session_scope', 'holiday_category', 'title', 'reason',
+            'department', 'department_name', 'batch', 'batch_name', 'academic_year',
+            'created_at', 'updated_at', 'created_by', 'updated_by'
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+
 
 

@@ -1,6 +1,8 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
+from rest_framework.decorators import action
 from django.http import Http404
+
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from django.db import transaction
@@ -934,8 +936,41 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
         except Exception:
             pass
 
+    @action(detail=False, methods=['get'], url_path='daily-schedule')
+    def resolve_daily_schedule(self, request):
+        date_str = request.query_params.get('date')
+        if not date_str:
+            from datetime import date
+            date_str = str(date.today())
+
+        department_id = request.query_params.get('department_id')
+        batch_id = request.query_params.get('batch_id')
+        section_id = request.query_params.get('section_id')
+        semester_id = request.query_params.get('semester_id')
+        academic_year_id = request.query_params.get('academic_year_id')
+        faculty_id = request.query_params.get('faculty_id')
+
+        from schedule.services import resolve_effective_schedule_for_date
+        schedule_data = resolve_effective_schedule_for_date(
+            target_date=date_str,
+            department_id=department_id,
+            batch_id=batch_id,
+            section_id=section_id,
+            semester_id=semester_id,
+            academic_year_id=academic_year_id,
+            faculty_id=faculty_id
+        )
+
+
+        return Response({
+            "code": 200,
+            "message": "Daily effective schedule resolved successfully.",
+            "data": schedule_data
+        }, status=status.HTTP_200_OK)
+
 
 class ActivityTypeViewSet(viewsets.ModelViewSet):
+
     queryset = ActivityType.objects.all().order_by('id')
     serializer_class = ActivityTypeSerializer
     permission_classes = [ActivityTypePermission]
