@@ -88,6 +88,10 @@ class AcademicYear(TrackingModel):
     academic_year = models.CharField(max_length=20, unique=True)
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
+    odd_sem_start_date = models.DateField(null=True, blank=True)
+    odd_sem_end_date = models.DateField(null=True, blank=True)
+    even_sem_start_date = models.DateField(null=True, blank=True)
+    even_sem_end_date = models.DateField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     is_display = models.BooleanField(default=False)
 
@@ -108,8 +112,13 @@ class AcademicYear(TrackingModel):
                 raise ValidationError({'is_display': 'Only one academic year can be set as display.'})
 
     def save(self, *args, **kwargs):
+        if self.odd_sem_start_date and not self.start_date:
+            self.start_date = self.odd_sem_start_date
+        if self.even_sem_end_date and not self.end_date:
+            self.end_date = self.even_sem_end_date
         self.full_clean()
         super().save(*args, **kwargs)
+
 
 
 

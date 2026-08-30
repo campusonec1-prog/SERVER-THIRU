@@ -36,6 +36,17 @@ class User(TrackingModel):
     def is_authenticated(self):
         return True
 
+    @property
+    def is_superuser(self):
+        if hasattr(self, 'role') and self.role and getattr(self.role, 'role_name', None):
+            return self.role.role_name.upper() in ['ADMIN', 'ADMINISTRATOR', 'SUPERADMIN']
+        return False
+
+    @property
+    def is_staff(self):
+        return self.is_superuser
+
+
 
 class UserDetails(TrackingModel):
     user = models.ForeignKey(

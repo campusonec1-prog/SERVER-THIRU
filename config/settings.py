@@ -58,7 +58,9 @@ INSTALLED_APPS = [
     'subject',
     'student',
     'timetable',
+    'leave',
 ]
+
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',

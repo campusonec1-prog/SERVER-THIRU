@@ -31,8 +31,9 @@ class BaseRolePermission(permissions.BasePermission):
             return True
             
         # 4. Check for 'authenticated' placeholder (any logged-in user allowed)
-        if is_read and 'AUTHENTICATED' in norm_roles:
+        if 'AUTHENTICATED' in norm_roles:
             return True
+
             
         # 5. Check specific roles
         try:

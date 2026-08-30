@@ -2499,3 +2499,30 @@
   }
 }
 
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+
+{
+  "path": "/api/users/edit/3",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "Password: Password is required."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+

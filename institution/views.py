@@ -124,15 +124,40 @@ class AcademicYearViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         response = super().create(request, *args, **kwargs)
+        self._broadcast_change(response.data.get('data'), 'academic_year_created')
         return Response({"code": 201, "message": "Academic year created successfully", "data": response.data}, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
         response = super().update(request, *args, **kwargs)
+        self._broadcast_change(response.data.get('data'), 'academic_year_updated')
         return Response({"code": 200, "message": "Academic year updated successfully", "data": response.data}, status=status.HTTP_200_OK)
 
     def destroy(self, request, *args, **kwargs):
+        instance_id = kwargs.get('pk')
         super().destroy(request, *args, **kwargs)
+        self._broadcast_change({'id': instance_id}, 'academic_year_deleted')
         return Response({"code": 200, "message": "Academic year deleted successfully"}, status=status.HTTP_200_OK)
+
+    def _broadcast_change(self, payload, event_name):
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'realtime_updates',
+                    {
+                        'type': 'broadcast_update',
+                        'data': {
+                            'event': event_name,
+                            'model': 'AcademicYear',
+                            'payload': payload
+                        }
+                    }
+                )
+        except Exception:
+            pass
+
 
 
 # ─── Batch ───────────────────────────────────────────────────────────────────
