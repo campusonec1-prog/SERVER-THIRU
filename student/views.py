@@ -675,6 +675,397 @@ class StudentViewSet(viewsets.ModelViewSet):
                 "errors": serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
 
+    @action(detail=False, methods=['get'], url_path='comprehensive-view')
+    def comprehensive_view(self, request, *args, **kwargs):
+        """
+        Comprehensive Student View API Endpoint.
+        Allows searching/retrieving student profile, application details, admission slip, fees,
+        marks (semester-wise & exam type breakdown), and attendance (subject-wise & overall).
+        Query params:
+        - search: Roll number, Register number, or Mobile number (or partial match)
+        - student_id: Direct Student primary key ID
+        """
+        search_query = request.query_params.get('search', '').strip()
+        student_id = request.query_params.get('student_id', '').strip()
+
+        if student_id and student_id.isdigit():
+            students = Student.objects.filter(pk=int(student_id))
+        elif search_query:
+            students = Student.objects.filter(
+                Q(roll_number__iexact=search_query) |
+                Q(register_number__iexact=search_query) |
+                Q(user__phone_number__icontains=search_query) |
+                Q(user__name__icontains=search_query) |
+                Q(roll_number__icontains=search_query) |
+                Q(register_number__icontains=search_query)
+            )
+        else:
+            user = request.user
+            if user and user.is_authenticated:
+                user_role = ""
+                if hasattr(user, 'role') and user.role:
+                    user_role = user.role.role_name.upper()
+                if user_role == 'STUDENT':
+                    students = Student.objects.filter(user__phone_number=user.phone_number)
+                else:
+                    return Response({
+                        "code": 400,
+                        "message": "Please enter a Roll Number, Register Number, or Phone Number to search"
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                return Response({
+                    "code": 400,
+                    "message": "Please enter a Roll Number, Register Number, or Phone Number to search"
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        if students.count() > 1 and not student_id:
+            results = []
+            for s in students[:20]:
+                app = s.user.applications.first() if s.user else None
+                fd = app.form_data if (app and app.form_data and isinstance(app.form_data, dict)) else {}
+                candidate_name = s.user.name if s.user else ''
+                photo_url = fd.get('photo', '')
+                results.append({
+                    'id': s.id,
+                    'name': candidate_name,
+                    'roll_number': s.roll_number,
+                    'register_number': s.register_number,
+                    'phone': s.user.phone_number if s.user else '',
+                    'department': s.department.department_name if s.department else '',
+                    'batch': s.batch.batch if s.batch else '',
+                    'section': s.section.sections if s.section else '',
+                    'student_photo': photo_url
+                })
+            return Response({
+                "code": 200,
+                "multiple": True,
+                "message": f"Found {students.count()} matching students",
+                "data": results
+            }, status=status.HTTP_200_OK)
+
+        student = students.first()
+        if not student:
+            return Response({
+                "code": 404,
+                "message": f"No student found matching query '{search_query}'"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # ── 1. Profile & Application Data ──────────────────────────────────────
+        app = student.user.applications.first() if student.user else None
+        fd = app.form_data if (app and app.form_data and isinstance(app.form_data, dict)) else {}
+
+        def get_fd(module_key, field_key=None):
+            module_data = fd.get(module_key, {})
+            if field_key is None:
+                return module_data
+            if isinstance(module_data, dict):
+                return module_data.get(field_key, '')
+            return ''
+
+        personal = get_fd('personal_information')
+        candidate_name = personal.get('applicant_name', '') or (student.user.name if student.user else '')
+        aadhaar_number = str(personal.get('aadhaar_number', '') or '')
+        community = str(personal.get('community', '') or '')
+        phone = str(personal.get('student_mobile', '') or (student.user.phone_number if student.user else ''))
+        email = str(personal.get('email', '') or (student.user.email if student.user else ''))
+        dob = str(
+            personal.get('date_of_birth', '') or
+            personal.get('dob', '') or
+            personal.get('dateOfBirth', '') or
+            personal.get('birth_date', '') or
+            ''
+        )
+        gender = str(personal.get('gender', '') or '')
+
+        parent = get_fd('parent_information')
+        parent_name = str(parent.get('parent_name', '') or parent.get('father_name', '') or '')
+        mother_name = str(parent.get('mother_name', '') or '')
+        parent_phone = str(parent.get('parent_mobile', '') or parent.get('father_mobile', '') or '')
+        address = str(parent.get('address', '') or parent.get('communication_address', '') or '')
+        pincode = str(parent.get('pincode', '') or '')
+
+        photo_url = fd.get('photo', '')
+        if not photo_url:
+            certs = fd.get('certificates') or []
+            if isinstance(certs, dict) and 'certificates' in certs:
+                certs = certs['certificates']
+            if isinstance(certs, list):
+                for c in certs:
+                    if c and isinstance(c, dict) and c.get('certificate_type') == 'Passport Size Photo':
+                        doc_val = c.get('document')
+                        if isinstance(doc_val, str) and doc_val.startswith('http'):
+                            photo_url = doc_val
+                        elif isinstance(doc_val, dict) and isinstance(doc_val.get('url'), str):
+                            photo_url = doc_val.get('url')
+                        break
+
+        certs_list = []
+        if isinstance(certs, list):
+            for c in certs:
+                if isinstance(c, dict):
+                    doc_url = ''
+                    d_val = c.get('document')
+                    if isinstance(d_val, str) and d_val.startswith('http'):
+                        doc_url = d_val
+                    elif isinstance(d_val, dict) and isinstance(d_val.get('url'), str):
+                        doc_url = d_val.get('url')
+
+                    certs_list.append({
+                        'name': c.get('certificate_type') or c.get('name') or 'Submitted Document',
+                        'url': doc_url,
+                        'status': 'Uploaded'
+                    })
+
+        admission_slip = getattr(student, 'admission_slip', None)
+        admission_data = {}
+
+        def resolve_admission_type(raw_type):
+            if not raw_type:
+                return 'Regular Entry'
+            s = str(raw_type).strip().lower()
+            if 'iii' in s or 'lateral' in s or 'sem 3' in s or '3rd' in s:
+                return 'Lateral Entry'
+            if 'i' in s or 'regular' in s or 'sem 1' in s or '1st' in s:
+                return 'Regular Entry'
+            return raw_type
+
+        if admission_slip:
+            m = float(admission_slip.marks_maths) if admission_slip.marks_maths is not None else 0.0
+            p = float(admission_slip.marks_physics) if admission_slip.marks_physics is not None else 0.0
+            c = float(admission_slip.marks_chemistry) if admission_slip.marks_chemistry is not None else 0.0
+            cutoff_calc = round(m + ((p + c) / 2), 2) if (admission_slip.marks_maths or admission_slip.marks_physics or admission_slip.marks_chemistry) else None
+
+            admission_data = {
+                'aadhaar_number': admission_slip.aadhaar_number or aadhaar_number,
+                'emis_number': admission_slip.emis_number or '',
+                'umis_number': admission_slip.umis_number or '',
+                'qualification': admission_slip.qualification or '',
+                'community': admission_slip.community or community,
+                'marks_maths': admission_slip.marks_maths,
+                'marks_physics': admission_slip.marks_physics,
+                'marks_chemistry': admission_slip.marks_chemistry,
+                'marks_total': admission_slip.marks_total,
+                'marks_percentage': float(admission_slip.marks_percentage) if admission_slip.marks_percentage else None,
+                'cutoff_marks': cutoff_calc,
+                'mode_of_admission': resolve_admission_type(admission_slip.mode_of_admission),
+                'recommendation_name': admission_slip.recommendation.name if admission_slip.recommendation else '',
+                'certificates_surrendered': admission_slip.certificates_surrendered or {},
+                'uploaded_documents': certs_list,
+            }
+        else:
+            admission_data = {
+                'aadhaar_number': aadhaar_number,
+                'emis_number': '',
+                'umis_number': '',
+                'qualification': '',
+                'community': community,
+                'marks_maths': None,
+                'marks_physics': None,
+                'marks_chemistry': None,
+                'marks_total': None,
+                'marks_percentage': None,
+                'cutoff_marks': None,
+                'mode_of_admission': 'Regular Entry',
+                'recommendation_name': '',
+                'certificates_surrendered': {},
+                'uploaded_documents': certs_list,
+            }
+
+        fees_payment = getattr(student, 'fees_payment', None)
+        fees_data = {}
+        if fees_payment:
+            fees_data = {
+                'total_fees': float(fees_payment.total_fees),
+                'paid_amount': float(fees_payment.paid_amount),
+                'balance_amount': float(fees_payment.balance_amount),
+                'books_fees_total': float(fees_payment.books_fees_total),
+                'books_fees_paid': float(fees_payment.books_fees_paid),
+                'due_date': fees_payment.due_date.isoformat() if fees_payment.due_date else None,
+                'payment_mode': fees_payment.payment_mode,
+                'remarks': fees_payment.remarks or '',
+            }
+        else:
+            fees_data = {
+                'total_fees': 0.0,
+                'paid_amount': 0.0,
+                'balance_amount': 0.0,
+                'books_fees_total': 0.0,
+                'books_fees_paid': 0.0,
+                'due_date': None,
+                'payment_mode': 'Cash',
+                'remarks': '',
+            }
+
+        def format_ddmmyyyy(d_str):
+            if not d_str:
+                return ''
+            d_str = str(d_str).strip()
+            if not d_str:
+                return ''
+            if '-' in d_str:
+                parts = d_str.split('-')
+                if len(parts) == 3:
+                    if len(parts[0]) == 4:
+                        return f"{parts[2].zfill(2)}-{parts[1].zfill(2)}-{parts[0]}"
+                    elif len(parts[2]) == 4:
+                        return f"{parts[0].zfill(2)}-{parts[1].zfill(2)}-{parts[2]}"
+            if '/' in d_str:
+                parts = d_str.split('/')
+                if len(parts) == 3:
+                    if len(parts[0]) == 4:
+                        return f"{parts[2].zfill(2)}-{parts[1].zfill(2)}-{parts[0]}"
+                    elif len(parts[2]) == 4:
+                        return f"{parts[0].zfill(2)}-{parts[1].zfill(2)}-{parts[2]}"
+            return d_str
+
+        dob_formatted = format_ddmmyyyy(dob)
+        district = str(parent.get('district', '') or personal.get('district', '') or fd.get('district', '') or '')
+
+        profile_data = {
+            'id': student.id,
+            'roll_number': student.roll_number or '',
+            'register_number': student.register_number or '',
+            'name': candidate_name,
+            'email': email,
+            'phone': phone,
+            'dob': dob_formatted,
+            'gender': gender,
+            'community': community,
+            'student_photo': photo_url,
+            'department_id': student.department_id,
+            'department_name': student.department.department_name if student.department else '',
+            'program_name': student.department.program.program_name if (student.department and student.department.program) else '',
+            'batch_id': student.batch_id,
+            'batch_name': student.batch.batch if student.batch else '',
+            'section_id': student.section_id,
+            'section_name': student.section.sections if student.section else '',
+            'quota_name': student.quota.quota_name if student.quota else '',
+            'status_name': student.status.status_name if student.status else '',
+            'is_hostler': student.is_hostler,
+            'is_day_scholar': student.is_day_scholar,
+            'is_bus': student.is_bus,
+            'bus_from': student.bus_from or '',
+            'bus_to': student.bus_to or '',
+            'parent_name': parent_name,
+            'parent_phone': parent_phone,
+            'district': district,
+            'address': address,
+            'pincode': pincode,
+            'admission': admission_data,
+            'fees': fees_data,
+        }
+
+        # ── 2. Academic Marks ──────────────────────────────────────────────────
+        from .models import Marks
+        marks_qs = Marks.objects.filter(student=student).select_related(
+            'exam', 'subject', 'subject__semester'
+        )
+
+        def resolve_sem_label(sem_obj):
+            if not sem_obj:
+                return "Semester 1"
+            if hasattr(sem_obj, 'semester_name') and sem_obj.semester_name:
+                return f"Semester {sem_obj.semester_name}"
+            if hasattr(sem_obj, 'id') and sem_obj.id:
+                return f"Semester {sem_obj.id}"
+            return "Semester 1"
+
+        marks_list = []
+        for m in marks_qs:
+            sem_name = resolve_sem_label(m.subject.semester) if (m.subject and m.subject.semester) else "Semester 1"
+            exam_type_label = 'CIA'
+            if m.exam and m.exam.exam_type:
+                exam_type_label = getattr(m.exam.exam_type, 'exam_type_name', str(m.exam.exam_type))
+            marks_list.append({
+                'id': m.id,
+                'exam_id': m.exam_id,
+                'exam_name': m.exam.exam_name if m.exam else '',
+                'exam_type': exam_type_label,
+                'subject_id': m.subject_id,
+                'subject_code': m.subject.subject_code if m.subject else '',
+                'subject_name': m.subject.subject_name if m.subject else '',
+                'subject_category': m.subject_category or 'THEORY',
+                'semester_name': sem_name,
+                'marks_obtained': m.marks_obtained,
+            })
+
+        # ── 3. Attendance Percentage (Subject-wise & Overall) ─────────────────
+        from .models import StudentAttendance
+        att_qs = StudentAttendance.objects.filter(student=student).select_related(
+            'faculty_activity__timetable__subject',
+            'faculty_activity__timetable__subject__semester'
+        )
+
+        overall_total = att_qs.count()
+        overall_present = att_qs.filter(status='P').count()
+        overall_absent = att_qs.filter(status='AB').count()
+        overall_od = att_qs.filter(status='OD').count()
+        overall_attended = overall_present + overall_od
+        overall_percentage = round((overall_attended / overall_total * 100), 2) if overall_total > 0 else 0.0
+
+        subj_map = {}
+        for a in att_qs:
+            activity = a.faculty_activity
+            tt = activity.timetable if activity else None
+            subj = tt.subject if tt else None
+            if not subj:
+                continue
+
+            sid = subj.id
+            if sid not in subj_map:
+                sem_title = resolve_sem_label(subj.semester) if subj.semester else "Semester 1"
+                subj_map[sid] = {
+                    'subject_id': sid,
+                    'subject_code': subj.subject_code,
+                    'subject_name': subj.subject_name,
+                    'semester_name': sem_title,
+                    'total_classes': 0,
+                    'present_count': 0,
+                    'absent_count': 0,
+                    'od_count': 0,
+                }
+
+            subj_map[sid]['total_classes'] += 1
+            if a.status == 'P':
+                subj_map[sid]['present_count'] += 1
+            elif a.status == 'AB':
+                subj_map[sid]['absent_count'] += 1
+            elif a.status == 'OD':
+                subj_map[sid]['od_count'] += 1
+
+        subject_wise_attendance = []
+        for sinfo in subj_map.values():
+            total = sinfo['total_classes']
+            attended = sinfo['present_count'] + sinfo['od_count']
+            pct = round((attended / total * 100), 2) if total > 0 else 0.0
+            subject_wise_attendance.append({
+                **sinfo,
+                'percentage': pct,
+            })
+
+        subject_wise_attendance.sort(key=lambda x: x['subject_code'])
+
+        return Response({
+            "code": 200,
+            "multiple": False,
+            "message": "Student comprehensive view retrieved successfully",
+            "data": {
+                "profile": profile_data,
+                "marks": marks_list,
+                "attendance": {
+                    "overall": {
+                        "total_classes": overall_total,
+                        "present_count": overall_present,
+                        "absent_count": overall_absent,
+                        "od_count": overall_od,
+                        "attended_count": overall_attended,
+                        "percentage": overall_percentage,
+                    },
+                    "subject_wise": subject_wise_attendance,
+                }
+            }
+        }, status=status.HTTP_200_OK)
+
     def admission_slip_pdf(self, request, pk, *args, **kwargs):
         import os
         from io import BytesIO

@@ -2526,3 +2526,12 @@
   }
 }
 
+{
+  "path": "/api/student/edit/56",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "department_id: Department id is required."
+  }
+}
+

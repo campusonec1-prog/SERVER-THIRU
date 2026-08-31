@@ -20,6 +20,7 @@ urlpatterns = [
     path('admission-slip/data/<int:pk>', StudentViewSet.as_view({'get': 'admission_slip_data'}), name='admission-slip-data'),
     path('admission-slip/pdf/<int:pk>', StudentViewSet.as_view({'get': 'admission_slip_pdf'}), name='admission-slip-pdf'),
     path('fees/save', StudentViewSet.as_view({'post': 'fees_save'}), name='fees-save'),
+    path('comprehensive-view', StudentViewSet.as_view({'get': 'comprehensive_view'}), name='student-comprehensive-view'),
 
     # Marks endpoints
     path('marks/create', MarksViewSet.as_view({'post': 'create'}), name='marks-create'),
