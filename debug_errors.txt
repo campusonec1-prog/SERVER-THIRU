@@ -36,3 +36,21 @@
   }
 }
 
+{
+  "path": "/api/student/marks/edit",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "You do not have permission to edit the marks for student ID 6 since they were entered by Mrs MENAGA E."
+  }
+}
+
+{
+  "path": "/api/student/marks/edit",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "You do not have permission to edit the marks for student ID 6 since they were entered by Mrs MENAGA E."
+  }
+}
+
