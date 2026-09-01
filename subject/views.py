@@ -3,8 +3,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied
-from .models import Subject
-from .serializers import SubjectSerializer
+from .models import Subject, SharedNotes
+from .serializers import SubjectSerializer, SharedNotesSerializer
 from .permissions import SubjectPermission
 
 
@@ -407,3 +407,286 @@ class SubjectViewSet(viewsets.ModelViewSet):
             "code": 201,
             "message": f"Successfully imported {len(created_subjects)} subjects."
         }, status=status.HTTP_201_CREATED)
+
+
+class SharedNotesViewSet(viewsets.ModelViewSet):
+    queryset = SharedNotes.objects.all().order_by('-created_at')
+    serializer_class = SharedNotesSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        user = request.user
+
+        # Scope visibility: Faculty sees ONLY their own uploaded notes; Admin/HOD/Principal sees all
+        role_obj = getattr(user, 'role', None)
+        role_name = getattr(role_obj, 'role_name', None) or getattr(role_obj, 'name', None) or str(role_obj or '')
+        role_str = str(role_name).upper().replace(' ', '_')
+
+        is_admin_or_hod_or_student = (
+            getattr(user, 'is_superuser', False) or 
+            getattr(user, 'is_staff', False) or 
+            role_str in ['ADMIN', 'ADMINISTRATOR', 'SUPERADMIN', 'HOD', 'PRINCIPAL', 'VICE_PRINCIPAL', 'STUDENT']
+        )
+
+        if not is_admin_or_hod_or_student:
+            queryset = queryset.filter(uploaded_by=user)
+        
+        department_id = request.query_params.get('department_id')
+        batch_id = request.query_params.get('batch_id')
+        semester_id = request.query_params.get('semester_id')
+        section_id = request.query_params.get('section_id')
+        subject_id = request.query_params.get('subject_id')
+        folder_name = request.query_params.get('folder_name')
+        search = request.query_params.get('search')
+
+        if department_id:
+            queryset = queryset.filter(department_id=department_id)
+        if batch_id:
+            queryset = queryset.filter(batch_id=batch_id)
+        if semester_id:
+            queryset = queryset.filter(semester_id=semester_id)
+        if section_id:
+            queryset = queryset.filter(section_id=section_id)
+        if subject_id:
+            queryset = queryset.filter(subject_id=subject_id)
+        if folder_name:
+            queryset = queryset.filter(folder_name__iexact=folder_name)
+        if search:
+            from django.db.models import Q
+            queryset = queryset.filter(
+                Q(file_name__icontains=search) |
+                Q(folder_name__icontains=search) |
+                Q(title__icontains=search) |
+                Q(subject__subject_code__icontains=search) |
+                Q(subject__subject_name__icontains=search)
+            )
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            paginated_response = self.get_paginated_response(serializer.data)
+            return Response({
+                "code": 200,
+                "message": "Shared notes retrieved successfully",
+                "data": paginated_response.data
+            }, status=status.HTTP_200_OK)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            "code": 200,
+            "message": "Shared notes retrieved successfully",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='upload')
+    def upload(self, request):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return Response({"code": 401, "message": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        # Check permissions: HOD, Faculty, Admin, Superadmin
+        role_obj = getattr(user, 'role', None)
+        role_name = getattr(role_obj, 'role_name', None) or getattr(role_obj, 'name', None) or str(role_obj or '')
+        role_str = str(role_name).upper().replace(' ', '_')
+        allowed_roles = ['HOD', 'FACULTY', 'TEACHER', 'ADMIN', 'ADMINISTRATOR', 'SUPERADMIN', 'PRINCIPAL', 'VICE_PRINCIPAL']
+        
+        is_allowed = (
+            getattr(user, 'is_superuser', False) or 
+            getattr(user, 'is_staff', False) or 
+            role_str in allowed_roles or 
+            'FACULTY' in role_str or 
+            'HOD' in role_str or 
+            'TEACHER' in role_str
+        )
+        if not is_allowed:
+            return Response({
+                "code": 403,
+                "message": f"Only HOD and Faculty are allowed to upload notes (your role: '{role_name}')."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        department_id = request.data.get('department_id')
+        batch_id = request.data.get('batch_id')
+        semester_id = request.data.get('semester_id')
+        section_id = request.data.get('section_id')
+        subject_id = request.data.get('subject_id')
+        folder_name = (request.data.get('folder_name') or 'Unit 1').strip()
+        title = (request.data.get('title') or '').strip()
+
+        if not (department_id and batch_id and semester_id and section_id and subject_id):
+            return Response({
+                "code": 400,
+                "message": "Department, Batch, Semester, Section, and Subject are all required fields."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        files = request.FILES.getlist('files')
+        if not files:
+            single_file = request.FILES.get('file')
+            if single_file:
+                files = [single_file]
+
+        if not files:
+            return Response({"code": 400, "message": "No document files provided for upload."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Requirement 1: Maximum of 5 files in one request
+        if len(files) > 5:
+            return Response({
+                "code": 400,
+                "message": "You can upload a maximum of 5 files per request."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Allowed extensions
+        allowed_extensions = ['.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt']
+        forbidden_image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.tiff']
+
+        import os
+        # Validate each file
+        for f in files:
+            ext = os.path.splitext(f.name)[1].lower()
+            if ext in forbidden_image_extensions:
+                return Response({
+                    "code": 400,
+                    "message": f"Image files are not allowed: '{f.name}'."
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if ext not in allowed_extensions:
+                return Response({
+                    "code": 400,
+                    "message": f"Unsupported file type for '{f.name}'. Only PDF, DOCX, XLSX, PPTX files are allowed."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Requirement 2: Size under 50MB
+            if f.size > 50 * 1024 * 1024:
+                return Response({
+                    "code": 400,
+                    "message": f"File '{f.name}' exceeds the 50MB limit."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Upload files to Cloudflare R2
+        from common.r2 import upload_file_to_r2
+        from subject.models import Subject, SharedNotes
+        from institution.models import Department, Batch, Semester, Section
+
+        try:
+            dept_obj = Department.objects.get(id=department_id)
+            batch_obj = Batch.objects.get(id=batch_id)
+            sem_obj = Semester.objects.get(id=semester_id)
+            sec_obj = Section.objects.get(id=section_id)
+            sub_obj = Subject.objects.get(id=subject_id)
+        except Exception as e:
+            return Response({"code": 400, "message": f"Invalid reference IDs: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        created_notes = []
+        for f in files:
+            ext = os.path.splitext(f.name)[1].lower().lstrip('.')
+            folder_path = f"notes/{sub_obj.subject_code}/{folder_name}".replace(' ', '_')
+            public_url = upload_file_to_r2(f, folder_name=folder_path)
+
+            note = SharedNotes.objects.create(
+                department=dept_obj,
+                batch=batch_obj,
+                semester=sem_obj,
+                section=sec_obj,
+                subject=sub_obj,
+                folder_name=folder_name,
+                title=title or f.name,
+                file_name=f.name,
+                file_url=public_url,
+                file_size=f.size,
+                file_type=ext,
+                uploaded_by=user
+            )
+            created_notes.append(note)
+
+            # Broadcast WebSocket event
+            try:
+                from asgiref.sync import async_to_sync
+                from channels.layers import get_channel_layer
+                channel_layer = get_channel_layer()
+                if channel_layer:
+                    async_to_sync(channel_layer.group_send)(
+                        'realtime_updates',
+                        {
+                            'type': 'broadcast_update',
+                            'data': {
+                                'event': 'shared_note_created',
+                                'payload': SharedNotesSerializer(note).data
+                            }
+                        }
+                    )
+            except Exception:
+                pass
+
+        return Response({
+            "code": 201,
+            "message": f"Successfully uploaded and shared {len(created_notes)} note file(s).",
+            "data": SharedNotesSerializer(created_notes, many=True).data
+        }, status=status.HTTP_201_CREATED)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        user = request.user
+        
+        role_obj = getattr(user, 'role', None)
+        role_name = getattr(role_obj, 'role_name', None) or getattr(role_obj, 'name', None) or str(role_obj or '')
+        role_str = str(role_name).upper().replace(' ', '_')
+        is_admin_or_hod = getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False) or any(r in role_str for r in ['HOD', 'ADMIN', 'ADMINISTRATOR', 'SUPERADMIN', 'PRINCIPAL'])
+        is_owner = instance.uploaded_by_id == user.id
+
+        if not (is_admin_or_hod or is_owner):
+            return Response({"code": 403, "message": "You can only delete notes uploaded by yourself."}, status=status.HTTP_403_FORBIDDEN)
+
+        from common.r2 import delete_file_from_r2
+        delete_file_from_r2(instance.file_url)
+
+        note_id = instance.id
+        instance.delete()
+
+        # Broadcast WebSocket event
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'realtime_updates',
+                    {
+                        'type': 'broadcast_update',
+                        'data': {
+                            'event': 'shared_note_deleted',
+                            'payload': {'id': note_id}
+                        }
+                    }
+                )
+        except Exception:
+            pass
+
+        return Response({"code": 200, "message": "Shared note deleted successfully."}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='folders')
+    def folders(self, request):
+        user = request.user
+        subject_id = request.query_params.get('subject_id')
+        from subject.models import SharedNotes
+        queryset = SharedNotes.objects.all()
+
+        role_obj = getattr(user, 'role', None)
+        role_name = getattr(role_obj, 'role_name', None) or getattr(role_obj, 'name', None) or str(role_obj or '')
+        role_str = str(role_name).upper().replace(' ', '_')
+        is_admin_or_hod_or_student = (
+            getattr(user, 'is_superuser', False) or 
+            getattr(user, 'is_staff', False) or 
+            role_str in ['ADMIN', 'ADMINISTRATOR', 'SUPERADMIN', 'HOD', 'PRINCIPAL', 'VICE_PRINCIPAL', 'STUDENT']
+        )
+        if not is_admin_or_hod_or_student:
+            queryset = queryset.filter(uploaded_by=user)
+
+        if subject_id:
+            queryset = queryset.filter(subject_id=subject_id)
+        folders_list = queryset.values_list('folder_name', flat=True).distinct()
+        
+        defaults = ['Unit 1', 'Unit 2', 'Unit 3', 'Unit 4', 'Unit 5', 'Question Bank', 'Lab Manual', 'Reference Notes']
+        combined = list(dict.fromkeys(list(folders_list) + defaults))
+        
+        return Response({"code": 200, "data": combined}, status=status.HTTP_200_OK)
+
