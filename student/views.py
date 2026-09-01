@@ -1058,6 +1058,32 @@ class StudentViewSet(viewsets.ModelViewSet):
 
         subject_wise_attendance.sort(key=lambda x: x['subject_code'])
 
+        # ── 4. Counselling Reports ─────────────────────────────────────
+        from .models import CounsellingReport
+        counselling_qs = CounsellingReport.objects.filter(student=student).select_related('semester', 'created_by').order_by('-report_date')
+        counselling_list = []
+        for c in counselling_qs:
+            sem_title = resolve_sem_label(c.semester) if c.semester else "Semester 1"
+            counselor_name = "—"
+            if c.created_by:
+                cb = c.created_by
+                full_name_func = getattr(cb, 'get_full_name', None)
+                if getattr(cb, 'name', None):
+                    counselor_name = cb.name
+                elif callable(full_name_func):
+                    counselor_name = full_name_func()
+                elif getattr(cb, 'first_name', None):
+                    counselor_name = cb.first_name
+                elif getattr(cb, 'username', None):
+                    counselor_name = cb.username
+            counselling_list.append({
+                'id': c.id,
+                'semester_name': sem_title,
+                'report_date': c.report_date.strftime('%Y-%m-%d') if c.report_date else '',
+                'remarks': c.remarks,
+                'counselled_by': counselor_name,
+            })
+
         return Response({
             "code": 200,
             "multiple": False,
@@ -1065,6 +1091,7 @@ class StudentViewSet(viewsets.ModelViewSet):
             "data": {
                 "profile": profile_data,
                 "marks": marks_list,
+                "counselling": counselling_list,
                 "attendance": {
                     "overall": {
                         "total_classes": overall_total,
@@ -2802,6 +2829,190 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
             "message": f"Successfully registered attendance for {len(saved_entries)} students.",
             "data": StudentAttendanceSerializer(saved_entries, many=True).data
         }, status=status.HTTP_200_OK)
+
+
+from .models import GradeSystem
+from .serializers import GradeSystemSerializer
+
+class GradeSystemViewSet(viewsets.ModelViewSet):
+    queryset = GradeSystem.objects.all().order_by('-points')
+    serializer_class = GradeSystemSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def handle_exception(self, exc):
+        if isinstance(exc, (Http404, NotFound)):
+            return Response({
+                "code": 404,
+                "message": "Grade system record not found"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if isinstance(exc, NotAuthenticated):
+            return Response({
+                "code": 401,
+                "message": "You don't have access to this resource."
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        if isinstance(exc, PermissionDenied):
+            return Response({
+                "code": 403,
+                "message": "You don't have access to this resource."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        if isinstance(exc, ValidationError):
+            errors = exc.detail
+            first_msg = ""
+            if isinstance(errors, dict):
+                first_key = next(iter(errors))
+                val = errors[first_key]
+                if isinstance(val, list):
+                    first_msg = f"{first_key}: {val[0]}"
+                else:
+                    first_msg = f"{first_key}: {val}"
+            elif isinstance(errors, list):
+                first_msg = str(errors[0])
+            else:
+                first_msg = str(errors)
+            return Response({
+                "code": 400,
+                "message": first_msg,
+                "errors": errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        logger.error(f"Unhandled exception in GradeSystemViewSet: {exc}", exc_info=True)
+        return Response({
+            "code": 500,
+            "message": "An unexpected error occurred."
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def _auto_seed_grades(self):
+        if not GradeSystem.objects.exists():
+            default_grades = [
+                {'grade': 'O', 'points': 10.0, 'description': 'Outstanding'},
+                {'grade': 'A+', 'points': 9.0, 'description': 'Excellent'},
+                {'grade': 'A', 'points': 8.0, 'description': 'Very Good'},
+                {'grade': 'B+', 'points': 7.0, 'description': 'Good'},
+                {'grade': 'B', 'points': 6.0, 'description': 'Above Average'},
+                {'grade': 'C', 'points': 5.0, 'description': 'Average'},
+                {'grade': 'P', 'points': 5.0, 'description': 'Pass'},
+                {'grade': 'F', 'points': 0.0, 'description': 'Fail'},
+                {'grade': 'RA', 'points': 0.0, 'description': 'Re-appear'},
+            ]
+            for item in default_grades:
+                GradeSystem.objects.create(**item)
+
+    def list(self, request, *args, **kwargs):
+        self._auto_seed_grades()
+        qs = GradeSystem.objects.all().order_by('-points')
+
+        is_active = request.query_params.get('is_active')
+        if is_active is not None:
+            if is_active.lower() in ['true', '1']:
+                qs = qs.filter(is_active=True)
+            elif is_active.lower() in ['false', '0']:
+                qs = qs.filter(is_active=False)
+
+        search = request.query_params.get('search')
+        if search:
+            qs = qs.filter(Q(grade__icontains=search) | Q(description__icontains=search))
+
+        pagination = request.query_params.get('pagination')
+        if pagination and pagination.lower() == 'false':
+            serializer = self.get_serializer(qs, many=True)
+            return Response({"code": 200, "data": serializer.data}, status=status.HTTP_200_OK)
+
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(qs, many=True)
+        return Response({"code": 200, "data": serializer.data}, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response({
+            "code": 201,
+            "message": "Grade system entry created successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_201_CREATED, headers=headers)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response({
+            "code": 200,
+            "message": "Grade system entry updated successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response({
+            "code": 200,
+            "message": "Grade system entry deleted successfully."
+        }, status=status.HTTP_200_OK)
+
+    def perform_create(self, serializer):
+        user = self.request.user if self.request.user.is_authenticated else None
+        instance = serializer.save(created_by=user, updated_by=user)
+        self._broadcast_change(instance, 'grade_system_created')
+
+    def perform_update(self, serializer):
+        user = self.request.user if self.request.user.is_authenticated else None
+        instance = serializer.save(updated_by=user)
+        self._broadcast_change(instance, 'grade_system_updated')
+
+    def perform_destroy(self, instance):
+        item_id = instance.id
+        instance.delete()
+        self._broadcast_delete(item_id)
+
+    def _broadcast_change(self, instance, event_name):
+        try:
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'dashboard_updates',
+                    {
+                        'type': 'broadcast_update',
+                        'data': {
+                            'model': 'GradeSystem',
+                            'event': event_name,
+                            'id': instance.id,
+                            'grade': instance.grade,
+                            'points': float(instance.points),
+                            'is_active': instance.is_active
+                        }
+                    }
+                )
+        except Exception as e:
+            logger.warning(f"Failed to broadcast GradeSystem change: {e}")
+
+    def _broadcast_delete(self, item_id):
+        try:
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'dashboard_updates',
+                    {
+                        'type': 'broadcast_update',
+                        'data': {
+                            'model': 'GradeSystem',
+                            'event': 'grade_system_deleted',
+                            'id': item_id
+                        }
+                    }
+                )
+        except Exception as e:
+            logger.warning(f"Failed to broadcast GradeSystem delete: {e}")
+
 
 
 

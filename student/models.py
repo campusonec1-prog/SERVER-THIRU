@@ -269,4 +269,21 @@ class StudentAttendance(TrackingModel):
         return f"{self.student.roll_number} - {self.status} (Activity {self.faculty_activity.id})"
 
 
+class GradeSystem(TrackingModel):
+    grade = models.CharField(max_length=10, unique=True, help_text="Grade letter e.g., O, A+, A, B+, B, C, P, F, RA")
+    points = models.DecimalField(max_digits=5, decimal_places=2, help_text="Grade points e.g., 10.0, 9.0, 8.0")
+    min_mark = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Minimum mark threshold")
+    max_mark = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Maximum mark threshold")
+    description = models.CharField(max_length=100, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'grade_system'
+        ordering = ['-points']
+
+    def __str__(self):
+        return f"{self.grade} ({self.points} pts)"
+
+
+
 

@@ -1,5 +1,13 @@
 from django.urls import path
-from .views import StudentStatusViewSet, StudentViewSet, MarksViewSet, CounsellingReportViewSet, FacultyActivityViewSet, StudentAttendanceViewSet
+from .views import (
+    StudentStatusViewSet, 
+    StudentViewSet, 
+    MarksViewSet, 
+    CounsellingReportViewSet, 
+    FacultyActivityViewSet, 
+    StudentAttendanceViewSet,
+    GradeSystemViewSet
+)
 
 urlpatterns = [
     # Student Status endpoints
@@ -8,6 +16,13 @@ urlpatterns = [
     path('statuses/get/<int:pk>', StudentStatusViewSet.as_view({'get': 'retrieve'}), name='student-status-detail'),
     path('statuses/edit/<int:pk>', StudentStatusViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='student-status-edit'),
     path('statuses/remove/<int:pk>', StudentStatusViewSet.as_view({'delete': 'destroy'}), name='student-status-remove'),
+
+    # Grade System endpoints
+    path('grade-systems/create', GradeSystemViewSet.as_view({'post': 'create'}), name='grade-system-create'),
+    path('grade-systems/list', GradeSystemViewSet.as_view({'get': 'list'}), name='grade-system-list'),
+    path('grade-systems/get/<int:pk>', GradeSystemViewSet.as_view({'get': 'retrieve'}), name='grade-system-detail'),
+    path('grade-systems/edit/<int:pk>', GradeSystemViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='grade-system-edit'),
+    path('grade-systems/remove/<int:pk>', GradeSystemViewSet.as_view({'delete': 'destroy'}), name='grade-system-remove'),
 
     # Student endpoints (Promotion)
     path('create', StudentViewSet.as_view({'post': 'create'}), name='student-create'),
@@ -44,4 +59,5 @@ urlpatterns = [
     path('counselling/edit/<int:pk>', CounsellingReportViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='counselling-edit'),
     path('counselling/remove/<int:pk>', CounsellingReportViewSet.as_view({'delete': 'destroy'}), name='counselling-remove'),
 ]
+
 

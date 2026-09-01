@@ -601,3 +601,43 @@ class StudentAttendanceSerializer(serializers.ModelSerializer):
             ret['student_roll'] = instance.student.roll_number
             ret['student_register'] = instance.student.register_number
         return ret
+
+
+from .models import GradeSystem
+
+class GradeSystemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GradeSystem
+        fields = [
+            'id', 'grade', 'points', 'min_mark', 'max_mark', 'description', 'is_active',
+            'created_at', 'updated_at', 'created_by', 'updated_by'
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        extra_kwargs = {
+            'grade': {'required': True},
+            'points': {'required': True},
+            'is_active': {'required': False, 'default': True},
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+    def validate_grade(self, value):
+        if not value or not str(value).strip():
+            raise serializers.ValidationError("Grade cannot be empty.")
+        grade_str = str(value).strip().upper()
+        qs = GradeSystem.objects.filter(grade__iexact=grade_str)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(f"Grade '{grade_str}' already exists in the system.")
+        return grade_str
+
+    def validate_points(self, value):
+        if value is None:
+            raise serializers.ValidationError("Points value is required.")
+        if float(value) < 0:
+            raise serializers.ValidationError("Points cannot be negative.")
+        return value
+
