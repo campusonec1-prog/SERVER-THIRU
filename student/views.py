@@ -705,9 +705,22 @@ class StudentViewSet(viewsets.ModelViewSet):
                 user_role = ""
                 if hasattr(user, 'role') and user.role:
                     user_role = user.role.role_name.upper()
-                if user_role == 'STUDENT':
-                    students = Student.objects.filter(user__phone_number=user.phone_number)
-                else:
+
+                phone_val = str(getattr(user, 'mobile_number', getattr(user, 'phone_number', '')) or '').strip()
+                email_val = str(getattr(user, 'mail', getattr(user, 'email', '')) or '').strip()
+                username_val = str(getattr(user, 'username', '') or '').strip()
+
+                q_filter = Q()
+                if username_val:
+                    q_filter |= Q(roll_number__iexact=username_val) | Q(register_number__iexact=username_val)
+                if phone_val:
+                    q_filter |= Q(user__phone_number=phone_val)
+                if email_val:
+                    q_filter |= Q(user__email=email_val)
+
+                students = Student.objects.filter(q_filter) if q_filter else Student.objects.none()
+
+                if not students.exists() and user_role != 'STUDENT':
                     return Response({
                         "code": 400,
                         "message": "Please enter a Roll Number, Register Number, or Phone Number to search"
