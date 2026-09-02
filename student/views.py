@@ -2395,6 +2395,411 @@ class MarksViewSet(viewsets.ViewSet):
             "data": serializer.data
         }, status=status.HTTP_201_CREATED if is_create else status.HTTP_200_OK)
 
+    @action(detail=False, methods=['post', 'get'], url_path='marksheet-report/pdf')
+    def marksheet_report_pdf(self, request):
+        import os
+        from io import BytesIO
+        from django.http import HttpResponse
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import Image as RLImage
+        from PIL import Image as PILImage
+        import urllib.request
+        import datetime
+
+        from institution.models import Department, Batch, Section, Semester, Regulation, CollegeHeader, ExamType, Exam
+        from subject.models import Subject
+        from timetable.models import ClassTimetable
+        from student.models import Student, Marks
+
+        # Data extraction from POST request body or GET query params
+        req_data = request.data if request.method == 'POST' else request.query_params
+        department_id = req_data.get('department_id')
+        batch_id = req_data.get('batch_id')
+        section_id = req_data.get('section_id')
+        semester_id = req_data.get('semester_id')
+        regulation_id = req_data.get('regulation_id')
+        subject_id = req_data.get('subject_id')
+        exam_type_id = req_data.get('exam_type_id')
+        exam_ids_raw = req_data.get('exam_ids')
+        exam_date_raw = req_data.get('exam_date')
+        header_type = req_data.get('header_type') or req_data.get('header_type_id') or 'Main'
+
+        # Process exam_ids
+        exam_ids = []
+        if isinstance(exam_ids_raw, list):
+            exam_ids = exam_ids_raw
+        elif isinstance(exam_ids_raw, str) and exam_ids_raw.strip():
+            exam_ids = [x.strip() for x in exam_ids_raw.split(',') if x.strip()]
+
+        # Query main objects
+        department = Department.objects.filter(id=department_id).first() if department_id else None
+        batch = Batch.objects.filter(id=batch_id).first() if batch_id else None
+        
+        # Section handling (ID or name string)
+        section_obj = None
+        if section_id:
+            if str(section_id).isdigit():
+                section_obj = Section.objects.filter(id=section_id).first()
+            else:
+                section_obj = Section.objects.filter(sections__iexact=section_id).first()
+
+        semester_obj = Semester.objects.filter(id=semester_id).first() if semester_id else None
+        subject_obj = Subject.objects.filter(id=subject_id).first() if subject_id else None
+        exam_type_obj = ExamType.objects.filter(id=exam_type_id).first() if exam_type_id else None
+
+        # Fetch college header
+        college_header_obj = None
+        if str(header_type).isdigit():
+            college_header_obj = CollegeHeader.objects.filter(id=header_type).first()
+        if not college_header_obj and header_type:
+            college_header_obj = CollegeHeader.objects.filter(header_type__iexact=str(header_type)).first()
+        if not college_header_obj:
+            college_header_obj = CollegeHeader.objects.first()
+
+        # Format exam date
+        exam_date_str = ""
+        if exam_date_raw:
+            try:
+                if '-' in str(exam_date_raw):
+                    parts = str(exam_date_raw).split('-')
+                    if len(parts) == 3:
+                        if len(parts[0]) == 4: # YYYY-MM-DD
+                            exam_date_str = f"{parts[2].zfill(2)}/{parts[1].zfill(2)}/{parts[0]}"
+                        else:
+                            exam_date_str = f"{parts[0].zfill(2)}/{parts[1].zfill(2)}/{parts[2]}"
+                elif '/' in str(exam_date_raw):
+                    exam_date_str = str(exam_date_raw)
+            except Exception:
+                exam_date_str = str(exam_date_raw)
+        if not exam_date_str:
+            exam_date_str = datetime.date.today().strftime("%d/%m/%Y")
+
+        # Determine exam title string for PDF header
+        exam_title_str = "CAT I / II / III / IV / MODEL"
+        if exam_ids:
+            sel_exams = Exam.objects.filter(id__in=exam_ids)
+            if sel_exams.exists():
+                exam_names = [e.exam_name for e in sel_exams]
+                exam_title_str = " / ".join(exam_names).upper()
+
+        # Subject & Handler details
+        sub_code_name = ""
+        if subject_obj:
+            sub_code_name = f"{subject_obj.subject_code} - {subject_obj.subject_name}"
+        
+        # Subject Handler Faculty lookup
+        handler_name = "—"
+        if subject_obj and department:
+            tt_query = ClassTimetable.objects.filter(subject=subject_obj, department=department)
+            if section_obj:
+                tt_query = tt_query.filter(section=section_obj)
+            tt_rec = tt_query.first()
+            if tt_rec and tt_rec.faculty:
+                handler_name = tt_rec.faculty.name or tt_rec.faculty.username
+
+        # Infer Year and Sem string
+        sem_num = 1
+        if semester_id and str(semester_id).isdigit():
+            sem_num = int(semester_id)
+        
+        roman_map = {1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V', 6: 'VI', 7: 'VII', 8: 'VIII'}
+        year_names = {1: 'First Year', 2: 'First Year', 3: 'Second Year', 4: 'Second Year', 5: 'Third Year', 6: 'Third Year', 7: 'Final Year', 8: 'Final Year'}
+        
+        sem_roman = roman_map.get(sem_num, str(sem_num))
+        year_str = year_names.get(sem_num, 'First Year')
+        sec_name = section_obj.sections if section_obj else (str(section_id) if section_id else 'A')
+        
+        # Query students matching filters
+        students_qs = Student.objects.all().select_related('user')
+        if department:
+            students_qs = students_qs.filter(department=department)
+        if batch:
+            students_qs = students_qs.filter(batch=batch)
+        if section_obj:
+            students_qs = students_qs.filter(section=section_obj)
+            
+        students = list(students_qs.order_by('roll_number', 'user__name'))
+
+        # Fetch marks for students
+        marks_map = {}
+        if students and subject_obj:
+            m_qs = Marks.objects.filter(student__in=students, subject=subject_obj)
+            if exam_ids:
+                m_qs = m_qs.filter(exam_id__in=exam_ids)
+            for m in m_qs:
+                marks_map[m.student_id] = m.marks_obtained
+
+        # PDF Document setup
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            leftMargin=30,
+            rightMargin=30,
+            topMargin=25,
+            bottomMargin=25
+        )
+
+        styles = getSampleStyleSheet()
+
+        # Custom paragraph styles matching Image 2
+        header_title_style = ParagraphStyle(
+            name='HeaderTitle',
+            fontName='Helvetica-Bold',
+            fontSize=11,
+            leading=13,
+            alignment=1,
+            textColor=colors.black
+        )
+        doc_info_style = ParagraphStyle(
+            name='DocInfo',
+            fontName='Helvetica',
+            fontSize=7.5,
+            leading=9,
+            textColor=colors.black
+        )
+        doc_info_bold = ParagraphStyle(
+            name='DocInfoBold',
+            fontName='Helvetica-Bold',
+            fontSize=7.5,
+            leading=9,
+            textColor=colors.black
+        )
+        meta_val_style = ParagraphStyle(
+            name='MetaVal',
+            fontName='Helvetica',
+            fontSize=8.5,
+            leading=12,
+            textColor=colors.black
+        )
+        tbl_header_style = ParagraphStyle(
+            name='TblHeader',
+            fontName='Helvetica-Bold',
+            fontSize=8,
+            leading=9,
+            alignment=1,
+            textColor=colors.black
+        )
+        tbl_cell_center = ParagraphStyle(
+            name='TblCellCenter',
+            fontName='Helvetica',
+            fontSize=7.5,
+            leading=9,
+            alignment=1,
+            textColor=colors.black
+        )
+        tbl_cell_left = ParagraphStyle(
+            name='TblCellLeft',
+            fontName='Helvetica',
+            fontSize=7.5,
+            leading=9,
+            alignment=0,
+            textColor=colors.black
+        )
+
+        # Load Logo image
+        logo_url = college_header_obj.primary_logo if college_header_obj else None
+        logo_flowable = None
+        if logo_url:
+            try:
+                if isinstance(logo_url, str) and logo_url.startswith('http'):
+                    headers = {'User-Agent': 'Mozilla/5.0'}
+                    req = urllib.request.Request(logo_url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        img_data = response.read()
+                        pil_img = PILImage.open(BytesIO(img_data))
+                        out_io = BytesIO()
+                        pil_img.save(out_io, format='PNG')
+                        out_io.seek(0)
+                        logo_flowable = RLImage(out_io, width=45, height=45)
+                elif os.path.exists(logo_url):
+                    pil_img = PILImage.open(logo_url)
+                    out_io = BytesIO()
+                    pil_img.save(out_io, format='PNG')
+                    out_io.seek(0)
+                    logo_flowable = RLImage(out_io, width=45, height=45)
+            except Exception:
+                pass
+
+        if not logo_flowable:
+            fallback_logo_path = 'd:\\IMS-Thirumalai\\APP-THIRU\\src\\assets\\logo.webp'
+            try:
+                if os.path.exists(fallback_logo_path):
+                    pil_img = PILImage.open(fallback_logo_path)
+                    out_io = BytesIO()
+                    pil_img.save(out_io, format='PNG')
+                    out_io.seek(0)
+                    logo_flowable = RLImage(out_io, width=45, height=45)
+            except Exception:
+                pass
+
+        story = []
+
+        # 1. Header Box Table (Logo | Title | Document Info Box)
+        doc_info_data = [
+            [Paragraph("Doc No:", doc_info_bold), Paragraph("CAHCET/AD/104/CF-12", doc_info_style)],
+            [Paragraph("Rev. No & Issue No", doc_info_bold), Paragraph("00 & 01", doc_info_style)],
+            [Paragraph("Rev Date:", doc_info_bold), Paragraph("03.01.2025", doc_info_style)],
+        ]
+        doc_info_table = Table(doc_info_data, colWidths=[65, 80])
+        doc_info_table.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('TOPPADDING', (0,0), (-1,-1), 2),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+            ('LEFTPADDING', (0,0), (-1,-1), 3),
+            ('RIGHTPADDING', (0,0), (-1,-1), 3),
+        ]))
+
+        header_title_text = f"{exam_title_str}<br/>EXAM MARK SHEET"
+        title_paragraph = Paragraph(header_title_text, header_title_style)
+
+        header_table_data = [[
+            logo_flowable if logo_flowable else "",
+            title_paragraph,
+            doc_info_table
+        ]]
+        header_table = Table(header_table_data, colWidths=[65, 320, 150])
+        header_table.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ALIGN', (0,0), (0,0), 'CENTER'),
+            ('ALIGN', (1,0), (1,0), 'CENTER'),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ]))
+        story.append(header_table)
+        story.append(Spacer(1, 10))
+
+        # 2. Metadata Section (Year/Sec, Subject Handler, Date of Exam, etc.)
+        meta_table_data = [
+            [
+                Paragraph(f"<b>Year/Sec:</b> {year_str} / {sec_name}", meta_val_style),
+                ""
+            ],
+            [
+                Paragraph(f"<b>Subject Handler:</b> {handler_name}", meta_val_style),
+                Paragraph(f"<b>Sub Code & Name:</b> {sub_code_name}", meta_val_style)
+            ],
+            [
+                Paragraph(f"<b>Date of Exam:</b> {exam_date_str}", meta_val_style),
+                Paragraph(f"<b>Year/ Sem/ Sec:</b> {sem_roman} / Semester {sem_num} / {sec_name}", meta_val_style)
+            ]
+        ]
+        meta_table = Table(meta_table_data, colWidths=[265, 270])
+        meta_table.setStyle(TableStyle([
+            ('SPAN', (0,0), (1,0)),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('TOPPADDING', (0,0), (-1,-1), 2),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
+        ]))
+        story.append(meta_table)
+        story.append(Spacer(1, 8))
+
+        # 3. Marks Table Grid (Side-by-side Dual Column layout: 60 students per page)
+        col_widths = [25, 50, 142.5, 50, 25, 50, 142.5, 50]
+        
+        chunk_size = 60
+        student_chunks = [students[i:i + chunk_size] for i in range(0, max(len(students), 1), chunk_size)]
+
+        for chunk_idx, chunk in enumerate(student_chunks):
+            if chunk_idx > 0:
+                story.append(Spacer(1, 15))
+
+            table_rows = []
+            # Header Row
+            header_row = [
+                Paragraph("S. No.", tbl_header_style),
+                Paragraph("Roll No.", tbl_header_style),
+                Paragraph("Student Name", tbl_header_style),
+                Paragraph("Marks(100)", tbl_header_style),
+                Paragraph("S. No.", tbl_header_style),
+                Paragraph("Roll No.", tbl_header_style),
+                Paragraph("Student Name", tbl_header_style),
+                Paragraph("Marks(100)", tbl_header_style)
+            ]
+            table_rows.append(header_row)
+
+            half = 30
+            left_students = chunk[0:half]
+            right_students = chunk[half:60]
+
+            max_rows = max(len(left_students), len(right_students), 30)
+
+            for r_i in range(max_rows):
+                global_left_idx = chunk_idx * chunk_size + r_i + 1
+                global_right_idx = chunk_idx * chunk_size + r_i + 31
+
+                if r_i < len(left_students):
+                    s_left = left_students[r_i]
+                    l_sno = str(global_left_idx)
+                    l_roll = s_left.roll_number or ""
+                    l_name = s_left.user.name.upper() if (s_left.user and s_left.user.name) else ""
+                    l_mark = str(marks_map.get(s_left.id, ""))
+                else:
+                    l_sno, l_roll, l_name, l_mark = "", "", "", ""
+
+                if r_i < len(right_students):
+                    s_right = right_students[r_i]
+                    r_sno = str(global_right_idx)
+                    r_roll = s_right.roll_number or ""
+                    r_name = s_right.user.name.upper() if (s_right.user and s_right.user.name) else ""
+                    r_mark = str(marks_map.get(s_right.id, ""))
+                else:
+                    r_sno, r_roll, r_name, r_mark = "", "", "", ""
+
+                row_cells = [
+                    Paragraph(l_sno, tbl_cell_center),
+                    Paragraph(l_roll, tbl_cell_center),
+                    Paragraph(l_name, tbl_cell_left),
+                    Paragraph(l_mark, tbl_cell_center),
+                    Paragraph(r_sno, tbl_cell_center),
+                    Paragraph(r_roll, tbl_cell_center),
+                    Paragraph(r_name, tbl_cell_left),
+                    Paragraph(r_mark, tbl_cell_center)
+                ]
+                table_rows.append(row_cells)
+
+            marks_table = Table(table_rows, colWidths=col_widths)
+            marks_table.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('TOPPADDING', (0,0), (-1,-1), 2),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+                ('LEFTPADDING', (0,0), (-1,-1), 3),
+                ('RIGHTPADDING', (0,0), (-1,-1), 3),
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#F5F5F5')),
+            ]))
+            story.append(marks_table)
+
+        # 4. Footer Signatures (Faculty In-Charge & HOD)
+        story.append(Spacer(1, 40))
+        sig_data = [[
+            Paragraph("<b>Faculty In-Charge</b>", meta_val_style),
+            Paragraph("<b>HOD</b>", ParagraphStyle(name='SigHOD', fontName='Helvetica-Bold', fontSize=8.5, alignment=2))
+        ]]
+        sig_table = Table(sig_data, colWidths=[265, 270])
+        sig_table.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
+        ]))
+        story.append(sig_table)
+
+        doc.build(story)
+        pdf = buffer.getvalue()
+        buffer.close()
+
+        response = HttpResponse(content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Marksheet_Report_{datetime.date.today().strftime("%Y%m%d")}.pdf"'
+        response.write(pdf)
+        return response
+
 
 from .models import CounsellingReport
 from .serializers import CounsellingReportSerializer
