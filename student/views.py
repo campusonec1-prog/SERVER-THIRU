@@ -1,3 +1,6 @@
+import logging
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -8,6 +11,8 @@ from .models import StudentStatus, Student, StudentAdmissionSlip, StudentFees, F
 from .serializers import StudentStatusSerializer, StudentSerializer, StudentAdmissionSlipSerializer, StudentFeesSerializer, FacultyActivitySerializer, StudentAttendanceSerializer
 from users.permissions import IsAdminUser
 from .permissions import StudentStatusPermission, StudentPermission, MarksPermission, CounsellingReportPermission, AttendancePermission
+
+logger = logging.getLogger(__name__)
 
 
 class StudentStatusViewSet(viewsets.ModelViewSet):
@@ -3119,6 +3124,16 @@ class MarksViewSet(viewsets.ViewSet):
                 if val is not None and str(val).strip() != '' and str(val).strip() != '-':
                     conducted_subjects.add(sub.id)
 
+        # Dynamic Pass Mark Threshold from GradeSystem
+        pass_threshold = 45.0
+        pass_grade_entry = GradeSystem.objects.filter(is_active=True, is_pass=True, min_mark__isnull=False).order_by('min_mark').first()
+        if pass_grade_entry and pass_grade_entry.min_mark is not None:
+            pass_threshold = float(pass_grade_entry.min_mark)
+        else:
+            p_grade = GradeSystem.objects.filter(is_active=True, grade__iexact='P').first()
+            if p_grade and p_grade.min_mark is not None:
+                pass_threshold = float(p_grade.min_mark)
+
         for idx, student in enumerate(students, start=1):
             s_sno = str(idx)
             s_roll = student.roll_number or ""
@@ -3156,7 +3171,6 @@ class MarksViewSet(viewsets.ViewSet):
                             if sub.id in conducted_subjects:
                                 student_conducted_count += 1
 
-                            pass_threshold = 50.0
                             if num_val >= pass_threshold:
                                 subject_stats[sub.id]['pass'] += 1
                             else:
@@ -3809,15 +3823,15 @@ class GradeSystemViewSet(viewsets.ModelViewSet):
     def _auto_seed_grades(self):
         if not GradeSystem.objects.exists():
             default_grades = [
-                {'grade': 'O', 'points': 10.0, 'description': 'Outstanding'},
-                {'grade': 'A+', 'points': 9.0, 'description': 'Excellent'},
-                {'grade': 'A', 'points': 8.0, 'description': 'Very Good'},
-                {'grade': 'B+', 'points': 7.0, 'description': 'Good'},
-                {'grade': 'B', 'points': 6.0, 'description': 'Above Average'},
-                {'grade': 'C', 'points': 5.0, 'description': 'Average'},
-                {'grade': 'P', 'points': 5.0, 'description': 'Pass'},
-                {'grade': 'F', 'points': 0.0, 'description': 'Fail'},
-                {'grade': 'RA', 'points': 0.0, 'description': 'Re-appear'},
+                {'grade': 'O',  'points': 10.0, 'min_mark': 90.0, 'max_mark': 100.0, 'is_pass': True,  'description': 'Outstanding (90 - 100)'},
+                {'grade': 'A+', 'points': 9.0,  'min_mark': 80.0, 'max_mark': 89.0,  'is_pass': True,  'description': 'Excellent (80 - 89)'},
+                {'grade': 'A',  'points': 8.0,  'min_mark': 70.0, 'max_mark': 79.0,  'is_pass': True,  'description': 'Very Good (70 - 79)'},
+                {'grade': 'B+', 'points': 7.0,  'min_mark': 60.0, 'max_mark': 69.0,  'is_pass': True,  'description': 'Good (60 - 69)'},
+                {'grade': 'B',  'points': 6.0,  'min_mark': 55.0, 'max_mark': 59.0,  'is_pass': True,  'description': 'Above Average (55 - 59)'},
+                {'grade': 'C',  'points': 5.0,  'min_mark': 50.0, 'max_mark': 54.0,  'is_pass': True,  'description': 'Average (50 - 54)'},
+                {'grade': 'P',  'points': 5.0,  'min_mark': 45.0, 'max_mark': 49.0,  'is_pass': True,  'description': 'Pass (45 - 49)'},
+                {'grade': 'F',  'points': 0.0,  'min_mark': 0.0,  'max_mark': 44.0,  'is_pass': False, 'description': 'Fail (0 - 44)'},
+                {'grade': 'RA', 'points': 0.0,  'min_mark': 0.0,  'max_mark': 44.0,  'is_pass': False, 'description': 'Re-appear'},
             ]
             for item in default_grades:
                 GradeSystem.objects.create(**item)
