@@ -2729,7 +2729,7 @@ class MarksViewSet(viewsets.ViewSet):
             left_students = chunk[0:half]
             right_students = chunk[half:60]
 
-            max_rows = max(len(left_students), len(right_students), 30)
+            max_rows = max(len(left_students), len(right_students))
 
             for r_i in range(max_rows):
                 global_left_idx = chunk_idx * chunk_size + r_i + 1
@@ -2797,6 +2797,523 @@ class MarksViewSet(viewsets.ViewSet):
 
         response = HttpResponse(content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="Marksheet_Report_{datetime.date.today().strftime("%Y%m%d")}.pdf"'
+        response.write(pdf)
+        return response
+
+    @action(detail=False, methods=['post', 'get'], url_path='consolidated-marksheet-report/pdf')
+    def consolidated_marksheet_report_pdf(self, request):
+        import os
+        from io import BytesIO
+        from django.http import HttpResponse
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, HRFlowable
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import Image as RLImage
+        from PIL import Image as PILImage
+        import urllib.request
+        import datetime
+
+        from institution.models import Department, Batch, Section, Semester, Regulation, CollegeHeader, ExamType, Exam
+        from subject.models import Subject
+        from timetable.models import ClassTimetable
+        from student.models import Student, Marks
+
+        req_data = request.data if request.method == 'POST' else request.query_params
+        department_id = req_data.get('department_id')
+        batch_id = req_data.get('batch_id')
+        section_id = req_data.get('section_id')
+        semester_id = req_data.get('semester_id')
+        regulation_id = req_data.get('regulation_id')
+        exam_type_id = req_data.get('exam_type_id')
+        exam_ids_raw = req_data.get('exam_ids') or req_data.get('exam_id')
+        exam_date_raw = req_data.get('exam_date')
+        header_type = req_data.get('header_type') or req_data.get('header_type_id') or 'Main'
+
+        # Process exam_ids
+        exam_ids = []
+        if isinstance(exam_ids_raw, list):
+            exam_ids = exam_ids_raw
+        elif isinstance(exam_ids_raw, str) and exam_ids_raw.strip():
+            exam_ids = [x.strip() for x in exam_ids_raw.split(',') if x.strip()]
+        elif isinstance(exam_ids_raw, int):
+            exam_ids = [exam_ids_raw]
+
+        department = Department.objects.filter(id=department_id).first() if department_id else None
+        batch = Batch.objects.filter(id=batch_id).first() if batch_id else None
+
+        section_obj = None
+        if section_id:
+            if str(section_id).isdigit():
+                section_obj = Section.objects.filter(id=section_id).first()
+            else:
+                section_obj = Section.objects.filter(sections__iexact=section_id).first()
+
+        semester_obj = Semester.objects.filter(id=semester_id).first() if (semester_id and str(semester_id).isdigit()) else None
+        exam_type_obj = ExamType.objects.filter(id=exam_type_id).first() if exam_type_id else None
+
+        college_header_obj = None
+        if str(header_type).isdigit():
+            college_header_obj = CollegeHeader.objects.filter(id=header_type).first()
+        if not college_header_obj and header_type:
+            college_header_obj = CollegeHeader.objects.filter(header_type__iexact=str(header_type)).first()
+        if not college_header_obj:
+            college_header_obj = CollegeHeader.objects.first()
+
+        # Date formatting
+        exam_date_str = ""
+        if exam_date_raw:
+            try:
+                if '-' in str(exam_date_raw):
+                    parts = str(exam_date_raw).split('-')
+                    if len(parts) == 3:
+                        if len(parts[0]) == 4:
+                            exam_date_str = f"{parts[2].zfill(2)}/{parts[1].zfill(2)}/{parts[0]}"
+                        else:
+                            exam_date_str = f"{parts[0].zfill(2)}/{parts[1].zfill(2)}/{parts[2]}"
+                elif '/' in str(exam_date_raw):
+                    exam_date_str = str(exam_date_raw)
+            except Exception:
+                exam_date_str = str(exam_date_raw)
+        if not exam_date_str:
+            exam_date_str = datetime.date.today().strftime("%d/%m/%Y")
+
+        # Exam title string
+        exam_title_str = "CAT1 Exam"
+        if exam_ids:
+            sel_exams = Exam.objects.filter(id__in=exam_ids)
+            if sel_exams.exists():
+                exam_names = [e.exam_name for e in sel_exams]
+                exam_title_str = " / ".join(exam_names)
+
+        # Sem & Year numbers
+        sem_num = 1
+        if semester_id and str(semester_id).isdigit():
+            sem_num = int(semester_id)
+        elif semester_obj:
+            try:
+                sem_num = int(semester_obj.semester_name or semester_obj.id)
+            except Exception:
+                sem_num = 1
+
+        roman_map = {1: 'I', 2: 'I', 3: 'II', 4: 'II', 5: 'III', 6: 'III', 7: 'IV', 8: 'IV'}
+        year_roman = roman_map.get(sem_num, 'I')
+        sec_name = section_obj.sections if section_obj else (str(section_id) if section_id else 'A')
+
+        # Academic Year string
+        academic_year_str = "Academic Year 2026-2027"
+        if batch and batch.batch:
+            academic_year_str = f"Academic Year {batch.batch}"
+
+        # Department Name string
+        dept_name_str = f"Department of {department.department_name}" if department else "Department of Computer Science Engineering"
+
+        # Fetch subjects for this semester & department (and regulation if selected)
+        subjects_qs = Subject.objects.all()
+        if department:
+            subjects_qs = subjects_qs.filter(department=department)
+        if semester_obj:
+            subjects_qs = subjects_qs.filter(semester=semester_obj)
+        elif semester_id:
+            subjects_qs = subjects_qs.filter(semester_id=semester_id)
+        if regulation_id:
+            subjects_qs = subjects_qs.filter(regulation_id=regulation_id)
+
+        subjects = list(subjects_qs.order_by('subject_code'))
+
+        # Fetch students
+        students_qs = Student.objects.all().select_related('user')
+        if department:
+            students_qs = students_qs.filter(department=department)
+        if batch:
+            students_qs = students_qs.filter(batch=batch)
+        if section_obj:
+            students_qs = students_qs.filter(section=section_obj)
+
+        students = list(students_qs.order_by('roll_number', 'user__name'))
+
+        # Fetch marks map
+        marks_map = {}
+        if students and subjects:
+            m_qs = Marks.objects.filter(student__in=students, subject__in=subjects)
+            if exam_ids:
+                m_qs = m_qs.filter(exam_id__in=exam_ids)
+            for m in m_qs:
+                marks_map[(m.student_id, m.subject_id)] = m.marks_obtained
+
+        # Document Setup
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            leftMargin=25,
+            rightMargin=25,
+            topMargin=20,
+            bottomMargin=20
+        )
+
+        styles = getSampleStyleSheet()
+
+        title_style = ParagraphStyle(
+            name='CollHeaderTitleCons',
+            fontName='Helvetica-Bold',
+            fontSize=11.5,
+            leading=13.5,
+            alignment=1,
+            textColor=colors.black
+        )
+        heading_title_style = ParagraphStyle(
+            name='ConsolidatedTitleCons',
+            fontName='Helvetica-Bold',
+            fontSize=11,
+            leading=13,
+            alignment=1,
+            textColor=colors.black
+        )
+        heading_meta_style = ParagraphStyle(
+            name='ConsolidatedMetaCons',
+            fontName='Helvetica',
+            fontSize=9,
+            leading=11,
+            alignment=1,
+            textColor=colors.black
+        )
+
+        tbl_header_style = ParagraphStyle(
+            name='TblHeaderStyleCons',
+            fontName='Helvetica-Bold',
+            fontSize=7.5,
+            leading=9,
+            alignment=1,
+            textColor=colors.black
+        )
+        tbl_cell_center = ParagraphStyle(
+            name='TblCellCenterStyleCons',
+            fontName='Helvetica',
+            fontSize=7.5,
+            leading=9,
+            alignment=1,
+            textColor=colors.black
+        )
+        tbl_cell_left = ParagraphStyle(
+            name='TblCellLeftStyleCons',
+            fontName='Helvetica',
+            fontSize=7.5,
+            leading=9,
+            alignment=0,
+            textColor=colors.black
+        )
+
+        # Load Logo image
+        logo_url = college_header_obj.primary_logo if college_header_obj else None
+        logo_flowable = None
+        if logo_url:
+            try:
+                if isinstance(logo_url, str) and logo_url.startswith('http'):
+                    headers = {'User-Agent': 'Mozilla/5.0'}
+                    req = urllib.request.Request(logo_url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        img_data = response.read()
+                        pil_img = PILImage.open(BytesIO(img_data))
+                        out_io = BytesIO()
+                        pil_img.save(out_io, format='PNG')
+                        out_io.seek(0)
+                        logo_flowable = RLImage(out_io, width=50, height=50)
+                elif os.path.exists(logo_url):
+                    pil_img = PILImage.open(logo_url)
+                    out_io = BytesIO()
+                    pil_img.save(out_io, format='PNG')
+                    out_io.seek(0)
+                    logo_flowable = RLImage(out_io, width=50, height=50)
+            except Exception:
+                pass
+
+        if not logo_flowable:
+            fallback_logo_path = 'd:\\IMS-Thirumalai\\APP-THIRU\\src\\assets\\logo.webp'
+            try:
+                if os.path.exists(fallback_logo_path):
+                    pil_img = PILImage.open(fallback_logo_path)
+                    out_io = BytesIO()
+                    pil_img.save(out_io, format='PNG')
+                    out_io.seek(0)
+                    logo_flowable = RLImage(out_io, width=50, height=50)
+            except Exception:
+                pass
+
+        story = []
+
+        # 1. Header Box (Image 1 Header Format)
+        header_name = college_header_obj.college_name if (college_header_obj and college_header_obj.college_name) else "C. Abdul Hakeem College Of Engineering & Technology"
+        header_address = college_header_obj.address if (college_header_obj and college_header_obj.address) else "Melvisharam - 632509"
+
+        header_center_text = f"<b>{header_name}</b><br/><b>{header_address}</b><br/><br/>{dept_name_str}<br/>{academic_year_str}"
+        header_p = Paragraph(header_center_text, title_style)
+
+        header_table_data = [[
+            logo_flowable if logo_flowable else "",
+            header_p
+        ]]
+        header_table = Table(header_table_data, colWidths=[60, 480])
+        header_table.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ALIGN', (0,0), (0,0), 'CENTER'),
+            ('ALIGN', (1,0), (1,0), 'CENTER'),
+        ]))
+        story.append(header_table)
+        story.append(Spacer(1, 6))
+
+        # Horizontal Rule
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.black, spaceAfter=8, spaceBefore=4))
+
+        # Title Block
+        story.append(Paragraph("<b>Consolidated Marksheet</b>", heading_title_style))
+        story.append(Spacer(1, 3))
+        story.append(Paragraph(f"{exam_title_str}", heading_meta_style))
+        story.append(Spacer(1, 3))
+        story.append(Paragraph(f"Date: {exam_date_str}", heading_meta_style))
+        story.append(Spacer(1, 3))
+        story.append(Paragraph(f"Year / Sem / Sec : {year_roman} / Semester {sem_num} / {sec_name}", heading_meta_style))
+        story.append(Spacer(1, 10))
+
+        # 2. Main Student Marks Table (Image 2)
+        sub_count = max(len(subjects), 1)
+        sub_col_width = max(345 / sub_count, 32)
+
+        table_header = [
+            Paragraph("S.<br/>No.", tbl_header_style),
+            Paragraph("Roll No.", tbl_header_style),
+            Paragraph("Name", tbl_header_style)
+        ]
+        for sub in subjects:
+            table_header.append(Paragraph(sub.subject_code, tbl_header_style))
+
+        table_data = [table_header]
+        col_widths = [25, 55, 120] + [sub_col_width] * len(subjects)
+
+        # Subject-wise statistics tracking
+        subject_stats = {
+            sub.id: {
+                'total': len(students),
+                'appeared': 0,
+                'pass': 0,
+                'fail': 0,
+                'absent': 0
+            }
+            for sub in subjects
+        }
+
+        # Student performance category counters
+        performance_counts = {
+            'cleared_all': 0,
+            'failed_1': 0,
+            'failed_2': 0,
+            'failed_3': 0,
+            'failed_more_than_3': 0
+        }
+
+        # Track conducted subjects
+        conducted_subjects = set()
+        for sub in subjects:
+            for s in students:
+                val = marks_map.get((s.id, sub.id))
+                if val is not None and str(val).strip() != '' and str(val).strip() != '-':
+                    conducted_subjects.add(sub.id)
+
+        for idx, student in enumerate(students, start=1):
+            s_sno = str(idx)
+            s_roll = student.roll_number or ""
+            s_name = student.user.name if (student.user and student.user.name) else ""
+
+            row = [
+                Paragraph(s_sno, tbl_cell_center),
+                Paragraph(s_roll, tbl_cell_center),
+                Paragraph(s_name, tbl_cell_left)
+            ]
+
+            student_failed_conducted_count = 0
+            student_conducted_count = 0
+
+            for sub in subjects:
+                raw_val = marks_map.get((student.id, sub.id))
+                display_val = "-"
+                
+                if raw_val is not None:
+                    str_val = str(raw_val).strip()
+                    if str_val.upper() in ['AB', 'ABSENT']:
+                        display_val = "AB"
+                        subject_stats[sub.id]['absent'] += 1
+                        if sub.id in conducted_subjects:
+                            student_failed_conducted_count += 1
+                            student_conducted_count += 1
+                    elif str_val in ['-', '']:
+                        display_val = "-"
+                        subject_stats[sub.id]['absent'] += 1
+                    else:
+                        try:
+                            num_val = float(str_val)
+                            display_val = str(int(num_val)) if num_val.is_integer() else str(num_val)
+                            subject_stats[sub.id]['appeared'] += 1
+                            if sub.id in conducted_subjects:
+                                student_conducted_count += 1
+
+                            pass_threshold = 50.0
+                            if num_val >= pass_threshold:
+                                subject_stats[sub.id]['pass'] += 1
+                            else:
+                                subject_stats[sub.id]['fail'] += 1
+                                if sub.id in conducted_subjects:
+                                    student_failed_conducted_count += 1
+                        except ValueError:
+                            display_val = str_val
+                            subject_stats[sub.id]['absent'] += 1
+                else:
+                    display_val = "-"
+                    subject_stats[sub.id]['absent'] += 1
+
+                row.append(Paragraph(display_val, tbl_cell_center))
+
+            table_data.append(row)
+
+            # Record overall performance for this student
+            if len(conducted_subjects) > 0 or len(subjects) > 0:
+                if student_failed_conducted_count == 0:
+                    performance_counts['cleared_all'] += 1
+                elif student_failed_conducted_count == 1:
+                    performance_counts['failed_1'] += 1
+                elif student_failed_conducted_count == 2:
+                    performance_counts['failed_2'] += 1
+                elif student_failed_conducted_count == 3:
+                    performance_counts['failed_3'] += 1
+                else:
+                    performance_counts['failed_more_than_3'] += 1
+
+        marks_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+        marks_table.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('TOPPADDING', (0,0), (-1,-1), 3),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+            ('LEFTPADDING', (0,0), (-1,-1), 2),
+            ('RIGHTPADDING', (0,0), (-1,-1), 2),
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#D9D9D9')),
+        ]))
+        story.append(marks_table)
+        story.append(Spacer(1, 15))
+
+        # 3. Subject-wise Analysis Table (Image 3)
+        story.append(Paragraph("<b>Subject-wise Analysis</b>", ParagraphStyle(name='SecHead1Cons', fontName='Helvetica-Bold', fontSize=9.5, leading=12)))
+        story.append(Spacer(1, 4))
+
+        ana_header = [Paragraph("Subject Code", tbl_header_style)]
+        for sub in subjects:
+            ana_header.append(Paragraph(sub.subject_code, tbl_header_style))
+
+        row_total = [Paragraph("Total No. of Students", tbl_cell_left)]
+        row_appeared = [Paragraph("No. of Students Appeared", tbl_cell_left)]
+        row_pass = [Paragraph("No. of Students Pass", tbl_cell_left)]
+        row_fail = [Paragraph("No. of Students Fail", tbl_cell_left)]
+        row_absent = [Paragraph("No. of Students Absent", tbl_cell_left)]
+        row_pass_pct_total = [Paragraph("Percentage of Pass: (Based on Total)", tbl_cell_left)]
+        row_pass_pct_app = [Paragraph("(Based on Appeared)", tbl_cell_left)]
+
+        for sub in subjects:
+            st = subject_stats[sub.id]
+            tot = st['total']
+            app = st['appeared']
+            pas = st['pass']
+            fal = st['fail']
+            absn = st['absent']
+
+            pct_tot_str = f"{round((pas / tot * 100), 2)}%" if tot > 0 else "0.0%"
+            pct_app_str = f"{round((pas / app * 100), 2)}%" if app > 0 else "0.0%"
+
+            row_total.append(Paragraph(str(tot), tbl_cell_center))
+            row_appeared.append(Paragraph(str(app), tbl_cell_center))
+            row_pass.append(Paragraph(str(pas), tbl_cell_center))
+            row_fail.append(Paragraph(str(fal), tbl_cell_center))
+            row_absent.append(Paragraph(str(absn), tbl_cell_center))
+            row_pass_pct_total.append(Paragraph(pct_tot_str, tbl_cell_center))
+            row_pass_pct_app.append(Paragraph(pct_app_str, tbl_cell_center))
+
+        ana_table_data = [
+            ana_header,
+            row_total,
+            row_appeared,
+            row_pass,
+            row_fail,
+            row_absent,
+            row_pass_pct_total,
+            row_pass_pct_app
+        ]
+
+        ana_col_widths = [200] + [sub_col_width] * len(subjects)
+        ana_table = Table(ana_table_data, colWidths=ana_col_widths)
+        ana_table.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('TOPPADDING', (0,0), (-1,-1), 2.5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 2.5),
+            ('LEFTPADDING', (0,0), (-1,-1), 3),
+            ('RIGHTPADDING', (0,0), (-1,-1), 3),
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#D9D9D9')),
+        ]))
+        story.append(ana_table)
+        story.append(Spacer(1, 15))
+
+        # 4. Overall Student Performance Table (Image 3)
+        story.append(Paragraph("<b>Overall Student Performance</b>", ParagraphStyle(name='SecHead2Cons', fontName='Helvetica-Bold', fontSize=9.5, leading=12)))
+        story.append(Spacer(1, 4))
+
+        perf_data = [
+            [Paragraph("Performance Category", tbl_header_style), Paragraph("Number of Students", tbl_header_style)],
+            [Paragraph("Cleared All Subjects", tbl_cell_left), Paragraph(str(performance_counts['cleared_all']), tbl_cell_center)],
+            [Paragraph("Failed in One Subject", tbl_cell_left), Paragraph(str(performance_counts['failed_1']), tbl_cell_center)],
+            [Paragraph("Failed in Two Subjects", tbl_cell_left), Paragraph(str(performance_counts['failed_2']), tbl_cell_center)],
+            [Paragraph("Failed in Three Subjects", tbl_cell_left), Paragraph(str(performance_counts['failed_3']), tbl_cell_center)],
+            [Paragraph("Failed in More Than Three Subjects", tbl_cell_left), Paragraph(str(performance_counts['failed_more_than_3']), tbl_cell_center)],
+        ]
+        perf_table = Table(perf_data, colWidths=[240, 140])
+        perf_table.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('TOPPADDING', (0,0), (-1,-1), 2.5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 2.5),
+            ('LEFTPADDING', (0,0), (-1,-1), 4),
+            ('RIGHTPADDING', (0,0), (-1,-1), 4),
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#D9D9D9')),
+        ]))
+        story.append(perf_table)
+        story.append(Spacer(1, 15))
+
+        # 5. Overall Pass Percentage (Image 3)
+        total_students_cnt = len(students)
+        overall_pct_val = f"{round((performance_counts['cleared_all'] / total_students_cnt * 100), 2)}%" if total_students_cnt > 0 else "0.0%"
+
+        story.append(Paragraph("<b>Overall Pass Percentage</b>", ParagraphStyle(name='SecHead3Cons', fontName='Helvetica-Bold', fontSize=9.5, leading=12)))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(f"<b>{overall_pct_val}</b>", ParagraphStyle(name='OverallValCons', fontName='Helvetica', fontSize=9.5, leading=12, alignment=1)))
+        story.append(Spacer(1, 35))
+
+        # 6. Signatures (Test Coordinator, HOD, Principal)
+        sig_data = [[
+            Paragraph("<b>Test Coordinator</b>", ParagraphStyle(name='SigLeftCons', fontName='Helvetica-Bold', fontSize=8.5, alignment=0)),
+            Paragraph("<b>HOD</b>", ParagraphStyle(name='SigCenterCons', fontName='Helvetica-Bold', fontSize=8.5, alignment=1)),
+            Paragraph("<b>Principal</b>", ParagraphStyle(name='SigRightCons', fontName='Helvetica-Bold', fontSize=8.5, alignment=2))
+        ]]
+        sig_table = Table(sig_data, colWidths=[175, 175, 175])
+        sig_table.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
+        ]))
+        story.append(sig_table)
+
+        doc.build(story)
+        pdf = buffer.getvalue()
+        buffer.close()
+
+        response = HttpResponse(content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Consolidated_Marksheet_{datetime.date.today().strftime("%Y%m%d")}.pdf"'
         response.write(pdf)
         return response
 

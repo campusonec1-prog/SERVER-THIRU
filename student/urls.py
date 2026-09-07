@@ -43,6 +43,7 @@ urlpatterns = [
     path('marks/get/<int:pk>', MarksViewSet.as_view({'get': 'retrieve'}), name='marks-detail'),
     path('marks/edit', MarksViewSet.as_view({'put': 'update'}), name='marks-edit'),
     path('marks/marksheet-report/pdf', MarksViewSet.as_view({'post': 'marksheet_report_pdf', 'get': 'marksheet_report_pdf'}), name='marksheet-report-pdf'),
+    path('marks/consolidated-marksheet-report/pdf', MarksViewSet.as_view({'post': 'consolidated_marksheet_report_pdf', 'get': 'consolidated_marksheet_report_pdf'}), name='consolidated-marksheet-report-pdf'),
 
 
     # Attendance endpoints
