@@ -276,6 +276,7 @@ class GradeSystem(TrackingModel):
     max_mark = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Maximum mark threshold")
     description = models.CharField(max_length=100, null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    is_pass = models.BooleanField(default=True, help_text="Designates passing grade/range")
 
     class Meta:
         db_table = 'grade_system'

@@ -1,3 +1,6 @@
+import logging
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -8,6 +11,8 @@ from .models import StudentStatus, Student, StudentAdmissionSlip, StudentFees, F
 from .serializers import StudentStatusSerializer, StudentSerializer, StudentAdmissionSlipSerializer, StudentFeesSerializer, FacultyActivitySerializer, StudentAttendanceSerializer
 from users.permissions import IsAdminUser
 from .permissions import StudentStatusPermission, StudentPermission, MarksPermission, CounsellingReportPermission, AttendancePermission
+
+logger = logging.getLogger(__name__)
 
 
 class StudentStatusViewSet(viewsets.ModelViewSet):
@@ -3209,6 +3214,58 @@ class MarksViewSet(viewsets.ViewSet):
                 if val is not None and str(val).strip() != '' and str(val).strip() != '-':
                     conducted_subjects.add(sub.id)
 
+        # Dynamic Evaluation against active GradeSystem table entries
+        active_grades = list(GradeSystem.objects.filter(is_active=True))
+
+        def evaluate_mark_pass_fail(val):
+            """
+            Evaluates raw mark/grade value dynamically against GradeSystem table.
+            Returns tuple: (is_absent, is_pass, display_val)
+            """
+            if val is None:
+                return True, False, "-"
+            str_val = str(val).strip().upper()
+            if str_val in ['-', '']:
+                return True, False, "-"
+            
+            # Check string absent codes
+            if str_val in ['AB', 'ABSENT']:
+                return True, False, "AB"
+            if str_val == 'UA':
+                return True, False, "UA"
+
+            # Check numeric value
+            try:
+                num_val = float(str_val)
+                disp = str(int(num_val)) if num_val.is_integer() else str(num_val)
+
+                # 0-0 range check for absent (e.g., UA with 0 - 0 marks)
+                absent_entry = next((g for g in active_grades if g.min_mark is not None and g.max_mark is not None and float(g.min_mark) == 0 and float(g.max_mark) == 0 and not g.is_pass), None)
+                if absent_entry and num_val == 0:
+                    return True, False, "UA"
+
+                # Check grade mark range match (excluding 0-0 range)
+                matching_entry = next((g for g in active_grades if g.min_mark is not None and g.max_mark is not None and not (float(g.min_mark) == 0 and float(g.max_mark) == 0) and float(g.min_mark) <= num_val <= float(g.max_mark)), None)
+                if matching_entry:
+                    return False, matching_entry.is_pass, disp
+
+                # Fallback: check against min pass mark from active passing grades
+                pass_entries = [g for g in active_grades if g.is_pass and g.min_mark is not None and not (float(g.min_mark) == 0 and float(g.max_mark or 0) == 0)]
+                if pass_entries:
+                    min_pass_mark = min(float(g.min_mark) for g in pass_entries)
+                    return False, num_val >= min_pass_mark, disp
+
+                return False, num_val >= 50.0, disp
+            except ValueError:
+                # Grade Letter string lookup (e.g. 'O', 'A+', 'U', 'UA', 'RA')
+                matching_grade = next((g for g in active_grades if g.grade.upper() == str_val), None)
+                if matching_grade:
+                    is_abs = (matching_grade.min_mark is not None and matching_grade.max_mark is not None and float(matching_grade.min_mark) == 0 and float(matching_grade.max_mark) == 0) or str_val == 'UA'
+                    return is_abs, matching_grade.is_pass, str_val
+
+                is_fail_code = str_val in ['U', 'UA', 'F', 'RA', 'AB', 'ABSENT']
+                return (str_val in ['AB', 'ABSENT', 'UA']), (not is_fail_code), str_val
+
         for idx, student in enumerate(students, start=1):
             s_sno = str(idx)
             s_roll = student.roll_number or ""
@@ -3225,40 +3282,26 @@ class MarksViewSet(viewsets.ViewSet):
 
             for sub in subjects:
                 raw_val = marks_map.get((student.id, sub.id))
-                display_val = "-"
-                
-                if raw_val is not None:
-                    str_val = str(raw_val).strip()
-                    if str_val.upper() in ['AB', 'ABSENT']:
-                        display_val = "AB"
-                        subject_stats[sub.id]['absent'] += 1
+                is_abs, is_pass, display_val = evaluate_mark_pass_fail(raw_val)
+
+                if display_val == "-":
+                    subject_stats[sub.id]['absent'] += 1
+                elif is_abs:
+                    subject_stats[sub.id]['absent'] += 1
+                    if sub.id in conducted_subjects:
+                        student_failed_conducted_count += 1
+                        student_conducted_count += 1
+                else:
+                    subject_stats[sub.id]['appeared'] += 1
+                    if sub.id in conducted_subjects:
+                        student_conducted_count += 1
+
+                    if is_pass:
+                        subject_stats[sub.id]['pass'] += 1
+                    else:
+                        subject_stats[sub.id]['fail'] += 1
                         if sub.id in conducted_subjects:
                             student_failed_conducted_count += 1
-                            student_conducted_count += 1
-                    elif str_val in ['-', '']:
-                        display_val = "-"
-                        subject_stats[sub.id]['absent'] += 1
-                    else:
-                        try:
-                            num_val = float(str_val)
-                            display_val = str(int(num_val)) if num_val.is_integer() else str(num_val)
-                            subject_stats[sub.id]['appeared'] += 1
-                            if sub.id in conducted_subjects:
-                                student_conducted_count += 1
-
-                            pass_threshold = 50.0
-                            if num_val >= pass_threshold:
-                                subject_stats[sub.id]['pass'] += 1
-                            else:
-                                subject_stats[sub.id]['fail'] += 1
-                                if sub.id in conducted_subjects:
-                                    student_failed_conducted_count += 1
-                        except ValueError:
-                            display_val = str_val
-                            subject_stats[sub.id]['absent'] += 1
-                else:
-                    display_val = "-"
-                    subject_stats[sub.id]['absent'] += 1
 
                 row.append(Paragraph(display_val, tbl_cell_center))
 
@@ -4348,15 +4391,20 @@ class GradeSystemViewSet(viewsets.ModelViewSet):
     def _auto_seed_grades(self):
         if not GradeSystem.objects.exists():
             default_grades = [
-                {'grade': 'O', 'points': 10.0, 'description': 'Outstanding'},
-                {'grade': 'A+', 'points': 9.0, 'description': 'Excellent'},
-                {'grade': 'A', 'points': 8.0, 'description': 'Very Good'},
-                {'grade': 'B+', 'points': 7.0, 'description': 'Good'},
-                {'grade': 'B', 'points': 6.0, 'description': 'Above Average'},
-                {'grade': 'C', 'points': 5.0, 'description': 'Average'},
-                {'grade': 'P', 'points': 5.0, 'description': 'Pass'},
-                {'grade': 'F', 'points': 0.0, 'description': 'Fail'},
-                {'grade': 'RA', 'points': 0.0, 'description': 'Re-appear'},
+                {'grade': 'O',  'points': 10.0, 'min_mark': 91.0, 'max_mark': 100.0, 'is_pass': True,  'description': 'Outstanding'},
+                {'grade': 'S',  'points': 10.0, 'min_mark': 91.0, 'max_mark': 100.0, 'is_pass': True,  'description': 'Outstanding (Regulation 2025)'},
+                {'grade': 'A+', 'points': 9.0,  'min_mark': 81.0, 'max_mark': 90.0,  'is_pass': True,  'description': 'Excellent'},
+                {'grade': 'A',  'points': 8.0,  'min_mark': 71.0, 'max_mark': 80.0,  'is_pass': True,  'description': 'Very Good'},
+                {'grade': 'B+', 'points': 7.0,  'min_mark': 61.0, 'max_mark': 70.0,  'is_pass': True,  'description': 'Good'},
+                {'grade': 'B',  'points': 6.0,  'min_mark': 56.0, 'max_mark': 60.0,  'is_pass': True,  'description': 'Above Average'},
+                {'grade': 'C+', 'points': 6.0,  'min_mark': 56.0, 'max_mark': 60.0,  'is_pass': True,  'description': 'Average (Regulation 2025)'},
+                {'grade': 'C',  'points': 5.0,  'min_mark': 50.0, 'max_mark': 55.0,  'is_pass': True,  'description': 'Average'},
+                {'grade': 'P',  'points': 5.0,  'min_mark': 50.0, 'max_mark': 55.0,  'is_pass': True,  'description': 'Pass'},
+                {'grade': 'U',  'points': 0.0,  'min_mark': 0.0,  'max_mark': 49.0,  'is_pass': False, 'description': 'Fail'},
+                {'grade': 'UA', 'points': 0.0,  'min_mark': 0.0,  'max_mark': 0.0,   'is_pass': False, 'description': 'Absent'},
+                {'grade': 'RA', 'points': 0.0,  'min_mark': 0.0,  'max_mark': 49.0,  'is_pass': False, 'description': 'Re-appear'},
+                {'grade': 'SA', 'points': 0.0,  'min_mark': 0.0,  'max_mark': 0.0,   'is_pass': False, 'description': 'Shortage of Attendance'},
+                {'grade': 'W',  'points': 0.0,  'min_mark': 0.0,  'max_mark': 0.0,   'is_pass': False, 'description': 'Withdrawal'},
             ]
             for item in default_grades:
                 GradeSystem.objects.create(**item)

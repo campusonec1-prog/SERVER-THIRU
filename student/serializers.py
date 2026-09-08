@@ -609,7 +609,7 @@ class GradeSystemSerializer(serializers.ModelSerializer):
     class Meta:
         model = GradeSystem
         fields = [
-            'id', 'grade', 'points', 'min_mark', 'max_mark', 'description', 'is_active',
+            'id', 'grade', 'points', 'min_mark', 'max_mark', 'description', 'is_active', 'is_pass',
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
@@ -617,6 +617,7 @@ class GradeSystemSerializer(serializers.ModelSerializer):
             'grade': {'required': True},
             'points': {'required': True},
             'is_active': {'required': False, 'default': True},
+            'is_pass': {'required': False, 'default': True},
         }
 
     def __init__(self, *args, **kwargs):
