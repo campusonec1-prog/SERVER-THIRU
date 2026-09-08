@@ -7,3 +7,71 @@
   }
 }
 
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 3,
+        "roll_number": "22603",
+        "name": "Abdul Fawaz N",
+        "errors": [
+          "Email 'abdulfawaz84@gmail.com' is already registered as an application user.",
+          "Roll number '22603' is already assigned.",
+          "Register number '510622104003' is already assigned."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 3,
+        "roll_number": "22603",
+        "name": "Abdul Fawaz N",
+        "errors": [
+          "Roll number '22603' is already assigned.",
+          "Register number '510622104003' is already assigned."
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "path": "/api/student/marks/edit",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "You do not have permission to edit the marks for student ID 1 since they were entered by Mrs AMBIGA A."
+  }
+}
+
+{
+  "path": "/api/student/marks/edit",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "You do not have permission to edit the marks for student ID 1 since they were entered by Mrs AMBIGA A."
+  }
+}
+
+{
+  "path": "/api/student/marks/edit",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "You do not have permission to edit the marks for student ID 1 since they were entered by Mrs AMBIGA A."
+  }
+}
+

@@ -3528,7 +3528,7 @@ class MarksViewSet(viewsets.ViewSet):
             subjects_qs = subjects_qs.filter(regulation_id=regulation_id)
 
         subjects = list(subjects_qs.order_by('subject_code'))
-
+        print(f"DEBUG: Found {len(subjects)} subjects. department_id={department_id}, semester_id={semester_id}, regulation_id={regulation_id}")
         # Fetch students
         students_qs = Student.objects.all().select_related('user')
         if department:
@@ -3894,10 +3894,541 @@ class MarksViewSet(viewsets.ViewSet):
         pdf = buffer.getvalue()
         buffer.close()
 
+        response = HttpResponse(pdf, content_type='application/pdf')
+        return response
+
+    @action(detail=False, methods=['post', 'get'], url_path='internal-exam-result-analysis-report/pdf')
+    def internal_exam_result_analysis_report_pdf(self, request):
+        import os
+        from io import BytesIO
+        from django.http import HttpResponse
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, PageBreak, HRFlowable
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import Image as RLImage
+        from PIL import Image as PILImage
+        import urllib.request
+        import datetime
+
+        from institution.models import Department, Batch, Section, Semester, Regulation, CollegeHeader, ExamType, Exam
+        from subject.models import Subject
+        from timetable.models import ClassTimetable
+        from student.models import Student, Marks
+
+        req_data = request.data if request.method == 'POST' else request.query_params
+        department_id = req_data.get('department_id')
+        batch_id = req_data.get('batch_id')
+        section_id = req_data.get('section_id')
+        semester_id = req_data.get('semester_id')
+        regulation_id = req_data.get('regulation_id')
+        subject_id = req_data.get('subject_id')
+        exam_type_id = req_data.get('exam_type_id')
+        exam_ids_raw = req_data.get('exam_ids') or req_data.get('exam_id')
+        exam_date_req = req_data.get('exam_date')
+        header_type = req_data.get('header_type') or req_data.get('header_type_id') or 'Main'
+
+        # Process exam_ids
+        exam_ids = []
+        if isinstance(exam_ids_raw, list):
+            exam_ids = exam_ids_raw
+        elif isinstance(exam_ids_raw, str) and exam_ids_raw.strip():
+            exam_ids = [x.strip() for x in exam_ids_raw.split(',') if x.strip()]
+        elif isinstance(exam_ids_raw, int):
+            exam_ids = [exam_ids_raw]
+
+        department = Department.objects.filter(id=department_id).first() if department_id else None
+        batch = Batch.objects.filter(id=batch_id).first() if batch_id else None
+
+        section_obj = None
+        if section_id:
+            if str(section_id).isdigit():
+                section_obj = Section.objects.filter(id=section_id).first()
+            else:
+                section_obj = Section.objects.filter(sections__iexact=section_id).first()
+
+        semester_obj = Semester.objects.filter(id=semester_id).first() if (semester_id and str(semester_id).isdigit()) else None
+
+        college_header_obj = None
+        if str(header_type).isdigit():
+            college_header_obj = CollegeHeader.objects.filter(id=header_type).first()
+        if not college_header_obj and header_type:
+            college_header_obj = CollegeHeader.objects.filter(header_type__iexact=str(header_type)).first()
+        if not college_header_obj:
+            college_header_obj = CollegeHeader.objects.first()
+
+        # Query subjects
+        if subject_id:
+            sub_obj = Subject.objects.filter(id=subject_id).first()
+            subjects = [sub_obj] if sub_obj else []
+        else:
+            subjects_qs = Subject.objects.all()
+            if department:
+                subjects_qs = subjects_qs.filter(department=department)
+            if semester_obj:
+                subjects_qs = subjects_qs.filter(semester=semester_obj)
+            elif semester_id:
+                subjects_qs = subjects_qs.filter(semester_id=semester_id)
+            if regulation_id:
+                subjects_qs = subjects_qs.filter(regulation_id=regulation_id)
+            subjects = list(subjects_qs.order_by('subject_code'))
+
+        if not subjects:
+            return HttpResponse("No subjects found matching the selected criteria.", status=400)
+
+        # Query students
+        students_qs = Student.objects.all().select_related('user')
+        if department:
+            students_qs = students_qs.filter(department=department)
+        if batch:
+            students_qs = students_qs.filter(batch=batch)
+        if section_obj:
+            students_qs = students_qs.filter(section=section_obj)
+
+        students = list(students_qs.order_by('roll_number', 'user__name'))
+
+        # Query exams
+        exams = []
+        if exam_ids:
+            exams = list(Exam.objects.filter(id__in=exam_ids))
+        elif exam_type_id:
+            exams = list(Exam.objects.filter(exam_type_id=exam_type_id))
+
+        # Active Grade System entries for pass/fail evaluation
+        active_grades = list(GradeSystem.objects.filter(is_active=True))
+
+        def evaluate_mark(val):
+            if val is None:
+                return True, False, 0.0, "AB"
+            str_val = str(val).strip().upper()
+            if str_val in ['-', '', 'AB', 'ABSENT', 'UA']:
+                return True, False, 0.0, str_val or "AB"
+            try:
+                num_val = float(str_val)
+                # Check 0-0 range absent grade
+                absent_entry = next((g for g in active_grades if g.min_mark is not None and g.max_mark is not None and float(g.min_mark) == 0 and float(g.max_mark) == 0 and not g.is_pass), None)
+                if absent_entry and num_val == 0:
+                    return True, False, 0.0, "UA"
+                
+                matching_entry = next((g for g in active_grades if g.min_mark is not None and g.max_mark is not None and not (float(g.min_mark) == 0 and float(g.max_mark) == 0) and float(g.min_mark) <= num_val <= float(g.max_mark)), None)
+                if matching_entry:
+                    return False, matching_entry.is_pass, num_val, str_val
+                
+                pass_entries = [g for g in active_grades if g.is_pass and g.min_mark is not None and not (float(g.min_mark) == 0 and float(g.max_mark or 0) == 0)]
+                if pass_entries:
+                    min_pass = min(float(g.min_mark) for g in pass_entries)
+                    return False, (num_val >= min_pass), num_val, str_val
+                
+                return False, (num_val >= 50.0), num_val, str_val
+            except ValueError:
+                matching_grade = next((g for g in active_grades if g.grade.upper() == str_val), None)
+                if matching_grade:
+                    is_abs = (matching_grade.min_mark is not None and matching_grade.max_mark is not None and float(matching_grade.min_mark) == 0 and float(matching_grade.max_mark) == 0) or str_val == 'UA'
+                    return is_abs, matching_grade.is_pass, 0.0, str_val
+                is_fail_code = str_val in ['U', 'UA', 'F', 'RA', 'AB', 'ABSENT']
+                return (str_val in ['AB', 'ABSENT', 'UA']), (not is_fail_code), 0.0, str_val
+
+        # Setup Document
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            leftMargin=35,
+            rightMargin=35,
+            topMargin=30,
+            bottomMargin=30
+        )
+
+        styles = getSampleStyleSheet()
+
+        title_style = ParagraphStyle(
+            name='InternalAnalysisHeaderTitle',
+            fontName='Helvetica-Bold',
+            fontSize=12,
+            leading=14,
+            alignment=1,
+            textColor=colors.black
+        )
+        report_title_style = ParagraphStyle(
+            name='InternalAnalysisReportTitle',
+            fontName='Helvetica-Bold',
+            fontSize=11,
+            leading=13,
+            alignment=1,
+            textColor=colors.black
+        )
+        meta_label_style = ParagraphStyle(
+            name='InternalAnalysisMetaLabel',
+            fontName='Helvetica-Bold',
+            fontSize=9,
+            leading=12,
+            alignment=0,
+            textColor=colors.black
+        )
+        meta_val_style = ParagraphStyle(
+            name='InternalAnalysisMetaVal',
+            fontName='Helvetica',
+            fontSize=9,
+            leading=12,
+            alignment=0,
+            textColor=colors.black
+        )
+        tbl_hdr_style = ParagraphStyle(
+            name='InternalAnalysisTblHdr',
+            fontName='Helvetica-Bold',
+            fontSize=8.5,
+            leading=11,
+            alignment=1,
+            textColor=colors.black
+        )
+        tbl_cell_center = ParagraphStyle(
+            name='InternalAnalysisTblCellCenter',
+            fontName='Helvetica',
+            fontSize=8.5,
+            leading=11,
+            alignment=1,
+            textColor=colors.black
+        )
+
+        # Load Logo image
+        logo_url = college_header_obj.primary_logo if college_header_obj else None
+        logo_flowable = None
+        if logo_url:
+            try:
+                if isinstance(logo_url, str) and logo_url.startswith('http'):
+                    headers = {'User-Agent': 'Mozilla/5.0'}
+                    req = urllib.request.Request(logo_url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        img_data = response.read()
+                        pil_img = PILImage.open(BytesIO(img_data))
+                        out_io = BytesIO()
+                        pil_img.save(out_io, format='PNG')
+                        out_io.seek(0)
+                        logo_flowable = RLImage(out_io, width=45, height=45)
+                elif os.path.exists(logo_url):
+                    pil_img = PILImage.open(logo_url)
+                    out_io = BytesIO()
+                    pil_img.save(out_io, format='PNG')
+                    out_io.seek(0)
+                    logo_flowable = RLImage(out_io, width=45, height=45)
+            except Exception:
+                pass
+
+        if not logo_flowable:
+            fallback_logo_path = 'd:\\IMS-Thirumalai\\APP-THIRU\\src\\assets\\logo.webp'
+            try:
+                if os.path.exists(fallback_logo_path):
+                    pil_img = PILImage.open(fallback_logo_path)
+                    out_io = BytesIO()
+                    pil_img.save(out_io, format='PNG')
+                    out_io.seek(0)
+                    logo_flowable = RLImage(out_io, width=45, height=45)
+            except Exception:
+                pass
+
+        story = []
+
+        # Exam date string
+        exam_date_str = ""
+        if exam_date_req:
+            try:
+                d_obj = datetime.datetime.strptime(str(exam_date_req), '%Y-%m-%d')
+                exam_date_str = d_obj.strftime('%d/%m/%Y')
+            except ValueError:
+                exam_date_str = str(exam_date_req)
+        if not exam_date_str:
+            exam_date_str = datetime.date.today().strftime('%d/%m/%Y')
+
+        # Year Roman and Semester representation
+        sem_num = 1
+        if semester_id and str(semester_id).isdigit():
+            sem_num = int(semester_id)
+        elif semester_obj and hasattr(semester_obj, 'id') and isinstance(semester_obj.id, int):
+            sem_num = semester_obj.id
+
+        year_roman = 'I'
+        if sem_num in [3, 4]:
+            year_roman = 'II'
+        elif sem_num in [5, 6]:
+            year_roman = 'III'
+        elif sem_num in [7, 8]:
+            year_roman = 'IV'
+
+        sec_name = section_obj.sections if section_obj else (section_id if section_id else 'A')
+        year_sem_sec_str = f"{year_roman} / Semester {sem_num} / {sec_name}"
+
+        dept_name_str = department.department_name.upper() if department else "COMPUTER SCIENCE AND ENGINEERING"
+        header_name = college_header_obj.college_name if (college_header_obj and college_header_obj.college_name) else "THIRUMALAI ENGINEERING COLLEGE"
+        header_address = college_header_obj.address if (college_header_obj and college_header_obj.address) else ""
+
+        exam_title_str = ""
+        if exams:
+            exam_title_str = " / ".join([e.exam_name.upper() for e in exams])
+        elif exam_type_id:
+            ex_type_obj = ExamType.objects.filter(id=exam_type_id).first()
+            if ex_type_obj:
+                exam_title_str = ex_type_obj.exam_type_name.upper()
+
+        if not exam_title_str:
+            exam_title_str = "INTERNAL EXAM"
+
+
+        header_title_style = ParagraphStyle(
+            name='InternalHdrTitle',
+            fontName='Helvetica-Bold',
+            fontSize=11,
+            leading=14,
+            alignment=1,
+            textColor=colors.black
+        )
+
+        for subj_index, target_subj in enumerate(subjects):
+            if subj_index > 0:
+                story.append(PageBreak())
+
+            # 1. College Header (Progress Report Style Bordered Grid Box)
+            header_title_text = f"{exam_title_str}<br/>INTERNAL EXAM RESULT ANALYSIS"
+            title_paragraph = Paragraph(f"<b>{header_title_text}</b>", header_title_style)
+
+            if logo_flowable:
+                header_table_data = [[logo_flowable, title_paragraph]]
+                header_table = Table(header_table_data, colWidths=[65, 460])
+            else:
+                header_table_data = [[title_paragraph]]
+                header_table = Table(header_table_data, colWidths=[525])
+
+            header_table.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('TOPPADDING', (0,0), (-1,-1), 6),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+            ]))
+            story.append(header_table)
+            story.append(Spacer(1, 14))
+
+
+            # 3. Subject Handler lookup & Exam Date from Database
+            faculty_handler_name = "N/A"
+            tt = ClassTimetable.objects.filter(
+                subject=target_subj,
+                department=department if department else target_subj.department,
+                semester=semester_obj if semester_obj else target_subj.semester
+            )
+            if section_obj:
+                tt = tt.filter(section=section_obj)
+            tt_item = tt.first()
+            if tt_item and tt_item.faculty:
+                faculty_handler_name = tt_item.faculty.name.upper()
+            elif request.user and hasattr(request.user, 'role') and request.user.role and request.user.role.role_name.upper() == 'FACULTY':
+                faculty_handler_name = request.user.name.upper()
+
+            # Query Exam Date directly from ExamTimetable database model for target_subj
+            from timetable.models import ExamTimetable
+            target_exam_date_str = ""
+            tt_exam_qs = ExamTimetable.objects.filter(subject=target_subj)
+            if exams:
+                tt_exam_qs = tt_exam_qs.filter(exam__in=exams)
+            if department:
+                tt_exam_qs = tt_exam_qs.filter(department=department)
+            if section_obj:
+                tt_exam_qs = tt_exam_qs.filter(section=section_obj)
+
+            tt_exam_item = tt_exam_qs.first()
+            if not tt_exam_item and exams:
+                tt_exam_item = ExamTimetable.objects.filter(exam__in=exams).first()
+
+            if tt_exam_item and tt_exam_item.exam_date:
+                target_exam_date_str = tt_exam_item.exam_date.strftime('%d/%m/%Y')
+            elif exam_date_req:
+                try:
+                    d_obj = datetime.datetime.strptime(str(exam_date_req), '%Y-%m-%d')
+                    target_exam_date_str = d_obj.strftime('%d/%m/%Y')
+                except ValueError:
+                    target_exam_date_str = str(exam_date_req)
+            else:
+                target_exam_date_str = datetime.date.today().strftime('%d/%m/%Y')
+
+            lbl_bold = ParagraphStyle(
+                name='InternalLblBold',
+                fontName='Helvetica-Bold',
+                fontSize=8.5,
+                leading=11,
+                textColor=colors.black
+            )
+            val_norm = ParagraphStyle(
+                name='InternalValNorm',
+                fontName='Helvetica',
+                fontSize=8.5,
+                leading=11,
+                textColor=colors.black
+            )
+
+            sub_code_name_str = f"{target_subj.subject_code} - {target_subj.subject_name}"
+
+            meta_data = [
+                [
+                    Paragraph("Subject Handler:", lbl_bold),
+                    Paragraph(faculty_handler_name, val_norm),
+                    Paragraph("Year/ Sem/ Sec:", lbl_bold),
+                    Paragraph(year_sem_sec_str, val_norm)
+                ],
+                [
+                    Paragraph("Sub Code & Name:", lbl_bold),
+                    Paragraph(sub_code_name_str, val_norm),
+                    Paragraph("Exam Date:", lbl_bold),
+                    Paragraph(target_exam_date_str, val_norm)
+                ]
+            ]
+
+            meta_table = Table(meta_data, colWidths=[105, 157, 105, 158])
+            meta_table.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#CBD5E1')),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('BACKGROUND', (0,0), (0,-1), colors.HexColor('#F8FAFC')),
+                ('BACKGROUND', (2,0), (2,-1), colors.HexColor('#F8FAFC')),
+                ('TOPPADDING', (0,0), (-1,-1), 4.5),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 4.5),
+                ('LEFTPADDING', (0,0), (-1,-1), 6),
+                ('RIGHTPADDING', (0,0), (-1,-1), 6),
+            ]))
+            story.append(meta_table)
+
+            story.append(Spacer(1, 20))
+
+            # 4. Perform statistics calculation for this subject
+            m_qs = Marks.objects.filter(student__in=students, subject=target_subj)
+            if exams:
+                m_qs = m_qs.filter(exam__in=exams)
+            
+            marks_dict = {m.student_id: m.marks_obtained for m in m_qs}
+
+            total_students_cnt = len(students)
+            appeared_cnt = 0
+            absent_cnt = 0
+            passed_cnt = 0
+            failed_cnt = 0
+
+            # Distribution ranges
+            dist_91_100 = 0
+            dist_81_90 = 0
+            dist_71_80 = 0
+            dist_61_70 = 0
+            dist_51_60 = 0
+            dist_less_50 = 0
+
+            for st in students:
+                raw_val = marks_dict.get(st.id)
+                is_abs, is_pass, num_val, str_val = evaluate_mark(raw_val)
+
+                if is_abs:
+                    absent_cnt += 1
+                    dist_less_50 += 1
+                else:
+                    appeared_cnt += 1
+                    if is_pass:
+                        passed_cnt += 1
+                    else:
+                        failed_cnt += 1
+
+                    # Range calculation
+                    if num_val >= 91 and num_val <= 100:
+                        dist_91_100 += 1
+                    elif num_val >= 81 and num_val <= 90:
+                        dist_81_90 += 1
+                    elif num_val >= 71 and num_val <= 80:
+                        dist_71_80 += 1
+                    elif num_val >= 61 and num_val <= 70:
+                        dist_61_70 += 1
+                    elif num_val >= 51 and num_val <= 60:
+                        dist_51_60 += 1
+                    else:
+                        dist_less_50 += 1
+
+            pass_pct_total = f"{round((passed_cnt / total_students_cnt * 100), 2):.2f}%" if total_students_cnt > 0 else "0.00%"
+            pass_pct_app = f"{round((passed_cnt / appeared_cnt * 100), 2):.2f}%" if appeared_cnt > 0 else "0.00%"
+
+            # 5. Statistics key-value summary table
+            stats_data = [
+                [Paragraph("<b>Total Number of Students</b>", meta_label_style), Paragraph(":", meta_label_style), Paragraph(f"<b>{total_students_cnt}</b>", meta_val_style)],
+                [Paragraph("<b>Number of Students Appeared</b>", meta_label_style), Paragraph(":", meta_label_style), Paragraph(f"<b>{appeared_cnt}</b>", meta_val_style)],
+                [Paragraph("<b>Number of Students Absent</b>", meta_label_style), Paragraph(":", meta_label_style), Paragraph(f"<b>{absent_cnt}</b>", meta_val_style)],
+                [Paragraph("<b>Number of Students Passed</b>", meta_label_style), Paragraph(":", meta_label_style), Paragraph(f"<b>{passed_cnt}</b>", meta_val_style)],
+                [Paragraph("<b>Number of Students Failed</b>", meta_label_style), Paragraph(":", meta_label_style), Paragraph(f"<b>{failed_cnt}</b>", meta_val_style)],
+                [Paragraph("<b>Pass % Based on Total Students</b>", meta_label_style), Paragraph(":", meta_label_style), Paragraph(f"<b>{pass_pct_total}</b>", meta_val_style)],
+                [Paragraph("<b>Pass % Based on Appeared</b>", meta_label_style), Paragraph(":", meta_label_style), Paragraph(f"<b>{pass_pct_app}</b>", meta_val_style)],
+            ]
+            stats_table = Table(stats_data, colWidths=[200, 15, 200])
+            stats_table.setStyle(TableStyle([
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('TOPPADDING', (0,0), (-1,-1), 4),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+                ('LEFTPADDING', (0,0), (-1,-1), 10),
+                ('RIGHTPADDING', (0,0), (-1,-1), 2),
+            ]))
+            story.append(stats_table)
+            story.append(Spacer(1, 24))
+
+            # 6. Marks Distribution Table
+            dist_data = [
+                [
+                    Paragraph("Description", tbl_hdr_style),
+                    Paragraph("91-100", tbl_hdr_style),
+                    Paragraph("81-90", tbl_hdr_style),
+                    Paragraph("71-80", tbl_hdr_style),
+                    Paragraph("61-70", tbl_hdr_style),
+                    Paragraph("51-60", tbl_hdr_style),
+                    Paragraph("&lt;50", tbl_hdr_style)
+                ],
+                [
+                    Paragraph("<b>No. of Students</b>", tbl_hdr_style),
+                    Paragraph(str(dist_91_100), tbl_cell_center),
+                    Paragraph(str(dist_81_90), tbl_cell_center),
+                    Paragraph(str(dist_71_80), tbl_cell_center),
+                    Paragraph(str(dist_61_70), tbl_cell_center),
+                    Paragraph(str(dist_51_60), tbl_cell_center),
+                    Paragraph(str(dist_less_50), tbl_cell_center)
+                ]
+            ]
+            dist_table = Table(dist_data, colWidths=[130, 60, 60, 60, 60, 60, 55])
+            dist_table.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('TOPPADDING', (0,0), (-1,-1), 5),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+                ('LEFTPADDING', (0,0), (-1,-1), 4),
+                ('RIGHTPADDING', (0,0), (-1,-1), 4),
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#F2F2F2')),
+            ]))
+            story.append(dist_table)
+            story.append(Spacer(1, 10))
+
+            # 7. Minimum Pass Marks note
+            story.append(Paragraph("<b>Minimum Pass Marks: 50 Marks</b>", ParagraphStyle(name='MinPassNote', fontName='Helvetica-Bold', fontSize=9, leading=12)))
+            story.append(Spacer(1, 60))
+
+            # 8. Signatures Footer
+            sig_data = [[
+                Paragraph("<b>Faculty In-Charge</b>", ParagraphStyle(name='InternalSig1', fontName='Helvetica-Bold', fontSize=9.5, alignment=1)),
+                Paragraph("<b>HOD</b>", ParagraphStyle(name='InternalSig2', fontName='Helvetica-Bold', fontSize=9.5, alignment=1))
+            ]]
+            sig_table = Table(sig_data, colWidths=[260, 265])
+            sig_table.setStyle(TableStyle([
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('LEFTPADDING', (0,0), (-1,-1), 0),
+                ('RIGHTPADDING', (0,0), (-1,-1), 0),
+            ]))
+            story.append(sig_table)
+
+        doc.build(story)
+        pdf = buffer.getvalue()
+        buffer.close()
+
         response = HttpResponse(content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="Progress_Report_{datetime.date.today().strftime("%Y%m%d")}.pdf"'
+        response['Content-Disposition'] = f'attachment; filename="Internal_Exam_Result_Analysis_{datetime.date.today().strftime("%Y%m%d")}.pdf"'
         response.write(pdf)
         return response
+
 
 
 from .models import CounsellingReport
