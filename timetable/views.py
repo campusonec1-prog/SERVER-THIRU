@@ -30,20 +30,6 @@ class ExamTimetableViewSet(viewsets.ModelViewSet):
             'academic_year', 'department', 'batch', 'section', 'semester', 'exam', 'subject', 'session', 'created_by'
         ).order_by('id')
         
-        is_admin = getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)
-        if not is_admin:
-            try:
-                role = getattr(user, 'role', None)
-                if role:
-                    user_role = role.role_name.upper().replace(' ', '_')
-                    if user_role in ['ADMIN', 'ADMINISTRATOR']:
-                        is_admin = True
-            except AttributeError:
-                pass
-                
-        if not is_admin:
-            queryset = queryset.filter(created_by=user)
-            
         return queryset
 
     def handle_exception(self, exc):
@@ -129,6 +115,9 @@ class ExamTimetableViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(section_id=section_id)
             else:
                 queryset = queryset.filter(section__sections__iexact=section_id)
+        session_id = request.query_params.get('session_id') or request.query_params.get('session')
+        if session_id:
+            queryset = queryset.filter(session_id=session_id)
         if exam_date:
             queryset = queryset.filter(exam_date=exam_date)
             

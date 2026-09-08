@@ -1,0 +1,9 @@
+{
+  "path": "/api/timetable/exam/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "End time must be after the start time."
+  }
+}
+
