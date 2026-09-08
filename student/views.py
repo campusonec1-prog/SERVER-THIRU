@@ -15,6 +15,24 @@ from .permissions import StudentStatusPermission, StudentPermission, MarksPermis
 logger = logging.getLogger(__name__)
 
 
+def _get_bus_from(student):
+    if getattr(student, 'stop', None):
+        return student.stop.stop_name
+    if getattr(student, 'route', None):
+        return student.route.route_name or student.route.start_location
+    if getattr(student, 'bus', None):
+        return student.bus.bus_number
+    return getattr(student, 'bus_from', '') or ''
+
+
+def _get_bus_to(student):
+    if getattr(student, 'bus', None) and getattr(student, 'route', None):
+        return f"{student.bus.bus_number} ({student.route.route_name})"
+    if getattr(student, 'route', None):
+        return student.route.end_location
+    return getattr(student, 'bus_to', '') or ''
+
+
 class StudentStatusViewSet(viewsets.ModelViewSet):
     queryset = StudentStatus.objects.all().order_by('id')
     serializer_class = StudentStatusSerializer
@@ -183,6 +201,9 @@ class StudentViewSet(viewsets.ModelViewSet):
         department_id = request.query_params.get('department_id')
         batch_id = request.query_params.get('batch_id')
         section_id = request.query_params.get('section_id')
+        is_bus = request.query_params.get('is_bus')
+        bus_id = request.query_params.get('bus_id')
+        route_id = request.query_params.get('route_id')
         search = request.query_params.get('search')
         
         if department_id:
@@ -194,13 +215,25 @@ class StudentViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(section_id=section_id)
             else:
                 queryset = queryset.filter(section__sections__iexact=section_id)
+        if is_bus is not None:
+            if str(is_bus).lower() in ['true', '1']:
+                queryset = queryset.filter(is_bus=True)
+            elif str(is_bus).lower() in ['false', '0']:
+                queryset = queryset.filter(is_bus=False)
+        if bus_id:
+            queryset = queryset.filter(bus_id=bus_id)
+        if route_id:
+            queryset = queryset.filter(route_id=route_id)
         if search:
             queryset = queryset.filter(
                 Q(user__name__icontains=search) |
                 Q(roll_number__icontains=search) |
                 Q(register_number__icontains=search) |
                 Q(user__email__icontains=search) |
-                Q(user__phone_number__icontains=search)
+                Q(user__phone_number__icontains=search) |
+                Q(bus__bus_number__icontains=search) |
+                Q(route__route_name__icontains=search) |
+                Q(stop__stop_name__icontains=search)
             )
 
         page = self.paginate_queryset(queryset)
@@ -237,11 +270,17 @@ class StudentViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
-        response = super().update(request, *args, **kwargs)
+        partial = kwargs.pop('partial', True)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        if getattr(instance, '_prefetched_objects_cache', None):
+            instance._prefetched_objects_cache = {}
         return Response({
             "code": 200,
             "message": "Student updated successfully",
-            "data": response.data
+            "data": serializer.data
         }, status=status.HTTP_200_OK)
 
     def destroy(self, request, *args, **kwargs):
@@ -589,12 +628,19 @@ class StudentViewSet(viewsets.ModelViewSet):
                     'is_hostler': student.is_hostler,
                     'is_day_scholar': student.is_day_scholar,
                     'is_bus': student.is_bus,
-                    'bus_from': student.bus_from or '',
-                    'bus_to': student.bus_to or '',
+                    'bus_from': _get_bus_from(student),
+                    'bus_to': _get_bus_to(student),
                     'department': student.department.department_name if student.department else '',
+                    'department_id': student.department_id,
                     'program': program,
                     'batch': student.batch.batch if student.batch else '',
+                    'batch_id': student.batch_id,
+                    'status_id': student.status_id,
                     'quota': student.quota.quota_name if student.quota else '',
+                    'quota_id': student.quota_id,
+                    'bus_id': student.bus_id,
+                    'route_id': student.route_id,
+                    'stop_id': student.stop_id,
                     'application_no': app.application_no if app else '',
                     'user_id': student.user.id if student.user else None,
                     'student_photo': photo_url,
@@ -962,8 +1008,8 @@ class StudentViewSet(viewsets.ModelViewSet):
             'is_hostler': student.is_hostler,
             'is_day_scholar': student.is_day_scholar,
             'is_bus': student.is_bus,
-            'bus_from': student.bus_from or '',
-            'bus_to': student.bus_to or '',
+            'bus_from': _get_bus_from(student),
+            'bus_to': _get_bus_to(student),
             'parent_name': parent_name,
             'parent_phone': parent_phone,
             'district': district,
@@ -1274,8 +1320,8 @@ class StudentViewSet(viewsets.ModelViewSet):
         hostler_chk = "[X]" if student.is_hostler else "[   ]"
         day_scholar_chk = "[X]" if student.is_day_scholar else "[   ]"
         bus_chk = "[X]" if student.is_bus else "[   ]"
-        bus_from = student.bus_from or ''
-        bus_to = student.bus_to or ''
+        bus_from = _get_bus_from(student)
+        bus_to = _get_bus_to(student)
 
         # Build PDF doc
         buffer = BytesIO()
@@ -1581,8 +1627,15 @@ class StudentViewSet(viewsets.ModelViewSet):
             [
                 Paragraph("<b>12. Hosteller (Tick):</b>", body_style),
                 Paragraph(f"{hostler_chk} Hosteller &nbsp;&nbsp; {day_scholar_chk} Day Scholar &nbsp;&nbsp; {bus_chk} Bus", body_style),
-                Paragraph("<b>Bus Place:</b>", body_style),
-                Paragraph(f"From {bus_from or '—'} to {bus_to or '—'}", body_bold)
+                Paragraph("<b>Bus Details:</b>", body_style),
+                Paragraph(
+                    (
+                        f"Bus: {student.bus.bus_number if student.bus else '—'}"
+                        f" &nbsp;|&nbsp; Route: {student.route.route_name if student.route else '—'}"
+                        f"{f' &nbsp;|&nbsp; Stop: {student.stop.stop_name}' if student.stop else ''}"
+                    ) if student.is_bus else "—",
+                    body_bold
+                )
             ]
         ]
         pay_table = Table(pay_info, colWidths=[120, 140, 120, 140])

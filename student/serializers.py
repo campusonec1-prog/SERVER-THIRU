@@ -3,6 +3,8 @@ from .models import StudentStatus, Student, FacultyActivity, StudentAttendance
 from institution.models import Department, Section, Batch, Quota
 from users.models import User
 from dynamic_forms.models import ApplicationUser
+from transport.models import Bus, TransportRoute, RouteStop
+
 
 
 def apply_default_error_messages(fields):
@@ -76,13 +78,35 @@ class StudentSerializer(serializers.ModelSerializer):
         allow_null=True,
         error_messages={'does_not_exist': 'Quota does not exist.'}
     )
+    bus_id = serializers.PrimaryKeyRelatedField(
+        source='bus',
+        queryset=Bus.objects.all(),
+        required=False,
+        allow_null=True,
+        error_messages={'does_not_exist': 'Bus does not exist.'}
+    )
+    route_id = serializers.PrimaryKeyRelatedField(
+        source='route',
+        queryset=TransportRoute.objects.all(),
+        required=False,
+        allow_null=True,
+        error_messages={'does_not_exist': 'Route does not exist.'}
+    )
+    stop_id = serializers.PrimaryKeyRelatedField(
+        source='stop',
+        queryset=RouteStop.objects.all(),
+        required=False,
+        allow_null=True,
+        error_messages={'does_not_exist': 'Route stop does not exist.'}
+    )
 
     class Meta:
         model = Student
         fields = [
             'id', 'roll_number', 'register_number', 'department_id',
             'section_id', 'batch_id', 'user_id', 'lab_batch', 'status_id',
-            'quota_id', 'is_hostler', 'is_day_scholar', 'is_bus', 'bus_from', 'bus_to',
+            'quota_id', 'is_hostler', 'is_day_scholar', 'is_bus',
+            'bus_id', 'route_id', 'stop_id',
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
@@ -110,8 +134,6 @@ class StudentSerializer(serializers.ModelSerializer):
             'is_hostler': {'required': False},
             'is_day_scholar': {'required': False},
             'is_bus': {'required': False},
-            'bus_from': {'required': False, 'allow_null': True, 'allow_blank': True},
-            'bus_to': {'required': False, 'allow_null': True, 'allow_blank': True},
         }
 
     def __init__(self, *args, **kwargs):
@@ -212,6 +234,10 @@ class StudentSerializer(serializers.ModelSerializer):
         
         ret['status_name'] = instance.status.status_name if instance.status else None
         ret['quota_name'] = instance.quota.quota_name if instance.quota else None
+
+        ret['bus_number'] = instance.bus.bus_number if instance.bus else None
+        ret['route_name'] = instance.route.route_name if instance.route else None
+        ret['stop_name'] = instance.stop.stop_name if instance.stop else None
 
         # Dynamically fetch matching FeesStructure based on department, batch, and quota
         from institution.models import FeesStructure
