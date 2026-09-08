@@ -2464,9 +2464,59 @@ class MarksViewSet(viewsets.ViewSet):
         if not college_header_obj:
             college_header_obj = CollegeHeader.objects.first()
 
-        # Format exam date
+        # Retrieve Exam Conduct Dates from ExamTimetable database model
+        from timetable.models import ExamTimetable
+
         exam_date_str = ""
-        if exam_date_raw:
+        sel_exams = []
+        if exam_ids:
+            sel_exams = list(Exam.objects.filter(id__in=exam_ids))
+        elif exam_type_id:
+            sel_exams = list(Exam.objects.filter(exam_type_id=exam_type_id))
+
+        if sel_exams:
+            dates_parts = []
+            for ex in sel_exams:
+                tt_qs = ExamTimetable.objects.filter(exam=ex)
+                if subject_obj:
+                    tt_qs = tt_qs.filter(subject=subject_obj)
+                if department:
+                    tt_qs = tt_qs.filter(department=department)
+                if batch:
+                    tt_qs = tt_qs.filter(batch=batch)
+                if semester_id:
+                    tt_qs = tt_qs.filter(semester_id=semester_id)
+                if section_obj:
+                    tt_qs = tt_qs.filter(section=section_obj)
+                
+                dates = list(tt_qs.values_list('exam_date', flat=True).distinct().order_by('exam_date'))
+                
+                if not dates and subject_obj:
+                    tt_qs_sub = ExamTimetable.objects.filter(exam=ex, subject=subject_obj)
+                    if department:
+                        tt_qs_sub = tt_qs_sub.filter(department=department)
+                    dates = list(tt_qs_sub.values_list('exam_date', flat=True).distinct().order_by('exam_date'))
+
+                if not dates and department:
+                    tt_qs_dept = ExamTimetable.objects.filter(exam=ex, department=department)
+                    dates = list(tt_qs_dept.values_list('exam_date', flat=True).distinct().order_by('exam_date'))
+
+                if not dates:
+                    dates = list(ExamTimetable.objects.filter(exam=ex).values_list('exam_date', flat=True).distinct().order_by('exam_date'))
+
+                if dates:
+                    min_d = dates[0].strftime("%d/%m/%Y")
+                    max_d = dates[-1].strftime("%d/%m/%Y")
+                    range_str = min_d if min_d == max_d else f"{min_d} to {max_d}"
+                    if len(sel_exams) > 1:
+                        dates_parts.append(f"{ex.exam_name}: {range_str}")
+                    else:
+                        dates_parts.append(range_str)
+
+            if dates_parts:
+                exam_date_str = " | ".join(dates_parts)
+
+        if not exam_date_str and exam_date_raw:
             try:
                 if '-' in str(exam_date_raw):
                     parts = str(exam_date_raw).split('-')
@@ -2525,6 +2575,13 @@ class MarksViewSet(viewsets.ViewSet):
             students_qs = students_qs.filter(batch=batch)
         if section_obj:
             students_qs = students_qs.filter(section=section_obj)
+
+        student_ids_raw = req_data.get('student_ids') or req_data.get('student_id')
+        if student_ids_raw:
+            if isinstance(student_ids_raw, list):
+                students_qs = students_qs.filter(id__in=student_ids_raw)
+            elif str(student_ids_raw).isdigit():
+                students_qs = students_qs.filter(id=student_ids_raw)
             
         students = list(students_qs.order_by('roll_number', 'user__name'))
 
@@ -2643,38 +2700,22 @@ class MarksViewSet(viewsets.ViewSet):
 
         story = []
 
-        # 1. Header Box Table (Logo | Title | Document Info Box)
-        doc_info_data = [
-            [Paragraph("Doc No:", doc_info_bold), Paragraph("CAHCET/AD/104/CF-12", doc_info_style)],
-            [Paragraph("Rev. No & Issue No", doc_info_bold), Paragraph("00 & 01", doc_info_style)],
-            [Paragraph("Rev Date:", doc_info_bold), Paragraph("03.01.2025", doc_info_style)],
-        ]
-        doc_info_table = Table(doc_info_data, colWidths=[65, 80])
-        doc_info_table.setStyle(TableStyle([
-            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('TOPPADDING', (0,0), (-1,-1), 2),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-            ('LEFTPADDING', (0,0), (-1,-1), 3),
-            ('RIGHTPADDING', (0,0), (-1,-1), 3),
-        ]))
-
         header_title_text = f"{exam_title_str}<br/>EXAM MARK SHEET"
         title_paragraph = Paragraph(header_title_text, header_title_style)
 
-        header_table_data = [[
-            logo_flowable if logo_flowable else "",
-            title_paragraph,
-            doc_info_table
-        ]]
-        header_table = Table(header_table_data, colWidths=[65, 320, 150])
+        if logo_flowable:
+            header_table_data = [[logo_flowable, title_paragraph]]
+            header_table = Table(header_table_data, colWidths=[65, 470])
+        else:
+            header_table_data = [[title_paragraph]]
+            header_table = Table(header_table_data, colWidths=[535])
+
         header_table.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 0.5, colors.black),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('ALIGN', (0,0), (0,0), 'CENTER'),
-            ('ALIGN', (1,0), (1,0), 'CENTER'),
-            ('TOPPADDING', (0,0), (-1,-1), 4),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('TOPPADDING', (0,0), (-1,-1), 6),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
         ]))
         story.append(header_table)
         story.append(Spacer(1, 10))
@@ -2865,9 +2906,51 @@ class MarksViewSet(viewsets.ViewSet):
         if not college_header_obj:
             college_header_obj = CollegeHeader.objects.first()
 
-        # Date formatting
+        # Retrieve Exam Conduct Dates from ExamTimetable database model
+        from timetable.models import ExamTimetable
+
         exam_date_str = ""
-        if exam_date_raw:
+        sel_exams_cnt = []
+        if exam_ids:
+            sel_exams_cnt = list(Exam.objects.filter(id__in=exam_ids))
+        elif exam_type_id:
+            sel_exams_cnt = list(Exam.objects.filter(exam_type_id=exam_type_id))
+
+        if sel_exams_cnt:
+            dates_parts = []
+            for ex in sel_exams_cnt:
+                tt_qs = ExamTimetable.objects.filter(exam=ex)
+                if department:
+                    tt_qs = tt_qs.filter(department=department)
+                if batch:
+                    tt_qs = tt_qs.filter(batch=batch)
+                if semester_id:
+                    tt_qs = tt_qs.filter(semester_id=semester_id)
+                if section_obj:
+                    tt_qs = tt_qs.filter(section=section_obj)
+                
+                dates = list(tt_qs.values_list('exam_date', flat=True).distinct().order_by('exam_date'))
+                
+                if not dates and department:
+                    tt_qs_dept = ExamTimetable.objects.filter(exam=ex, department=department)
+                    dates = list(tt_qs_dept.values_list('exam_date', flat=True).distinct().order_by('exam_date'))
+
+                if not dates:
+                    dates = list(ExamTimetable.objects.filter(exam=ex).values_list('exam_date', flat=True).distinct().order_by('exam_date'))
+
+                if dates:
+                    min_d = dates[0].strftime("%d/%m/%Y")
+                    max_d = dates[-1].strftime("%d/%m/%Y")
+                    range_str = min_d if min_d == max_d else f"{min_d} to {max_d}"
+                    if len(sel_exams_cnt) > 1:
+                        dates_parts.append(f"{ex.exam_name}: {range_str}")
+                    else:
+                        dates_parts.append(range_str)
+
+            if dates_parts:
+                exam_date_str = " | ".join(dates_parts)
+
+        if not exam_date_str and exam_date_raw:
             try:
                 if '-' in str(exam_date_raw):
                     parts = str(exam_date_raw).split('-')
@@ -2934,6 +3017,13 @@ class MarksViewSet(viewsets.ViewSet):
             students_qs = students_qs.filter(batch=batch)
         if section_obj:
             students_qs = students_qs.filter(section=section_obj)
+
+        student_ids_raw = req_data.get('student_ids') or req_data.get('student_id')
+        if student_ids_raw:
+            if isinstance(student_ids_raw, list):
+                students_qs = students_qs.filter(id__in=student_ids_raw)
+            elif str(student_ids_raw).isdigit():
+                students_qs = students_qs.filter(id=student_ids_raw)
 
         students = list(students_qs.order_by('roll_number', 'user__name'))
 
@@ -3047,18 +3137,19 @@ class MarksViewSet(viewsets.ViewSet):
 
         story = []
 
-        # 1. Header Box (Image 1 Header Format)
-        header_name = college_header_obj.college_name if (college_header_obj and college_header_obj.college_name) else "C. Abdul Hakeem College Of Engineering & Technology"
-        header_address = college_header_obj.address if (college_header_obj and college_header_obj.address) else "Melvisharam - 632509"
+        # 1. Header Box
+        header_name = college_header_obj.college_name if (college_header_obj and college_header_obj.college_name) else "THIRUMALAI ENGINEERING COLLEGE"
+        header_address = college_header_obj.address if (college_header_obj and college_header_obj.address) else ""
 
-        header_center_text = f"<b>{header_name}</b><br/><b>{header_address}</b><br/><br/>{dept_name_str}<br/>{academic_year_str}"
+        addr_str = f"<br/>{header_address}" if header_address else ""
+        header_center_text = f"<b>{header_name.upper()}</b>{addr_str}<br/>{dept_name_str}<br/>{academic_year_str}"
         header_p = Paragraph(header_center_text, title_style)
 
         header_table_data = [[
             logo_flowable if logo_flowable else "",
             header_p
         ]]
-        header_table = Table(header_table_data, colWidths=[60, 480])
+        header_table = Table(header_table_data, colWidths=[60, 485])
         header_table.setStyle(TableStyle([
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('ALIGN', (0,0), (0,0), 'CENTER'),
@@ -3068,16 +3159,15 @@ class MarksViewSet(viewsets.ViewSet):
         story.append(Spacer(1, 6))
 
         # Horizontal Rule
-        story.append(HRFlowable(width="100%", thickness=1, color=colors.black, spaceAfter=8, spaceBefore=4))
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.black, spaceAfter=6, spaceBefore=4))
 
         # Title Block
-        story.append(Paragraph("<b>Consolidated Marksheet</b>", heading_title_style))
+        story.append(Paragraph("<b>CONSOLIDATED MARKSHEET REPORT</b>", heading_title_style))
         story.append(Spacer(1, 3))
-        story.append(Paragraph(f"{exam_title_str}", heading_meta_style))
-        story.append(Spacer(1, 3))
-        story.append(Paragraph(f"Date: {exam_date_str}", heading_meta_style))
-        story.append(Spacer(1, 3))
-        story.append(Paragraph(f"Year / Sem / Sec : {year_roman} / Semester {sem_num} / {sec_name}", heading_meta_style))
+        
+        # Meta Info Line (Exam Name, Date, Year/Sem/Sec)
+        meta_info_text = f"<b>Exam:</b> {exam_title_str} &nbsp;&nbsp;|&nbsp;&nbsp; <b>Date:</b> {exam_date_str} &nbsp;&nbsp;|&nbsp;&nbsp; <b>Year / Sem / Sec:</b> {year_roman} / Semester {sem_num} / {sec_name}"
+        story.append(Paragraph(meta_info_text, heading_meta_style))
         story.append(Spacer(1, 10))
 
         # 2. Main Student Marks Table (Image 2)
@@ -3357,6 +3447,455 @@ class MarksViewSet(viewsets.ViewSet):
 
         response = HttpResponse(content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="Consolidated_Marksheet_{datetime.date.today().strftime("%Y%m%d")}.pdf"'
+        response.write(pdf)
+        return response
+
+    @action(detail=False, methods=['post', 'get'], url_path='progress-report/pdf')
+    def progress_report_pdf(self, request):
+        import os
+        from io import BytesIO
+        from django.http import HttpResponse
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, PageBreak
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import Image as RLImage
+        from PIL import Image as PILImage
+        import urllib.request
+        import datetime
+
+        from institution.models import Department, Batch, Section, Semester, Regulation, CollegeHeader, ExamType, Exam
+        from subject.models import Subject
+        from student.models import Student, Marks
+
+        req_data = request.data if request.method == 'POST' else request.query_params
+        department_id = req_data.get('department_id')
+        batch_id = req_data.get('batch_id')
+        section_id = req_data.get('section_id')
+        semester_id = req_data.get('semester_id')
+        regulation_id = req_data.get('regulation_id')
+        exam_type_id = req_data.get('exam_type_id')
+        exam_ids_raw = req_data.get('exam_ids') or req_data.get('exam_id')
+        header_type = req_data.get('header_type') or req_data.get('header_type_id') or 'Main'
+
+        # Process exam_ids
+        exam_ids = []
+        if isinstance(exam_ids_raw, list):
+            exam_ids = exam_ids_raw
+        elif isinstance(exam_ids_raw, str) and exam_ids_raw.strip():
+            exam_ids = [x.strip() for x in exam_ids_raw.split(',') if x.strip()]
+        elif isinstance(exam_ids_raw, int):
+            exam_ids = [exam_ids_raw]
+
+        department = Department.objects.filter(id=department_id).first() if department_id else None
+        batch = Batch.objects.filter(id=batch_id).first() if batch_id else None
+
+        section_obj = None
+        if section_id:
+            if str(section_id).isdigit():
+                section_obj = Section.objects.filter(id=section_id).first()
+            else:
+                section_obj = Section.objects.filter(sections__iexact=section_id).first()
+
+        semester_obj = Semester.objects.filter(id=semester_id).first() if (semester_id and str(semester_id).isdigit()) else None
+
+        college_header_obj = None
+        if str(header_type).isdigit():
+            college_header_obj = CollegeHeader.objects.filter(id=header_type).first()
+        if not college_header_obj and header_type:
+            college_header_obj = CollegeHeader.objects.filter(header_type__iexact=str(header_type)).first()
+        if not college_header_obj:
+            college_header_obj = CollegeHeader.objects.first()
+
+        # Query exams
+        exams = []
+        if exam_ids:
+            exams = list(Exam.objects.filter(id__in=exam_ids))
+        elif exam_type_id:
+            exams = list(Exam.objects.filter(exam_type_id=exam_type_id))
+        else:
+            exams = list(Exam.objects.all()[:3])
+
+        # Fetch subjects for this department & semester
+        subjects_qs = Subject.objects.all()
+        if department:
+            subjects_qs = subjects_qs.filter(department=department)
+        if semester_obj:
+            subjects_qs = subjects_qs.filter(semester=semester_obj)
+        elif semester_id:
+            subjects_qs = subjects_qs.filter(semester_id=semester_id)
+        if regulation_id:
+            subjects_qs = subjects_qs.filter(regulation_id=regulation_id)
+
+        subjects = list(subjects_qs.order_by('subject_code'))
+
+        # Fetch students
+        students_qs = Student.objects.all().select_related('user')
+        if department:
+            students_qs = students_qs.filter(department=department)
+        if batch:
+            students_qs = students_qs.filter(batch=batch)
+        if section_obj:
+            students_qs = students_qs.filter(section=section_obj)
+
+        student_ids_raw = req_data.get('student_ids') or req_data.get('student_id')
+        if student_ids_raw:
+            if isinstance(student_ids_raw, list):
+                students_qs = students_qs.filter(id__in=student_ids_raw)
+            elif str(student_ids_raw).isdigit():
+                students_qs = students_qs.filter(id=student_ids_raw)
+
+        students = list(students_qs.order_by('roll_number', 'user__name'))
+
+        # Fetch marks map: key (student_id, subject_id, exam_id) -> marks_obtained
+        marks_dict = {}
+        if students and subjects and exams:
+            m_qs = Marks.objects.filter(student__in=students, subject__in=subjects, exam__in=exams)
+            for m in m_qs:
+                marks_dict[(m.student_id, m.subject_id, m.exam_id)] = m.marks_obtained
+
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            leftMargin=30,
+            rightMargin=30,
+            topMargin=25,
+            bottomMargin=25
+        )
+
+        styles = getSampleStyleSheet()
+
+        prog_title_style = ParagraphStyle(
+            name='ProgTitle',
+            fontName='Helvetica-Bold',
+            fontSize=12,
+            leading=14,
+            alignment=1,
+            textColor=colors.black
+        )
+
+        doc_info_style = ParagraphStyle(
+            name='DocInfoProg',
+            fontName='Helvetica',
+            fontSize=7.5,
+            leading=9,
+            textColor=colors.black
+        )
+
+        doc_info_bold = ParagraphStyle(
+            name='DocInfoBoldProg',
+            fontName='Helvetica-Bold',
+            fontSize=7.5,
+            leading=9,
+            textColor=colors.black
+        )
+
+        lbl_bold = ParagraphStyle(
+            name='LblBold',
+            fontName='Helvetica-Bold',
+            fontSize=8,
+            leading=10,
+            textColor=colors.black
+        )
+
+        val_norm = ParagraphStyle(
+            name='ValNorm',
+            fontName='Helvetica',
+            fontSize=8,
+            leading=10,
+            textColor=colors.black
+        )
+
+        tbl_hdr_style = ParagraphStyle(
+            name='ProgTblHdr',
+            fontName='Helvetica-Bold',
+            fontSize=8,
+            leading=10,
+            alignment=1,
+            textColor=colors.black
+        )
+
+        tbl_cell_center = ParagraphStyle(
+            name='ProgCellCenter',
+            fontName='Helvetica',
+            fontSize=8,
+            leading=10,
+            alignment=1,
+            textColor=colors.black
+        )
+
+        tbl_cell_left = ParagraphStyle(
+            name='ProgCellLeft',
+            fontName='Helvetica',
+            fontSize=8,
+            leading=10,
+            alignment=0,
+            textColor=colors.black
+        )
+
+        story = []
+
+        for s_idx, st in enumerate(students):
+            if s_idx > 0:
+                story.append(PageBreak())
+
+            # 1. Header Box Table (Logo | Title | Document Info Box) - matching Image 2
+            logo_url = college_header_obj.primary_logo if college_header_obj else None
+            logo_flowable = None
+            if logo_url:
+                try:
+                    if isinstance(logo_url, str) and logo_url.startswith('http'):
+                        headers = {'User-Agent': 'Mozilla/5.0'}
+                        req = urllib.request.Request(logo_url, headers=headers)
+                        with urllib.request.urlopen(req, timeout=5) as resp:
+                            img_data = resp.read()
+                            pil_img = PILImage.open(BytesIO(img_data))
+                            out_io = BytesIO()
+                            pil_img.save(out_io, format='PNG')
+                            out_io.seek(0)
+                            logo_flowable = RLImage(out_io, width=45, height=45)
+                    elif os.path.exists(logo_url):
+                        pil_img = PILImage.open(logo_url)
+                        out_io = BytesIO()
+                        pil_img.save(out_io, format='PNG')
+                        out_io.seek(0)
+                        logo_flowable = RLImage(out_io, width=45, height=45)
+                except Exception as e:
+                    print("Logo load error in progress report:", e)
+
+            if not logo_flowable:
+                fallback_logo_path = 'd:\\IMS-Thirumalai\\APP-THIRU\\src\\assets\\logo.webp'
+                try:
+                    if os.path.exists(fallback_logo_path):
+                        pil_img = PILImage.open(fallback_logo_path)
+                        out_io = BytesIO()
+                        pil_img.save(out_io, format='PNG')
+                        out_io.seek(0)
+                        logo_flowable = RLImage(out_io, width=45, height=45)
+                except Exception:
+                    pass
+
+            exam_title_str = "CAT-1 / CAT-2 / MODEL"
+            if exams:
+                exam_title_str = " / ".join([e.exam_name.upper() for e in exams])
+
+            header_title_style = ParagraphStyle(
+                name='HdrTitleImage2',
+                fontName='Helvetica-Bold',
+                fontSize=11,
+                leading=14,
+                alignment=1,
+                textColor=colors.black
+            )
+
+            header_title_text = f"{exam_title_str}<br/>STUDENT PROGRESS REPORT"
+            title_paragraph = Paragraph(f"<b>{header_title_text}</b>", header_title_style)
+
+            if logo_flowable:
+                header_table_data = [[logo_flowable, title_paragraph]]
+                header_table = Table(header_table_data, colWidths=[65, 470])
+            else:
+                header_table_data = [[title_paragraph]]
+                header_table = Table(header_table_data, colWidths=[535])
+
+            header_table.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('TOPPADDING', (0,0), (-1,-1), 6),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+            ]))
+            story.append(header_table)
+            story.append(Spacer(1, 10))
+
+            # Retrieve Exam Conduct Dates from ExamTimetable database model
+            from timetable.models import ExamTimetable
+
+            exam_date_str = ""
+            if exams:
+                dates_parts = []
+                for ex in exams:
+                    tt_qs = ExamTimetable.objects.filter(exam=ex)
+                    if department:
+                        tt_qs = tt_qs.filter(department=department)
+                    if batch:
+                        tt_qs = tt_qs.filter(batch=batch)
+                    if semester_id:
+                        tt_qs = tt_qs.filter(semester_id=semester_id)
+                    if section_obj:
+                        tt_qs = tt_qs.filter(section=section_obj)
+                    
+                    dates = list(tt_qs.values_list('exam_date', flat=True).distinct().order_by('exam_date'))
+                    
+                    if not dates and department:
+                        tt_qs_dept = ExamTimetable.objects.filter(exam=ex, department=department)
+                        dates = list(tt_qs_dept.values_list('exam_date', flat=True).distinct().order_by('exam_date'))
+                    
+                    if not dates:
+                        dates = list(ExamTimetable.objects.filter(exam=ex).values_list('exam_date', flat=True).distinct().order_by('exam_date'))
+
+                    if dates:
+                        min_d = dates[0].strftime("%d/%m/%Y")
+                        max_d = dates[-1].strftime("%d/%m/%Y")
+                        range_str = min_d if min_d == max_d else f"{min_d} to {max_d}"
+                        if len(exams) > 1:
+                            dates_parts.append(f"{ex.exam_name}: {range_str}")
+                        else:
+                            dates_parts.append(range_str)
+
+                if dates_parts:
+                    exam_date_str = " | ".join(dates_parts)
+
+            if not exam_date_str:
+                exam_date_raw = req_data.get('exam_date')
+                if exam_date_raw:
+                    try:
+                        if '-' in str(exam_date_raw):
+                            parts = str(exam_date_raw).split('-')
+                            if len(parts) == 3:
+                                if len(parts[0]) == 4: # YYYY-MM-DD
+                                    exam_date_str = f"{parts[2].zfill(2)}/{parts[1].zfill(2)}/{parts[0]}"
+                                else:
+                                    exam_date_str = f"{parts[0].zfill(2)}/{parts[1].zfill(2)}/{parts[2]}"
+                        elif '/' in str(exam_date_raw):
+                            exam_date_str = str(exam_date_raw)
+                    except Exception:
+                        exam_date_str = str(exam_date_raw)
+            if not exam_date_str:
+                exam_date_str = datetime.date.today().strftime("%d/%m/%Y")
+
+            s_name = st.user.name.upper() if (st.user and st.user.name) else "—"
+            r_no = st.register_number or "—"
+            roll_no = st.roll_number or "—"
+            dept_name = department.department_name if department else "—"
+            sec_name = section_obj.sections if section_obj else "A"
+            sem_val = semester_id or "—"
+            batch_val = batch.batch if batch else "—"
+
+            info_data = [
+                [
+                    Paragraph("<b>Student Name:</b>", lbl_bold), Paragraph(s_name, val_norm),
+                    Paragraph("<b>Register No:</b>", lbl_bold), Paragraph(r_no, val_norm)
+                ],
+                [
+                    Paragraph("<b>Roll No:</b>", lbl_bold), Paragraph(roll_no, val_norm),
+                    Paragraph("<b>Department:</b>", lbl_bold), Paragraph(dept_name, val_norm)
+                ],
+                [
+                    Paragraph("<b>Batch:</b>", lbl_bold), Paragraph(str(batch_val), val_norm),
+                    Paragraph("<b>Sem / Section:</b>", lbl_bold), Paragraph(f"Sem {sem_val} - Sec {sec_name}", val_norm)
+                ],
+                [
+                    Paragraph("<b>Date of Exam:</b>", lbl_bold), Paragraph(exam_date_str, val_norm),
+                    Paragraph("", val_norm), Paragraph("", val_norm)
+                ]
+            ]
+            info_tbl = Table(info_data, colWidths=[80, 187, 80, 188])
+            info_tbl.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#CBD5E1')),
+                ('SPAN', (1,3), (3,3)),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('BACKGROUND', (0,0), (0,-1), colors.HexColor('#F8FAFC')),
+                ('BACKGROUND', (2,0), (2,-2), colors.HexColor('#F8FAFC')),
+                ('TOPPADDING', (0,0), (-1,-1), 4),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+                ('LEFTPADDING', (0,0), (-1,-1), 6),
+                ('RIGHTPADDING', (0,0), (-1,-1), 6),
+            ]))
+            story.append(info_tbl)
+            story.append(Spacer(1, 15))
+
+            # Function to clean text and support multi-line table cell formatting
+            def clean_pdf_text(val):
+                if not val:
+                    return ""
+                val_str = str(val).strip()
+                # If newlines exist, replace with <br/> for multi-line table display
+                if '\n' in val_str:
+                    lines = [clean_pdf_text(l) for l in val_str.split('\n')]
+                    return "<br/>".join([l for l in lines if l])
+                
+                # Handle slash separated text for multi-line display
+                if '/' in val_str:
+                    parts = [p.strip() for p in val_str.split('/')]
+                    cleaned_parts = []
+                    for p in parts:
+                        cp = "".join(c for c in p if ord(c) < 256).strip()
+                        if cp:
+                            cleaned_parts.append(cp)
+                    if len(cleaned_parts) > 1:
+                        return "<br/>".join(cleaned_parts)
+                    elif len(cleaned_parts) == 1:
+                        return cleaned_parts[0]
+
+                res = "".join(c for c in val_str if ord(c) < 256).strip()
+                return res if res else val_str
+
+            # Marks Table
+            exam_cols = [e.exam_name for e in exams]
+            col_widths = [35, 80, 240] + [int(180 / max(len(exams), 1))] * len(exams)
+
+            table_rows = []
+            header_cells = [
+                Paragraph("S. No.", tbl_hdr_style),
+                Paragraph("Subject Code", tbl_hdr_style),
+                Paragraph("Subject Name", tbl_hdr_style),
+            ] + [Paragraph(ex_name, tbl_hdr_style) for ex_name in exam_cols]
+            table_rows.append(header_cells)
+
+            for sub_i, sub in enumerate(subjects):
+                cleaned_name = clean_pdf_text(sub.subject_name)
+                cleaned_code = clean_pdf_text(sub.subject_code)
+
+                row_cells = [
+                    Paragraph(str(sub_i + 1), tbl_cell_center),
+                    Paragraph(cleaned_code or "—", tbl_cell_center),
+                    Paragraph(cleaned_name or "—", tbl_cell_left),
+                ]
+                for ex in exams:
+                    m_val = marks_dict.get((st.id, sub.id, ex.id))
+                    m_str = str(m_val) if (m_val is not None) else "-"
+                    row_cells.append(Paragraph(m_str, tbl_cell_center))
+
+                table_rows.append(row_cells)
+
+            if len(subjects) == 0:
+                table_rows.append([Paragraph("No subjects found", tbl_cell_center)] * (3 + len(exams)))
+
+            marks_table = Table(table_rows, colWidths=col_widths)
+            marks_table.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('TOPPADDING', (0,0), (-1,-1), 4),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+                ('LEFTPADDING', (0,0), (-1,-1), 5),
+                ('RIGHTPADDING', (0,0), (-1,-1), 5),
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#E2E8F0')),
+            ]))
+            story.append(marks_table)
+            story.append(Spacer(1, 35))
+
+            # Signatures
+            sig_data = [[
+                Paragraph("<b>Class In-Charge</b>", ParagraphStyle(name='Sig1', fontName='Helvetica-Bold', fontSize=8.5, alignment=0)),
+                Paragraph("<b>HOD</b>", ParagraphStyle(name='Sig2', fontName='Helvetica-Bold', fontSize=8.5, alignment=1)),
+                Paragraph("<b>Parent Signature</b>", ParagraphStyle(name='Sig3', fontName='Helvetica-Bold', fontSize=8.5, alignment=2))
+            ]]
+            sig_table = Table(sig_data, colWidths=[178, 178, 179])
+            sig_table.setStyle(TableStyle([
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('LEFTPADDING', (0,0), (-1,-1), 0),
+                ('RIGHTPADDING', (0,0), (-1,-1), 0),
+            ]))
+            story.append(sig_table)
+
+        doc.build(story)
+        pdf = buffer.getvalue()
+        buffer.close()
+
+        response = HttpResponse(content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Progress_Report_{datetime.date.today().strftime("%Y%m%d")}.pdf"'
         response.write(pdf)
         return response
 
@@ -3982,7 +4521,4 @@ class GradeSystemViewSet(viewsets.ModelViewSet):
                 )
         except Exception as e:
             logger.warning(f"Failed to broadcast GradeSystem delete: {e}")
-
-
-
 
