@@ -7,3 +7,66 @@
   }
 }
 
+{
+  "path": "/api/transport/drivers/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "date_of_joining: Date of joining cannot be null."
+  }
+}
+
+{
+  "path": "/api/transport/buses/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "fuel_type: \"Diesel\" is not a valid choice."
+  }
+}
+
+{
+  "path": "/api/transport/buses/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "fuel_type: \"Diesel\" is not a valid choice."
+  }
+}
+
+{
+  "path": "/api/transport/buses/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "fuel_type: \"Petrol\" is not a valid choice."
+  }
+}
+
+{
+  "path": "/api/transport/buses/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "fuel_type: \"Petrol\" is not a valid choice."
+  }
+}
+
+{
+  "path": "/api/student/edit/1",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "department_id: Department id is required."
+  }
+}
+
+{
+  "path": "/api/student/edit/1",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "department_id: Department id is required."
+  }
+}
+

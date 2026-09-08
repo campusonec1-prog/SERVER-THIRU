@@ -54,8 +54,30 @@ class Student(TrackingModel):
     is_hostler = models.BooleanField(default=False)
     is_day_scholar = models.BooleanField(default=False)
     is_bus = models.BooleanField(default=False)
-    bus_from = models.CharField(max_length=150, null=True, blank=True)
-    bus_to = models.CharField(max_length=150, null=True, blank=True)
+    bus = models.ForeignKey(
+        'transport.Bus',
+        on_delete=models.SET_NULL,
+        db_column='bus_id',
+        related_name='students',
+        null=True,
+        blank=True
+    )
+    route = models.ForeignKey(
+        'transport.TransportRoute',
+        on_delete=models.SET_NULL,
+        db_column='route_id',
+        related_name='students',
+        null=True,
+        blank=True
+    )
+    stop = models.ForeignKey(
+        'transport.RouteStop',
+        on_delete=models.SET_NULL,
+        db_column='stop_id',
+        related_name='students',
+        null=True,
+        blank=True
+    )
     status = models.ForeignKey(
         StudentStatus,
         on_delete=models.CASCADE,
