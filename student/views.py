@@ -201,6 +201,9 @@ class StudentViewSet(viewsets.ModelViewSet):
         department_id = request.query_params.get('department_id')
         batch_id = request.query_params.get('batch_id')
         section_id = request.query_params.get('section_id')
+        is_bus = request.query_params.get('is_bus')
+        bus_id = request.query_params.get('bus_id')
+        route_id = request.query_params.get('route_id')
         search = request.query_params.get('search')
         
         if department_id:
@@ -212,13 +215,25 @@ class StudentViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(section_id=section_id)
             else:
                 queryset = queryset.filter(section__sections__iexact=section_id)
+        if is_bus is not None:
+            if str(is_bus).lower() in ['true', '1']:
+                queryset = queryset.filter(is_bus=True)
+            elif str(is_bus).lower() in ['false', '0']:
+                queryset = queryset.filter(is_bus=False)
+        if bus_id:
+            queryset = queryset.filter(bus_id=bus_id)
+        if route_id:
+            queryset = queryset.filter(route_id=route_id)
         if search:
             queryset = queryset.filter(
                 Q(user__name__icontains=search) |
                 Q(roll_number__icontains=search) |
                 Q(register_number__icontains=search) |
                 Q(user__email__icontains=search) |
-                Q(user__phone_number__icontains=search)
+                Q(user__phone_number__icontains=search) |
+                Q(bus__bus_number__icontains=search) |
+                Q(route__route_name__icontains=search) |
+                Q(stop__stop_name__icontains=search)
             )
 
         page = self.paginate_queryset(queryset)
