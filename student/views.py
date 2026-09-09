@@ -131,7 +131,7 @@ class StudentStatusViewSet(viewsets.ModelViewSet):
 
 
 class StudentViewSet(viewsets.ModelViewSet):
-    queryset = Student.objects.all().order_by('id')
+    queryset = Student.objects.select_related('department', 'batch', 'section', 'status', 'quota', 'bus', 'route', 'stop', 'user').all().order_by('id')
     serializer_class = StudentSerializer
     permission_classes = [StudentPermission]
 
@@ -2262,7 +2262,7 @@ class MarksViewSet(viewsets.ViewSet):
         return super().handle_exception(exc)
 
     def list(self, request):
-        queryset = Marks.objects.all().order_by('id')
+        queryset = Marks.objects.select_related('student', 'subject', 'exam', 'exam_type', 'created_by').all().order_by('id')
         
         user = request.user
         role_name = ""

@@ -9,7 +9,7 @@ from .permissions import SubjectPermission
 
 
 class SubjectViewSet(viewsets.ModelViewSet):
-    queryset = Subject.objects.all().order_by('id')
+    queryset = Subject.objects.select_related('department', 'regulation', 'semester').all().order_by('id')
     serializer_class = SubjectSerializer
     permission_classes = [SubjectPermission]
 

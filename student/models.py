@@ -103,6 +103,11 @@ class Student(TrackingModel):
 
     class Meta:
         db_table = 'students'
+        indexes = [
+            models.Index(fields=['department', 'batch', 'section']),
+            models.Index(fields=['is_bus', 'bus']),
+            models.Index(fields=['is_hostler']),
+        ]
 
     def __str__(self):
         return f"{self.roll_number} - {self.user.name}"
@@ -139,6 +144,10 @@ class Marks(TrackingModel):
     class Meta:
         db_table = 'marks'
         unique_together = ('student', 'exam', 'subject', 'subject_category')
+        indexes = [
+            models.Index(fields=['student', 'exam']),
+            models.Index(fields=['exam', 'subject']),
+        ]
 
     def __str__(self):
         return f"{self.student.roll_number} - {self.subject.subject_code} ({self.exam.exam_name}): {self.marks_obtained}"
