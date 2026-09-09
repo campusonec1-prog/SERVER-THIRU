@@ -105,7 +105,8 @@ class StudentSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'roll_number', 'register_number', 'department_id',
             'section_id', 'batch_id', 'user_id', 'lab_batch', 'status_id',
-            'quota_id', 'is_hostler', 'is_day_scholar', 'is_bus',
+            'quota_id', 'is_hostler', 'hostel_building_type', 'hostel_room_number',
+            'is_day_scholar', 'is_bus',
             'bus_id', 'route_id', 'stop_id',
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
@@ -132,6 +133,8 @@ class StudentSerializer(serializers.ModelSerializer):
             'status_id': {'required': True},
             'lab_batch': {'required': False, 'allow_null': True, 'allow_blank': True},
             'is_hostler': {'required': False},
+            'hostel_building_type': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'hostel_room_number': {'required': False, 'allow_null': True, 'allow_blank': True},
             'is_day_scholar': {'required': False},
             'is_bus': {'required': False},
         }
