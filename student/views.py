@@ -2262,7 +2262,7 @@ class MarksViewSet(viewsets.ViewSet):
         return super().handle_exception(exc)
 
     def list(self, request):
-        queryset = Marks.objects.select_related('student', 'subject', 'exam', 'exam_type', 'created_by').all().order_by('id')
+        queryset = Marks.objects.select_related('student', 'subject', 'exam', 'exam__exam_type', 'created_by').all().order_by('id')
         
         user = request.user
         role_name = ""
