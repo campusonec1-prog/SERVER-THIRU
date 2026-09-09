@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Driver, Bus, TransportRoute, RouteStop
+from .models import Driver, Bus, TransportRoute, RouteStop, TransportExpense
 
 
 def apply_default_error_messages(fields):
@@ -115,8 +115,11 @@ class BusSerializer(serializers.ModelSerializer):
             ret['start_location'] = ''
             ret['end_location'] = ''
 
-        ret['allocated_students_count'] = instance.students.count() if hasattr(instance, 'students') else 0
+        allocated_count = instance.students.count() if hasattr(instance, 'students') else 0
+        ret['allocated_students_count'] = allocated_count
+        ret['available_seats'] = max(0, instance.capacity - allocated_count)
         return ret
+
 
 
 class RouteStopSerializer(serializers.ModelSerializer):
@@ -187,3 +190,59 @@ class TransportRouteSerializer(serializers.ModelSerializer):
 
         ret['allocated_students_count'] = instance.students.count()
         return ret
+
+
+class TransportExpenseSerializer(serializers.ModelSerializer):
+    bus_id = serializers.PrimaryKeyRelatedField(
+        source='bus',
+        queryset=Bus.objects.all(),
+        required=True,
+        error_messages={'does_not_exist': 'Vehicle/Bus does not exist.', 'required': 'Vehicle is required.'}
+    )
+    incharge_driver_id = serializers.PrimaryKeyRelatedField(
+        source='incharge_driver',
+        queryset=Driver.objects.all(),
+        required=True,
+        error_messages={'does_not_exist': 'Incharge driver does not exist.', 'required': 'Incharge driver is required.'}
+    )
+
+    class Meta:
+        model = TransportExpense
+        fields = [
+            'id', 'bus_id', 'incharge_driver_id', 'expense_type', 'expense_date_time',
+            'amount', 'description', 'vendor', 'odometer_reading',
+            'invoice_number', 'payment_mode', 'created_at', 'updated_at',
+            'created_by', 'updated_by'
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        if instance.bus:
+            ret['bus_number'] = instance.bus.bus_number
+            ret['bus_registration'] = instance.bus.registration_number
+            if instance.bus.driver:
+                ret['bus_assigned_driver_id'] = instance.bus.driver.id
+                ret['bus_assigned_driver_name'] = instance.bus.driver.driver_name
+            else:
+                ret['bus_assigned_driver_id'] = None
+                ret['bus_assigned_driver_name'] = ''
+        else:
+            ret['bus_number'] = ''
+            ret['bus_registration'] = ''
+            ret['bus_assigned_driver_id'] = None
+            ret['bus_assigned_driver_name'] = ''
+
+        if instance.incharge_driver:
+            ret['incharge_driver_name'] = instance.incharge_driver.driver_name
+            ret['incharge_driver_phone'] = instance.incharge_driver.phone_number
+        else:
+            ret['incharge_driver_name'] = ''
+            ret['incharge_driver_phone'] = ''
+        return ret
+
+
