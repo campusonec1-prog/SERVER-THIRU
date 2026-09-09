@@ -6,7 +6,8 @@ from .views import (
     CounsellingReportViewSet, 
     FacultyActivityViewSet, 
     StudentAttendanceViewSet,
-    GradeSystemViewSet
+    GradeSystemViewSet,
+    HostelVisitorLogViewSet
 )
 
 urlpatterns = [
@@ -16,6 +17,21 @@ urlpatterns = [
     path('statuses/get/<int:pk>', StudentStatusViewSet.as_view({'get': 'retrieve'}), name='student-status-detail'),
     path('statuses/edit/<int:pk>', StudentStatusViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='student-status-edit'),
     path('statuses/remove/<int:pk>', StudentStatusViewSet.as_view({'delete': 'destroy'}), name='student-status-remove'),
+
+    # Hostel Visitor Log endpoints
+    path('hostel/visitor-logs/create', HostelVisitorLogViewSet.as_view({'post': 'create'}), name='hostel-visitor-log-create'),
+    path('hostel/visitor-logs/list', HostelVisitorLogViewSet.as_view({'get': 'list'}), name='hostel-visitor-log-list'),
+    path('hostel/visitor-logs/get/<int:pk>', HostelVisitorLogViewSet.as_view({'get': 'retrieve'}), name='hostel-visitor-log-detail'),
+    path('hostel/visitor-logs/edit/<int:pk>', HostelVisitorLogViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='hostel-visitor-log-edit'),
+    path('hostel/visitor-logs/remove/<int:pk>', HostelVisitorLogViewSet.as_view({'delete': 'destroy'}), name='hostel-visitor-log-remove'),
+    path('hostel/visitor-logs/checkout/<int:pk>', HostelVisitorLogViewSet.as_view({'post': 'checkout'}), name='hostel-visitor-log-checkout'),
+
+    # Grade System endpoints
+    path('grade-systems/create', GradeSystemViewSet.as_view({'post': 'create'}), name='grade-system-create'),
+    path('grade-systems/list', GradeSystemViewSet.as_view({'get': 'list'}), name='grade-system-list'),
+    path('grade-systems/get/<int:pk>', GradeSystemViewSet.as_view({'get': 'retrieve'}), name='grade-system-detail'),
+    path('grade-systems/edit/<int:pk>', GradeSystemViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='grade-system-edit'),
+    path('grade-systems/remove/<int:pk>', GradeSystemViewSet.as_view({'delete': 'destroy'}), name='grade-system-remove'),
 
     # Grade System endpoints
     path('grade-systems/create', GradeSystemViewSet.as_view({'post': 'create'}), name='grade-system-create'),

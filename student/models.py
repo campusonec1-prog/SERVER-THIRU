@@ -353,5 +353,43 @@ class GradeSystem(TrackingModel):
         return f"{self.grade} ({self.points} pts)"
 
 
+class HostelVisitorLog(TrackingModel):
+    RELATIONSHIP_CHOICES = [
+        ('FATHER', 'Father'),
+        ('MOTHER', 'Mother'),
+        ('BROTHER', 'Brother'),
+        ('SISTER', 'Sister'),
+        ('GUARDIAN', 'Guardian'),
+        ('FRIEND', 'Friend'),
+        ('RELATIVE', 'Relative'),
+        ('OTHERS', 'Others'),
+    ]
+
+    student = models.ForeignKey(
+        Student,
+        on_delete=models.CASCADE,
+        db_column='student_id',
+        related_name='visitor_logs'
+    )
+    visitor_name = models.CharField(max_length=150)
+    relationship = models.CharField(max_length=30, choices=RELATIONSHIP_CHOICES)
+    visitor_phone = models.CharField(max_length=20)
+    check_in = models.DateTimeField()
+    check_out = models.DateTimeField(null=True, blank=True)
+    reason_of_visit = models.TextField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'hostel_visitor_logs'
+        ordering = ['-check_in']
+        indexes = [
+            models.Index(fields=['student', 'check_in']),
+            models.Index(fields=['check_in']),
+        ]
+
+    def __str__(self):
+        return f"Visitor {self.visitor_name} for {self.student.roll_number or self.student.id} at {self.check_in}"
+
+
+
 
 

@@ -671,3 +671,70 @@ class GradeSystemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Points cannot be negative.")
         return value
 
+
+from .models import HostelVisitorLog
+
+class HostelVisitorLogSerializer(serializers.ModelSerializer):
+    student_id = serializers.PrimaryKeyRelatedField(
+        source='student',
+        queryset=Student.objects.all(),
+        error_messages={'does_not_exist': 'Student does not exist.'}
+    )
+
+    class Meta:
+        model = HostelVisitorLog
+        fields = [
+            'id', 'student_id', 'visitor_name', 'relationship', 'visitor_phone',
+            'check_in', 'check_out', 'reason_of_visit',
+            'created_at', 'updated_at', 'created_by', 'updated_by'
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+    def validate_student_id(self, value):
+        if not value:
+            raise serializers.ValidationError("Student selection is required.")
+        if not value.is_hostler:
+            raise serializers.ValidationError("Selected student is not a registered hostler.")
+        return value
+
+    def validate_visitor_phone(self, value):
+        if not value or not str(value).strip():
+            raise serializers.ValidationError("Visitor phone number cannot be empty.")
+        phone_str = str(value).strip()
+        import re
+        if not re.match(r'^\+?[0-9]{10,15}$', phone_str):
+            raise serializers.ValidationError("Visitor phone number must contain 10 to 15 digits.")
+        return phone_str
+
+    def validate(self, attrs):
+        check_in = attrs.get('check_in') or (self.instance.check_in if self.instance else None)
+        check_out = attrs.get('check_out') or (self.instance.check_out if self.instance else None)
+
+        if check_in and check_out and check_out <= check_in:
+            raise serializers.ValidationError({"check_out": "Check-out time must be after check-in time."})
+
+        return attrs
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        if instance.student:
+            student = instance.student
+            ret['student_details'] = {
+                'id': student.id,
+                'name': student.user.name if student.user else "Unknown",
+                'roll_number': student.roll_number,
+                'register_number': student.register_number,
+                'department_code': student.department.department_code if student.department else None,
+                'department_name': student.department.department_name if student.department else None,
+                'section': student.section.sections if student.section else None,
+                'batch': student.batch.batch if student.batch else None,
+                'hostel_building_type': student.hostel_building_type,
+                'hostel_room_number': student.hostel_room_number,
+            }
+        return ret
+
+

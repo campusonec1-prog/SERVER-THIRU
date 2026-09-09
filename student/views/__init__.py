@@ -4,6 +4,7 @@ from .marks_views import MarksViewSet
 from .counselling_views import CounsellingReportViewSet
 from .attendance_views import FacultyActivityViewSet, StudentAttendanceViewSet
 from .grade_views import GradeSystemViewSet
+from .hostel_visitor_views import HostelVisitorLogViewSet
 
 __all__ = [
     'StudentStatusViewSet',
@@ -15,4 +16,5 @@ __all__ = [
     'FacultyActivityViewSet',
     'StudentAttendanceViewSet',
     'GradeSystemViewSet',
+    'HostelVisitorLogViewSet',
 ]
