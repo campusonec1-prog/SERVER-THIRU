@@ -5315,7 +5315,8 @@ class MarksViewSet(viewsets.ViewSet):
             for m in all_st_marks:
                 is_abs, is_pass, num_val, str_val = evaluate_mark(m.marks_obtained)
                 if not is_pass or is_abs:
-                    student_cum_fail_counts[st.id] += 1
+                    if m.student_id in student_cum_fail_counts:
+                        student_cum_fail_counts[m.student_id] += 1
 
             cum_fail_0 = sum(1 for f in student_cum_fail_counts.values() if f == 0)
             cum_fail_1 = sum(1 for f in student_cum_fail_counts.values() if f == 1)
@@ -5419,6 +5420,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         response = HttpResponse(content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="Consolidated_Exam_Result_Analysis_{datetime.date.today().strftime("%Y%m%d")}.pdf"'
+        response.write(pdf)
         return response
 
     @action(detail=False, methods=['post', 'get'], url_path='capa-report/pdf')
