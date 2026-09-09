@@ -5435,6 +5435,383 @@ class MarksViewSet(viewsets.ViewSet):
         response.write(pdf)
         return response
 
+    @action(detail=False, methods=['post', 'get'], url_path='student-performance-report/pdf')
+    def student_performance_report_pdf(self, request):
+        import os
+        from io import BytesIO
+        from django.http import HttpResponse
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.platypus import Image as RLImage
+        from PIL import Image as PILImage
+        import urllib.request
+        import datetime
+
+        from institution.models import Department, Batch, Section, Semester, Regulation, CollegeHeader, ExamType, Exam
+        from subject.models import Subject
+        from student.models import Student, Marks, GradeSystem
+
+        req_data = request.data if request.method == 'POST' else request.query_params
+        department_id = req_data.get('department_id')
+        batch_id = req_data.get('batch_id')
+        section_id = req_data.get('section_id')
+        semester_id = req_data.get('semester_id')
+        regulation_id = req_data.get('regulation_id')
+        exam_type_id = req_data.get('exam_type_id')
+        exam_ids_raw = req_data.get('exam_ids') or req_data.get('exam_id')
+        header_type = req_data.get('header_type') or req_data.get('header_type_id') or 'Main'
+
+        exam_ids = []
+        if isinstance(exam_ids_raw, list):
+            exam_ids = exam_ids_raw
+        elif isinstance(exam_ids_raw, str) and exam_ids_raw.strip():
+            exam_ids = [x.strip() for x in exam_ids_raw.split(',') if x.strip()]
+        elif isinstance(exam_ids_raw, int):
+            exam_ids = [exam_ids_raw]
+
+        department = Department.objects.filter(id=department_id).first() if department_id else None
+        batch = Batch.objects.filter(id=batch_id).first() if batch_id else None
+
+        section_obj = None
+        if section_id:
+            if str(section_id).isdigit():
+                section_obj = Section.objects.filter(id=section_id).first()
+            else:
+                section_obj = Section.objects.filter(sections__iexact=section_id).first()
+
+        semester_obj = Semester.objects.filter(id=semester_id).first() if (semester_id and str(semester_id).isdigit()) else None
+
+        college_header_obj = None
+        if str(header_type).isdigit():
+            college_header_obj = CollegeHeader.objects.filter(id=header_type).first()
+        if not college_header_obj and header_type:
+            college_header_obj = CollegeHeader.objects.filter(header_type__iexact=str(header_type)).first()
+        if not college_header_obj:
+            college_header_obj = CollegeHeader.objects.first()
+
+        students_qs = Student.objects.all().select_related('user')
+        if department:
+            students_qs = students_qs.filter(department=department)
+        if batch:
+            students_qs = students_qs.filter(batch=batch)
+        if section_obj:
+            students_qs = students_qs.filter(section=section_obj)
+        students = list(students_qs.order_by('roll_number', 'user__name'))
+
+        if not students and department:
+            students = list(Student.objects.filter(department=department).order_by('roll_number', 'user__name'))
+        if not students:
+            return HttpResponse("No students found matching the selected criteria.", status=400)
+
+        exams = []
+        if exam_ids:
+            exams = list(Exam.objects.filter(id__in=exam_ids))
+        elif exam_type_id:
+            exams = list(Exam.objects.filter(exam_type_id=exam_type_id))
+
+        active_grades = list(GradeSystem.objects.filter(is_active=True))
+
+        def evaluate_mark_spr(val):
+            if val is None:
+                return True, False
+            str_val = str(val).strip().upper()
+            if str_val in ['-', '', 'AB', 'ABSENT', 'UA']:
+                return True, False
+            try:
+                num_val = float(str_val)
+                absent_entry = next((g for g in active_grades if g.min_mark is not None and g.max_mark is not None
+                                     and float(g.min_mark) == 0 and float(g.max_mark) == 0 and not g.is_pass), None)
+                if absent_entry and num_val == 0:
+                    return True, False
+                matching_entry = next((g for g in active_grades if g.min_mark is not None and g.max_mark is not None
+                                       and not (float(g.min_mark) == 0 and float(g.max_mark) == 0)
+                                       and float(g.min_mark) <= num_val <= float(g.max_mark)), None)
+                if matching_entry:
+                    return False, matching_entry.is_pass
+                pass_entries = [g for g in active_grades if g.is_pass and g.min_mark is not None
+                                and not (float(g.min_mark) == 0 and float(g.max_mark or 0) == 0)]
+                if pass_entries:
+                    min_pass = min(float(g.min_mark) for g in pass_entries)
+                    return False, (num_val >= min_pass)
+                return False, (num_val >= 50.0)
+            except ValueError:
+                matching_grade = next((g for g in active_grades if g.grade.upper() == str_val), None)
+                if matching_grade:
+                    is_abs = (matching_grade.min_mark is not None and matching_grade.max_mark is not None
+                              and float(matching_grade.min_mark) == 0 and float(matching_grade.max_mark) == 0) or str_val == 'UA'
+                    return is_abs, matching_grade.is_pass
+                is_fail_code = str_val in ['U', 'UA', 'F', 'RA', 'AB', 'ABSENT']
+                return (str_val in ['AB', 'ABSENT', 'UA']), (not is_fail_code)
+
+        # Build per-student fail counts
+        marks_qs = Marks.objects.filter(student__in=students)
+        if exams:
+            marks_qs = marks_qs.filter(exam__in=exams)
+        elif exam_type_id:
+            marks_qs = marks_qs.filter(exam__exam_type_id=exam_type_id)
+        all_marks = list(marks_qs)
+
+        student_fail_counts = {}
+        for st in students:
+            st_marks = [m for m in all_marks if m.student_id == st.id]
+            fail_count = 0
+            for m in st_marks:
+                is_abs, is_pass = evaluate_mark_spr(m.marks_obtained)
+                if not is_pass:
+                    fail_count += 1
+            student_fail_counts[st.id] = fail_count
+
+        # ─── PDF Build ───────────────────────────────────────────
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=35, rightMargin=35, topMargin=30, bottomMargin=30)
+
+        logo_url = college_header_obj.primary_logo if college_header_obj else None
+        logo_flowable = None
+        if logo_url:
+            try:
+                if isinstance(logo_url, str) and logo_url.startswith('http'):
+                    headers = {'User-Agent': 'Mozilla/5.0'}
+                    req_obj = urllib.request.Request(logo_url, headers=headers)
+                    with urllib.request.urlopen(req_obj, timeout=5) as resp:
+                        img_data = resp.read()
+                        pil_img = PILImage.open(BytesIO(img_data))
+                        out_io = BytesIO()
+                        pil_img.save(out_io, format='PNG')
+                        out_io.seek(0)
+                        logo_flowable = RLImage(out_io, width=45, height=45)
+                elif os.path.exists(logo_url):
+                    pil_img = PILImage.open(logo_url)
+                    out_io = BytesIO()
+                    pil_img.save(out_io, format='PNG')
+                    out_io.seek(0)
+                    logo_flowable = RLImage(out_io, width=45, height=45)
+            except Exception:
+                pass
+
+        story = []
+
+        # ── Exam title ──────────────────────────────────────────
+        exam_title_str = ""
+        if exams:
+            exam_title_str = " / ".join([e.exam_name.upper() for e in exams])
+        elif exam_type_id:
+            ex_type_obj = ExamType.objects.filter(id=exam_type_id).first()
+            if ex_type_obj:
+                exam_title_str = ex_type_obj.exam_type_name.upper()
+        if not exam_title_str:
+            exam_title_str = "ALL EXAMS"
+
+        # ── Header ───────────────────────────────────────────────
+        hdr_style = ParagraphStyle(name='SPRHdrTitle', fontName='Helvetica-Bold', fontSize=11, leading=14, alignment=1, textColor=colors.black)
+        college_name_str = college_header_obj.college_name.upper() if (college_header_obj and college_header_obj.college_name) else ""
+
+        hdr_parts = []
+        if college_name_str:
+            hdr_parts.append(college_name_str)
+        if exam_title_str:
+            hdr_parts.append(exam_title_str)
+            hdr_parts.append("STUDENT PERFORMANCE REPORT")
+
+        hdr_paragraph = Paragraph("<br/>".join(f"<b>{p}</b>" for p in hdr_parts), hdr_style)
+
+        if logo_flowable:
+            header_table = Table([[logo_flowable, hdr_paragraph]], colWidths=[65, 460])
+        else:
+            header_table = Table([[hdr_paragraph]], colWidths=[525])
+        header_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(header_table)
+        story.append(Spacer(1, 8))
+
+        # ── Metadata table ───────────────────────────────────────
+        sem_num = 1
+        if semester_id and str(semester_id).isdigit():
+            sem_num = int(semester_id)
+        elif semester_obj and isinstance(semester_obj.id, int):
+            sem_num = semester_obj.id
+        year_roman = {1: 'I', 2: 'I', 3: 'II', 4: 'II', 5: 'III', 6: 'III', 7: 'IV', 8: 'IV'}.get(sem_num, 'I')
+        sec_name = section_obj.sections if section_obj else (section_id if section_id else 'A')
+        batch_str = batch.batch if batch else ""
+        regulation_str = ""
+        if regulation_id:
+            reg_obj = Regulation.objects.filter(id=regulation_id).first()
+            if reg_obj:
+                regulation_str = reg_obj.regulation_code
+
+        lbl_bold = ParagraphStyle(name='SPRLblBold', fontName='Helvetica-Bold', fontSize=8, leading=10, textColor=colors.black)
+        val_norm = ParagraphStyle(name='SPRValNorm', fontName='Helvetica', fontSize=8, leading=10, textColor=colors.black)
+
+        meta_data = [
+            [
+                Paragraph("<b>Department:</b>", lbl_bold), Paragraph(department.department_name.title() if department else "", val_norm),
+                Paragraph("<b>Batch:</b>", lbl_bold), Paragraph(batch_str, val_norm),
+            ],
+            [
+                Paragraph("<b>Year/Sem/Section:</b>", lbl_bold), Paragraph(f"{year_roman} / Semester {sem_num} / {sec_name}", val_norm),
+                Paragraph("<b>Regulation:</b>", lbl_bold), Paragraph(regulation_str, val_norm),
+            ],
+        ]
+        meta_table = Table(meta_data, colWidths=[90, 177, 80, 178])
+        meta_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F8FAFC')),
+            ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#F8FAFC')),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(meta_table)
+        story.append(Spacer(1, 12))
+
+        # ── Performance table ────────────────────────────────────
+        try:
+            pdfmetrics.registerFont(TTFont('ArialUni', 'C:\\Windows\\Fonts\\ARIALUNI.TTF'))
+            name_font = 'ArialUni'
+        except Exception:
+            name_font = 'Helvetica'
+
+        tbl_hdr_style = ParagraphStyle(name='SPRTblHdr', fontName='Helvetica-Bold', fontSize=8, leading=10, alignment=1, textColor=colors.black)
+        tbl_cell_center = ParagraphStyle(name='SPRTblCC', fontName='Helvetica', fontSize=8, leading=10, alignment=1, textColor=colors.black)
+        tbl_cell_left = ParagraphStyle(name='SPRTblCL', fontName=name_font, fontSize=8, leading=10, alignment=0, textColor=colors.black)
+        tbl_cell_fail = ParagraphStyle(name='SPRTblFail', fontName='Helvetica-Bold', fontSize=8, leading=10, alignment=1, textColor=colors.HexColor('#1D4ED8'))
+
+        table_data = [[
+            Paragraph("<b>S.No</b>", tbl_hdr_style),
+            Paragraph("<b>Register No</b>", tbl_hdr_style),
+            Paragraph("<b>Student Name</b>", tbl_hdr_style),
+            Paragraph("<b>Arrears</b>", tbl_hdr_style),
+        ]]
+        row_styles = []
+        for idx, st in enumerate(students, start=1):
+            st_name = (st.user.name if st.user and st.user.name else (st.user.username if st.user else "")) or ""
+            reg_no = st.register_number or st.roll_number or (st.user.username if st.user else "") or ""
+            fail_count = student_fail_counts.get(st.id, 0)
+            arrears_para = Paragraph(str(fail_count), tbl_cell_fail if fail_count > 0 else tbl_cell_center)
+            table_data.append([
+                Paragraph(str(idx), tbl_cell_center),
+                Paragraph(reg_no, tbl_cell_center),
+                Paragraph(st_name, tbl_cell_left),
+                arrears_para,
+            ])
+            if fail_count > 0:
+                row_styles.append(('TEXTCOLOR', (3, idx), (3, idx), colors.HexColor('#1D4ED8')))
+
+        col_widths = [35, 110, 310, 70]
+        perf_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+        ts = [
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E2E8F0')),
+        ]
+        # Alternate row shading
+        for i in range(1, len(table_data)):
+            if i % 2 == 0:
+                ts.append(('BACKGROUND', (0, i), (-1, i), colors.HexColor('#F8FAFC')))
+        ts.extend(row_styles)
+        perf_table.setStyle(TableStyle(ts))
+        story.append(perf_table)
+        story.append(Spacer(1, 25))
+
+        # ── Arrear Breakdown Summary Table ───────────────────────
+        total_st = len(students)
+        count_0    = sum(1 for v in student_fail_counts.values() if v == 0)
+        count_1    = sum(1 for v in student_fail_counts.values() if v == 1)
+        count_2    = sum(1 for v in student_fail_counts.values() if v == 2)
+        count_3plus = sum(1 for v in student_fail_counts.values() if v >= 3)
+
+        summ_hdr  = ParagraphStyle(name='SPRSummHdr',  fontName='Helvetica-Bold', fontSize=8, leading=10, alignment=1, textColor=colors.black)
+        summ_cell = ParagraphStyle(name='SPRSummCell', fontName='Helvetica',      fontSize=8, leading=10, alignment=1, textColor=colors.black)
+        summ_cell_left = ParagraphStyle(name='SPRSummCellL', fontName='Helvetica', fontSize=8, leading=10, alignment=0, textColor=colors.black)
+        summ_bold_left = ParagraphStyle(name='SPRSummBL',   fontName='Helvetica-Bold', fontSize=8, leading=10, alignment=0, textColor=colors.black)
+        summ_blue = ParagraphStyle(name='SPRSummBlue', fontName='Helvetica-Bold', fontSize=8, leading=10, alignment=1, textColor=colors.HexColor('#1D4ED8'))
+
+        breakdown_data = [
+            # Header row
+            [
+                Paragraph("<b>No. of Arrears</b>",        summ_hdr),
+                Paragraph("<b>No. of Students</b>",       summ_hdr),
+            ],
+            [
+                Paragraph("0  (No Arrears)",               summ_cell_left),
+                Paragraph(str(count_0),                    summ_cell),
+            ],
+            [
+                Paragraph("1",                             summ_cell_left),
+                Paragraph(str(count_1),  summ_blue if count_1  > 0 else summ_cell),
+            ],
+            [
+                Paragraph("2",                             summ_cell_left),
+                Paragraph(str(count_2),  summ_blue if count_2  > 0 else summ_cell),
+            ],
+            [
+                Paragraph("3 or More",                     summ_cell_left),
+                Paragraph(str(count_3plus), summ_blue if count_3plus > 0 else summ_cell),
+            ],
+            [
+                Paragraph("<b>Total Students</b>",         summ_bold_left),
+                Paragraph(str(total_st),                   summ_hdr),
+            ],
+        ]
+
+        breakdown_col_widths = [250, 150]
+        breakdown_table = Table(breakdown_data, colWidths=breakdown_col_widths)
+        breakdown_ts = [
+            ('GRID',        (0, 0), (-1, -1), 0.5, colors.black),
+            ('VALIGN',      (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN',       (1, 0), (1, -1),  'CENTER'),
+            ('TOPPADDING',  (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING',(0,0), (-1, -1), 5),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING',(0, 0), (-1, -1), 8),
+            # Header background
+            ('BACKGROUND',  (0, 0), (-1,  0), colors.HexColor('#E2E8F0')),
+            # Total row background
+            ('BACKGROUND',  (0, -1),(-1, -1), colors.HexColor('#F1F5F9')),
+            # Alternate data row shading
+            ('BACKGROUND',  (0, 2), (-1,  2), colors.HexColor('#F8FAFC')),
+            ('BACKGROUND',  (0, 4), (-1,  4), colors.HexColor('#F8FAFC')),
+        ]
+        breakdown_table.setStyle(TableStyle(breakdown_ts))
+        story.append(breakdown_table)
+        story.append(Spacer(1, 40))
+
+        # ── Signature row ─────────────────────────────────────────
+        sig_style = ParagraphStyle(name='SPRSig', fontName='Helvetica', fontSize=9, alignment=1)
+        sig_data = [[
+            Paragraph("<b>Test Coordinator</b>", sig_style),
+            Paragraph("<b>HOD</b>", sig_style),
+            Paragraph("<b>Vice Principal</b>", sig_style),
+            Paragraph("<b>Principal</b>", sig_style),
+        ]]
+        sig_table = Table(sig_data, colWidths=[130, 130, 130, 130])
+        sig_table.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
+        story.append(sig_table)
+
+        doc.build(story)
+        pdf = buffer.getvalue()
+        buffer.close()
+
+        response = HttpResponse(content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Student_Performance_Report_{datetime.date.today().strftime("%Y%m%d")}.pdf"'
+        response.write(pdf)
+        return response
+
     @action(detail=False, methods=['post', 'get'], url_path='capa-report/pdf')
     def capa_report_pdf(self, request):
         import os
