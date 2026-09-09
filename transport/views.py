@@ -5,12 +5,14 @@ from rest_framework.permissions import IsAuthenticated
 from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied, ValidationError
 
-from .models import Driver, Bus, TransportRoute, RouteStop
+from common.pagination import CustomPageNumberPagination
+from .models import Driver, Bus, TransportRoute, RouteStop, TransportExpense
 from .serializers import (
     DriverSerializer,
     BusSerializer,
     TransportRouteSerializer,
-    RouteStopSerializer
+    RouteStopSerializer,
+    TransportExpenseSerializer
 )
 
 logger = logging.getLogger(__name__)
@@ -411,3 +413,95 @@ class RouteStopViewSet(BaseTransportViewSet):
             "code": 200,
             "message": "Route stop deleted successfully."
         }, status=status.HTTP_200_OK)
+
+
+class TransportExpenseViewSet(BaseTransportViewSet):
+    queryset = TransportExpense.objects.select_related('bus', 'bus__driver', 'incharge_driver').all()
+    serializer_class = TransportExpenseSerializer
+    pagination_class = CustomPageNumberPagination
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+
+        bus_id = params.get('bus_id') or params.get('vehicle_id')
+        if bus_id:
+            qs = qs.filter(bus_id=bus_id)
+
+        incharge_driver_id = params.get('incharge_driver_id')
+        if incharge_driver_id:
+            qs = qs.filter(incharge_driver_id=incharge_driver_id)
+
+
+        expense_type = params.get('expense_type')
+        if expense_type:
+            qs = qs.filter(expense_type__iexact=expense_type)
+
+        payment_mode = params.get('payment_mode')
+        if payment_mode:
+            qs = qs.filter(payment_mode__iexact=payment_mode)
+
+        search = params.get('search')
+        if search:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(invoice_number__icontains=search) |
+                Q(vendor__icontains=search) |
+                Q(description__icontains=search) |
+                Q(bus__bus_number__icontains=search) |
+                Q(bus__registration_number__icontains=search)
+            )
+
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        response = super(BaseTransportViewSet, self).list(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Transport expenses listed successfully.",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super(BaseTransportViewSet, self).retrieve(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Transport expense details retrieved successfully.",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        broadcast_event('TransportExpense', 'create', serializer.data)
+        return Response({
+            "code": 201,
+            "message": "Transport expense created successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_201_CREATED, headers=headers)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        broadcast_event('TransportExpense', 'update', serializer.data)
+        return Response({
+            "code": 200,
+            "message": "Transport expense updated successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        expense_id = instance.id
+        self.perform_destroy(instance)
+        broadcast_event('TransportExpense', 'delete', {'id': expense_id})
+        return Response({
+            "code": 200,
+            "message": "Transport expense record deleted successfully."
+        }, status=status.HTTP_200_OK)
+

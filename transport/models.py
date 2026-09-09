@@ -107,3 +107,60 @@ class RouteStop(TrackingModel):
 
     def __str__(self):
         return f"{self.route.route_name} - Stop {self.stop_order}: {self.stop_name}"
+
+
+class TransportExpense(TrackingModel):
+    EXPENSE_TYPE_CHOICES = [
+        ('fuel', 'Fuel'),
+        ('service', 'Service'),
+        ('maintenance', 'Maintenance'),
+        ('repair', 'Repair'),
+        ('tyre', 'Tyre'),
+        ('battery', 'Battery'),
+        ('insurance', 'Insurance'),
+        ('tax', 'Tax'),
+        ('permit', 'Permit'),
+        ('cleaning', 'Cleaning'),
+        ('other', 'Other'),
+    ]
+
+    PAYMENT_MODE_CHOICES = [
+        ('CASH', 'Cash'),
+        ('BANK_TRANSFER', 'Bank Transfer'),
+        ('UPI', 'UPI'),
+        ('CARD', 'Card'),
+        ('CHEQUE', 'Cheque'),
+        ('OTHER', 'Other'),
+    ]
+
+    bus = models.ForeignKey(
+        Bus,
+        on_delete=models.CASCADE,
+        db_column='bus_id',
+        related_name='expenses'
+    )
+    incharge_driver = models.ForeignKey(
+        Driver,
+        on_delete=models.SET_NULL,
+        db_column='incharge_driver_id',
+        related_name='incharge_expenses',
+        null=True,
+        blank=True
+    )
+    expense_type = models.CharField(max_length=50, choices=EXPENSE_TYPE_CHOICES)
+
+    expense_date_time = models.DateTimeField()
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    description = models.TextField()
+    vendor = models.CharField(max_length=200)
+    odometer_reading = models.DecimalField(max_digits=10, decimal_places=2)
+    invoice_number = models.CharField(max_length=100)
+    payment_mode = models.CharField(max_length=50, choices=PAYMENT_MODE_CHOICES)
+
+    class Meta:
+        db_table = 'transport_expense'
+        ordering = ['-expense_date_time']
+
+    def __str__(self):
+        return f"{self.bus.bus_number} - {self.expense_type} ({self.amount})"
+

@@ -3,7 +3,8 @@ from .views import (
     DriverViewSet,
     BusViewSet,
     TransportRouteViewSet,
-    RouteStopViewSet
+    RouteStopViewSet,
+    TransportExpenseViewSet
 )
 
 urlpatterns = [
@@ -34,5 +35,13 @@ urlpatterns = [
     re_path(r'^stops/detail/(?P<pk>\d+)/?$', RouteStopViewSet.as_view({'get': 'retrieve'}), name='stop-detail'),
     re_path(r'^stops/edit/(?P<pk>\d+)/?$', RouteStopViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='stop-edit'),
     re_path(r'^stops/remove/(?P<pk>\d+)/?$', RouteStopViewSet.as_view({'delete': 'destroy'}), name='stop-remove'),
+
+    # Expense Endpoints
+    re_path(r'^expenses/create/?$', TransportExpenseViewSet.as_view({'post': 'create'}), name='expense-create'),
+    re_path(r'^expenses/list/?$', TransportExpenseViewSet.as_view({'get': 'list'}), name='expense-list'),
+    re_path(r'^expenses/detail/(?P<pk>\d+)/?$', TransportExpenseViewSet.as_view({'get': 'retrieve'}), name='expense-detail'),
+    re_path(r'^expenses/edit/(?P<pk>\d+)/?$', TransportExpenseViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='expense-edit'),
+    re_path(r'^expenses/remove/(?P<pk>\d+)/?$', TransportExpenseViewSet.as_view({'delete': 'destroy'}), name='expense-remove'),
 ]
+
 
