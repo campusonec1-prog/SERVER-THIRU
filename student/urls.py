@@ -48,6 +48,7 @@ urlpatterns = [
     path('marks/internal-exam-result-analysis-report/pdf', MarksViewSet.as_view({'post': 'internal_exam_result_analysis_report_pdf', 'get': 'internal_exam_result_analysis_report_pdf'}), name='internal-exam-result-analysis-report-pdf'),
     path('marks/consolidated-exam-result-analysis-report/pdf', MarksViewSet.as_view({'post': 'consolidated_exam_result_analysis_report_pdf', 'get': 'consolidated_exam_result_analysis_report_pdf'}), name='consolidated-exam-result-analysis-report-pdf'),
     path('marks/capa-report/pdf', MarksViewSet.as_view({'post': 'capa_report_pdf', 'get': 'capa_report_pdf'}), name='capa-report-pdf'),
+    path('marks/student-performance-report/pdf', MarksViewSet.as_view({'post': 'student_performance_report_pdf', 'get': 'student_performance_report_pdf'}), name='student-performance-report-pdf'),
 
 
     # Attendance endpoints
