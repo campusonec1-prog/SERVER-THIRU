@@ -51,7 +51,23 @@ class Student(TrackingModel):
         null=True,
         blank=True
     )
+    HOSTEL_BUILDING_CHOICES = [
+        ('BOYS', 'Boys Hostel'),
+        ('GIRLS', 'Girls Hostel'),
+        ('COMBINED', 'Combined'),
+    ]
     is_hostler = models.BooleanField(default=False)
+    hostel_building_type = models.CharField(
+        max_length=20,
+        choices=HOSTEL_BUILDING_CHOICES,
+        null=True,
+        blank=True
+    )
+    hostel_room_number = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True
+    )
     is_day_scholar = models.BooleanField(default=False)
     is_bus = models.BooleanField(default=False)
     bus = models.ForeignKey(

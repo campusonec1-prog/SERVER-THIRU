@@ -202,6 +202,7 @@ class StudentViewSet(viewsets.ModelViewSet):
         batch_id = request.query_params.get('batch_id')
         section_id = request.query_params.get('section_id')
         is_bus = request.query_params.get('is_bus')
+        is_hostler = request.query_params.get('is_hostler')
         bus_id = request.query_params.get('bus_id')
         route_id = request.query_params.get('route_id')
         search = request.query_params.get('search')
@@ -220,6 +221,11 @@ class StudentViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(is_bus=True)
             elif str(is_bus).lower() in ['false', '0']:
                 queryset = queryset.filter(is_bus=False)
+        if is_hostler is not None:
+            if str(is_hostler).lower() in ['true', '1']:
+                queryset = queryset.filter(is_hostler=True)
+            elif str(is_hostler).lower() in ['false', '0']:
+                queryset = queryset.filter(is_hostler=False)
         if bus_id:
             queryset = queryset.filter(bus_id=bus_id)
         if route_id:
@@ -1323,6 +1329,19 @@ class StudentViewSet(viewsets.ModelViewSet):
         bus_from = _get_bus_from(student)
         bus_to = _get_bus_to(student)
 
+        hostel_bldg_dict = dict(getattr(Student, 'HOSTEL_BUILDING_CHOICES', []))
+        hostel_bldg_name = hostel_bldg_dict.get(student.hostel_building_type, student.hostel_building_type or '—')
+        if student.is_hostler:
+            acc_details_str = f"Hostel: {hostel_bldg_name} | Room: {student.hostel_room_number or '—'}"
+        elif student.is_bus:
+            acc_details_str = (
+                f"Bus: {student.bus.bus_number if student.bus else '—'}"
+                f" &nbsp;|&nbsp; Route: {student.route.route_name if student.route else '—'}"
+                f"{f' &nbsp;|&nbsp; Stop: {student.stop.stop_name}' if student.stop else ''}"
+            )
+        else:
+            acc_details_str = "—"
+
         # Build PDF doc
         buffer = BytesIO()
         doc = SimpleDocTemplate(
@@ -1627,15 +1646,8 @@ class StudentViewSet(viewsets.ModelViewSet):
             [
                 Paragraph("<b>12. Hosteller (Tick):</b>", body_style),
                 Paragraph(f"{hostler_chk} Hosteller &nbsp;&nbsp; {day_scholar_chk} Day Scholar &nbsp;&nbsp; {bus_chk} Bus", body_style),
-                Paragraph("<b>Bus Details:</b>", body_style),
-                Paragraph(
-                    (
-                        f"Bus: {student.bus.bus_number if student.bus else '—'}"
-                        f" &nbsp;|&nbsp; Route: {student.route.route_name if student.route else '—'}"
-                        f"{f' &nbsp;|&nbsp; Stop: {student.stop.stop_name}' if student.stop else ''}"
-                    ) if student.is_bus else "—",
-                    body_bold
-                )
+                Paragraph("<b>Hostel / Bus Info:</b>", body_style),
+                Paragraph(acc_details_str, body_bold)
             ]
         ]
         pay_table = Table(pay_info, colWidths=[120, 140, 120, 140])
