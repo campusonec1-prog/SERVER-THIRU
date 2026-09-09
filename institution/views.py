@@ -5,6 +5,7 @@ from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDeni
 from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader, ExamType, Exam, Quota, FeesStructure
 from .serializers import ProgramSerializer, DepartmentSerializer, AcademicYearSerializer, BatchSerializer, RegulationSerializer, SemesterSerializer, SectionSerializer, CollegeHeaderSerializer, ExamTypeSerializer, ExamSerializer, QuotaSerializer, FeesStructureSerializer
 from users.permissions import IsAdminUser
+from common.caching import CachedOptionViewSetMixin, invalidate_option_cache
 from .permissions import (
     ProgramPermission, DepartmentPermission, AcademicYearPermission,
     BatchPermission, RegulationPermission, SemesterPermission,
@@ -50,7 +51,7 @@ class AdminWriteMixin:
 
 # ─── Program ─────────────────────────────────────────────────────────────────
 
-class ProgramViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+class ProgramViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Program.objects.all().order_by('id')
     serializer_class = ProgramSerializer
     permission_classes = [ProgramPermission]
@@ -79,7 +80,7 @@ class ProgramViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 # ─── Department ──────────────────────────────────────────────────────────────
 
-class DepartmentViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+class DepartmentViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Department.objects.all().order_by('id')
     serializer_class = DepartmentSerializer
     permission_classes = [DepartmentPermission]
@@ -108,7 +109,7 @@ class DepartmentViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 # ─── Academic Year ───────────────────────────────────────────────────────────
 
-class AcademicYearViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+class AcademicYearViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
     queryset = AcademicYear.objects.all().order_by('id')
     serializer_class = AcademicYearSerializer
     permission_classes = [AcademicYearPermission]
@@ -162,17 +163,14 @@ class AcademicYearViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 # ─── Batch ───────────────────────────────────────────────────────────────────
 
-class BatchViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+class BatchViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Batch.objects.all().order_by('id')
     serializer_class = BatchSerializer
     permission_classes = [BatchPermission]
     model_label = "Batch"
 
     def get_queryset(self):
-        # Filtering (department_id, is_active, etc.) is handled automatically
-        # by the global DynamicFilterBackend — no manual filtering needed here.
         return super().get_queryset()
-
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
@@ -197,7 +195,7 @@ class BatchViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 # ─── Regulation ───────────────────────────────────────────────────
 
-class RegulationViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+class RegulationViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Regulation.objects.all().order_by('id')
     serializer_class = RegulationSerializer
     permission_classes = [RegulationPermission]
@@ -226,7 +224,7 @@ class RegulationViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 # ─── Semester ───────────────────────────────────────────────────
 
-class SemesterViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+class SemesterViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Semester.objects.all().order_by('id')
     serializer_class = SemesterSerializer
     permission_classes = [SemesterPermission]
@@ -255,7 +253,7 @@ class SemesterViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 # ─── Section ───────────────────────────────────────────────────────
 
-class SectionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+class SectionViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Section.objects.all().order_by('id')
     serializer_class = SectionSerializer
     permission_classes = [SectionPermission]
@@ -317,6 +315,7 @@ class SectionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
             updated_sections = Section.objects.filter(department=dept).order_by('sections')
             serializer = self.get_serializer(updated_sections, many=True)
 
+        invalidate_option_cache("Section")
         return Response({
             "code": 201,
             "message": "Sections created successfully",
@@ -372,6 +371,7 @@ class SectionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
             updated_sections = Section.objects.filter(department=dept).order_by('sections')
             serializer = self.get_serializer(updated_sections, many=True)
 
+        invalidate_option_cache("Section")
         return Response({
             "code": 200,
             "message": "Sections updated successfully",
@@ -381,6 +381,7 @@ class SectionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         Section.objects.filter(department=instance.department).delete()
+        invalidate_option_cache("Section")
         return Response({"code": 200, "message": "Sections deleted successfully"}, status=status.HTTP_200_OK)
 
 
@@ -415,7 +416,7 @@ class CollegeHeaderViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 # ─── Exam Type ─────────────────────────────────────────────────────
 
-class ExamTypeViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+class ExamTypeViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
     queryset = ExamType.objects.all().order_by('id')
     serializer_class = ExamTypeSerializer
     permission_classes = [ExamTypePermission]
@@ -444,7 +445,7 @@ class ExamTypeViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 # ─── Exam ──────────────────────────────────────────────────────────
 
-class ExamViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+class ExamViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Exam.objects.all().order_by('id')
     serializer_class = ExamSerializer
     permission_classes = [ExamPermission]
@@ -473,7 +474,7 @@ class ExamViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 # ─── Quota ──────────────────────────────────────────────────────────
 
-class QuotaViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+class QuotaViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
     queryset = Quota.objects.all().order_by('id')
     serializer_class = QuotaSerializer
     permission_classes = [QuotaPermission]

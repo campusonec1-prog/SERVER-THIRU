@@ -66,6 +66,10 @@ class ExamTimetable(TrackingModel):
 
     class Meta:
         db_table = 'exam_timetables'
+        indexes = [
+            models.Index(fields=['department', 'batch', 'section', 'exam']),
+            models.Index(fields=['exam_date']),
+        ]
 
     def __str__(self):
         return f"{self.exam.exam_name} - {self.department.department_name} ({self.exam_date})"
@@ -177,6 +181,11 @@ class ClassTimetable(TrackingModel):
     class Meta:
         db_table = 'class_timetables'
         unique_together = ('academic_year', 'day', 'period', 'department', 'batch', 'semester', 'section', 'from_date')
+        indexes = [
+            models.Index(fields=['faculty']),
+            models.Index(fields=['department', 'batch', 'section']),
+            models.Index(fields=['day', 'period']),
+        ]
 
     def __str__(self):
         subject_str = f" - {self.subject.subject_code}" if self.subject else ""

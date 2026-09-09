@@ -29,6 +29,11 @@ class Subject(TrackingModel):
 
     class Meta:
         db_table = 'subjects'
+        indexes = [
+            models.Index(fields=['department', 'regulation']),
+            models.Index(fields=['department', 'semester']),
+            models.Index(fields=['is_active']),
+        ]
 
     def __str__(self):
         return f"{self.subject_code} - {self.subject_name}"
@@ -82,6 +87,10 @@ class SharedNotes(TrackingModel):
     class Meta:
         db_table = 'shared_notes'
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['department', 'batch', 'semester', 'section']),
+            models.Index(fields=['subject']),
+        ]
 
     def __str__(self):
         return f"{self.subject.subject_code} - {self.folder_name} - {self.file_name}"

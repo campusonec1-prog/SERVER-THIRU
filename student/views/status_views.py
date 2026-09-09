@@ -2,7 +2,7 @@ import logging
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from django.http import Http404
-from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied, ValidationError
+from common.caching import CachedOptionViewSetMixin
 from ..models import StudentStatus
 from ..serializers import StudentStatusSerializer
 from ..permissions import StudentStatusPermission
@@ -10,7 +10,7 @@ from ..permissions import StudentStatusPermission
 logger = logging.getLogger(__name__)
 
 
-class StudentStatusViewSet(viewsets.ModelViewSet):
+class StudentStatusViewSet(CachedOptionViewSetMixin, viewsets.ModelViewSet):
     queryset = StudentStatus.objects.all().order_by('id')
     serializer_class = StudentStatusSerializer
     permission_classes = [StudentStatusPermission]

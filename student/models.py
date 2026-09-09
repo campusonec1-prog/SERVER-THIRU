@@ -107,6 +107,11 @@ class Student(TrackingModel):
             models.Index(fields=['department', 'batch', 'section']),
             models.Index(fields=['is_bus', 'bus']),
             models.Index(fields=['is_hostler']),
+            models.Index(fields=['status']),
+            models.Index(fields=['quota']),
+            models.Index(fields=['user']),
+            models.Index(fields=['roll_number']),
+            models.Index(fields=['register_number']),
         ]
 
     def __str__(self):
@@ -147,6 +152,8 @@ class Marks(TrackingModel):
         indexes = [
             models.Index(fields=['student', 'exam']),
             models.Index(fields=['exam', 'subject']),
+            models.Index(fields=['student', 'subject']),
+            models.Index(fields=['created_by']),
         ]
 
     def __str__(self):
@@ -171,6 +178,10 @@ class CounsellingReport(TrackingModel):
 
     class Meta:
         db_table = 'counselling_reports'
+        indexes = [
+            models.Index(fields=['student', 'report_date']),
+            models.Index(fields=['semester']),
+        ]
 
     def __str__(self):
         return f"Counselling Report for {self.student.roll_number} on {self.report_date}"
@@ -283,6 +294,11 @@ class FacultyActivity(TrackingModel):
 
     class Meta:
         db_table = 'faculty_activities'
+        indexes = [
+            models.Index(fields=['timetable', 'date']),
+            models.Index(fields=['date']),
+            models.Index(fields=['status']),
+        ]
 
     def __str__(self):
         return f"Activity on {self.date} for {self.timetable}"
@@ -311,6 +327,10 @@ class StudentAttendance(TrackingModel):
     class Meta:
         db_table = 'student_attendances'
         unique_together = ('faculty_activity', 'student')
+        indexes = [
+            models.Index(fields=['faculty_activity', 'status']),
+            models.Index(fields=['student', 'status']),
+        ]
 
     def __str__(self):
         return f"{self.student.roll_number} - {self.status} (Activity {self.faculty_activity.id})"

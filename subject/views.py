@@ -3,6 +3,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied
+from common.caching import get_option_cache_version, invalidate_option_cache
+from django.core.cache import cache
 from .models import Subject, SharedNotes
 from .serializers import SubjectSerializer, SharedNotesSerializer
 from .permissions import SubjectPermission
@@ -61,6 +63,7 @@ class SubjectViewSet(viewsets.ModelViewSet):
         from users.models import User as StandardUser
         tracking_user = user if isinstance(user, StandardUser) else None
         instance = serializer.save(created_by=tracking_user, updated_by=tracking_user)
+        invalidate_option_cache("Subject")
         self._broadcast_change(instance, 'subject_created')
 
     def perform_update(self, serializer):
@@ -68,11 +71,13 @@ class SubjectViewSet(viewsets.ModelViewSet):
         from users.models import User as StandardUser
         tracking_user = user if isinstance(user, StandardUser) else None
         instance = serializer.save(updated_by=tracking_user)
+        invalidate_option_cache("Subject")
         self._broadcast_change(instance, 'subject_updated')
 
     def perform_destroy(self, instance):
         subject_id = instance.id
         instance.delete()
+        invalidate_option_cache("Subject")
         self._broadcast_delete(subject_id)
 
     def _broadcast_change(self, instance, event_name):
@@ -116,6 +121,15 @@ class SubjectViewSet(viewsets.ModelViewSet):
             pass
 
     def list(self, request, *args, **kwargs):
+        if request.query_params.get('no_cache') != 'true':
+            version = get_option_cache_version("Subject")
+            cache_key = f"opt_cache:Subject:v{version}:{request.get_full_path()}"
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return Response(cached, status=status.HTTP_200_OK)
+        else:
+            cache_key = None
+
         queryset = self.get_queryset()
         
         # Filtering parameters
@@ -150,18 +164,24 @@ class SubjectViewSet(viewsets.ModelViewSet):
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             paginated_response = self.get_paginated_response(serializer.data)
-            return Response({
+            resp_dict = {
                 "code": 200,
                 "message": "Subjects listed successfully",
                 "data": paginated_response.data
-            }, status=status.HTTP_200_OK)
+            }
+            if cache_key:
+                cache.set(cache_key, resp_dict, timeout=3600)
+            return Response(resp_dict, status=status.HTTP_200_OK)
 
         serializer = self.get_serializer(queryset, many=True)
-        return Response({
+        resp_dict = {
             "code": 200,
             "message": "Subjects listed successfully",
             "data": serializer.data
-        }, status=status.HTTP_200_OK)
+        }
+        if cache_key:
+            cache.set(cache_key, resp_dict, timeout=3600)
+        return Response(resp_dict, status=status.HTTP_200_OK)
 
     def retrieve(self, request, *args, **kwargs):
         response = super().retrieve(request, *args, **kwargs)
