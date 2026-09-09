@@ -37,6 +37,7 @@ urlpatterns = [
     re_path(r'^stops/remove/(?P<pk>\d+)/?$', RouteStopViewSet.as_view({'delete': 'destroy'}), name='stop-remove'),
 
     # Expense Endpoints
+    re_path(r'^expenses/export-pdf/?$', TransportExpenseViewSet.as_view({'get': 'export_pdf'}), name='expense-export-pdf'),
     re_path(r'^expenses/create/?$', TransportExpenseViewSet.as_view({'post': 'create'}), name='expense-create'),
     re_path(r'^expenses/list/?$', TransportExpenseViewSet.as_view({'get': 'list'}), name='expense-list'),
     re_path(r'^expenses/detail/(?P<pk>\d+)/?$', TransportExpenseViewSet.as_view({'get': 'retrieve'}), name='expense-detail'),

@@ -1,9 +1,19 @@
+import io
 import logging
+from django.http import Http404, HttpResponse
+from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.http import Http404
+from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied, ValidationError
+
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.pdfgen import canvas
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 from common.pagination import CustomPageNumberPagination
 from .models import Driver, Bus, TransportRoute, RouteStop, TransportExpense
@@ -14,6 +24,40 @@ from .serializers import (
     RouteStopSerializer,
     TransportExpenseSerializer
 )
+
+class NumberedCanvas(canvas.Canvas):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._saved_page_states = []
+
+    def showPage(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        num_pages = len(self._saved_page_states)
+        for state in self._saved_page_states:
+            self.__dict__.update(state)
+            self.draw_page_number(num_pages)
+            canvas.Canvas.showPage(self)
+        canvas.Canvas.save(self)
+
+    def draw_page_number(self, page_count):
+        self.saveState()
+        self.setFont("Helvetica", 8)
+        self.setFillColor(colors.HexColor("#64748b"))
+        
+        footer_text = "TEC IMS · Transport Operations · Transport Expense Statement Report"
+        page_text = f"Page {self._pageNumber} of {page_count}"
+        
+        self.setStrokeColor(colors.HexColor("#e2e8f0"))
+        self.setLineWidth(0.5)
+        self.line(20, 25, 821, 25)
+        
+        self.drawString(20, 14, footer_text)
+        self.drawRightString(821, 14, page_text)
+        self.restoreState()
+
 
 logger = logging.getLogger(__name__)
 
@@ -504,4 +548,234 @@ class TransportExpenseViewSet(BaseTransportViewSet):
             "code": 200,
             "message": "Transport expense record deleted successfully."
         }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='export-pdf')
+    def export_pdf(self, request, *args, **kwargs):
+        qs = self.filter_queryset(self.get_queryset()).order_by('-expense_date_time')
+
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=landscape(A4),
+            leftMargin=20,
+            rightMargin=20,
+            topMargin=20,
+            bottomMargin=35
+        )
+
+        styles = getSampleStyleSheet()
+
+        title_style = ParagraphStyle(
+            'ReportTitle',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=15,
+            leading=18,
+            textColor=colors.HexColor('#0f172a')
+        )
+        subtitle_style = ParagraphStyle(
+            'ReportSubtitle',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=8.5,
+            leading=11,
+            textColor=colors.HexColor('#475569')
+        )
+        meta_style = ParagraphStyle(
+            'ReportMeta',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=8,
+            leading=11,
+            textColor=colors.HexColor('#475569')
+        )
+        th_style = ParagraphStyle(
+            'TableHeader',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=8,
+            leading=10,
+            textColor=colors.white,
+            alignment=TA_CENTER
+        )
+        td_style = ParagraphStyle(
+            'TableBody',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=7.5,
+            leading=9.5,
+            textColor=colors.HexColor('#1e293b')
+        )
+        tf_label = ParagraphStyle(
+            'TableFooterLabel',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=8.5,
+            leading=10.5,
+            alignment=TA_RIGHT,
+            textColor=colors.HexColor('#0f172a')
+        )
+        tf_amount = ParagraphStyle(
+            'TableFooterAmount',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=8.5,
+            leading=10.5,
+            textColor=colors.HexColor('#0f172a')
+        )
+
+        elements = []
+
+        # Header Title
+        elements.append(Paragraph("THIRUMALAI ENGINEERING COLLEGE", subtitle_style))
+        elements.append(Paragraph("TRANSPORT OPERATIONS & FLEET EXPENSE REPORT", title_style))
+        elements.append(Spacer(1, 4))
+
+        now_str = timezone.localtime(timezone.now()).strftime("%d-%m-%Y %I:%M %p")
+
+        params = request.query_params
+        active_filters = []
+        if params.get('bus_id'):
+            bus_obj = Bus.objects.filter(id=params.get('bus_id')).first()
+            if bus_obj:
+                active_filters.append(f"Vehicle: {bus_obj.bus_number} ({bus_obj.registration_number})")
+        if params.get('incharge_driver_id'):
+            drv_obj = Driver.objects.filter(id=params.get('incharge_driver_id')).first()
+            if drv_obj:
+                active_filters.append(f"Incharge: {drv_obj.driver_name}")
+        if params.get('expense_type'):
+            active_filters.append(f"Type: {params.get('expense_type').title()}")
+        if params.get('payment_mode'):
+            active_filters.append(f"Payment: {params.get('payment_mode').upper()}")
+        if params.get('search'):
+            active_filters.append(f"Search: \"{params.get('search')}\"")
+
+        filter_summary_str = " | ".join(active_filters) if active_filters else "All Records (No Filters)"
+
+        total_count = qs.count()
+        total_amount = sum(float(e.amount or 0) for e in qs)
+
+        meta_p = Paragraph(
+            f"<b>Generated:</b> {now_str} &nbsp;&nbsp;|&nbsp;&nbsp; "
+            f"<b>Active Filters:</b> {filter_summary_str} &nbsp;&nbsp;|&nbsp;&nbsp; "
+            f"<b>Total Count:</b> {total_count} records &nbsp;&nbsp;|&nbsp;&nbsp; "
+            f"<b>Total Expense:</b> Rs. {total_amount:,.2f}",
+            meta_style
+        )
+        elements.append(meta_p)
+        elements.append(Spacer(1, 6))
+        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#cbd5e1"), spaceBefore=0, spaceAfter=8))
+
+        # Table Header
+        table_data = [[
+            Paragraph("#", th_style),
+            Paragraph("Date & Time", th_style),
+            Paragraph("Vehicle Number", th_style),
+            Paragraph("Vehicle Driver", th_style),
+            Paragraph("Incharge Driver", th_style),
+            Paragraph("Expense & Payment", th_style),
+            Paragraph("Amount & Bill #", th_style),
+            Paragraph("Vendor & Odometer", th_style),
+            Paragraph("Description", th_style),
+        ]]
+
+        for idx, item in enumerate(qs, start=1):
+            if item.expense_date_time:
+                local_dt = timezone.localtime(item.expense_date_time) if timezone.is_aware(item.expense_date_time) else item.expense_date_time
+                date_time_str = local_dt.strftime("%d-%m-%Y<br/>%I:%M %p")
+            else:
+                date_time_str = "-"
+
+            bus_num = item.bus.bus_number if item.bus else "-"
+            reg_num = item.bus.registration_number if item.bus else ""
+            veh_str = f"<b>{bus_num}</b><br/><font color='#64748b'>({reg_num})</font>" if reg_num else f"<b>{bus_num}</b>"
+
+            perm_driver = item.bus.driver if (item.bus and item.bus.driver) else None
+            if perm_driver:
+                drv_phone = f"<br/><font color='#64748b'>{perm_driver.phone_number}</font>" if perm_driver.phone_number else ""
+                veh_driver_str = f"<b>{perm_driver.driver_name}</b>{drv_phone}"
+            else:
+                veh_driver_str = "<font color='#94a3b8'>Not Assigned</font>"
+
+            inc_driver = item.incharge_driver
+            if inc_driver:
+                inc_phone = f"<br/><font color='#64748b'>{inc_driver.phone_number}</font>" if inc_driver.phone_number else ""
+                veh_inc_str = f"<b>{inc_driver.driver_name}</b>{inc_phone}"
+            else:
+                veh_inc_str = "-"
+
+            exp_type = (item.expense_type or "-").title()
+            pay_mode = (item.payment_mode or "-").upper()
+            exp_pay_str = f"<b>{exp_type}</b><br/><font color='#475569'>({pay_mode})</font>"
+
+            amt_str = f"<b>Rs. {float(item.amount or 0):,.2f}</b>"
+            inv_str = f"<br/><font color='#64748b'>#{item.invoice_number}</font>" if item.invoice_number else ""
+            amt_bill_str = f"{amt_str}{inv_str}"
+
+            vendor_str = item.vendor or "-"
+            odo_str = f"<br/><font color='#0284c7'>{float(item.odometer_reading):,.1f} KM</font>" if item.odometer_reading is not None else ""
+            vendor_odo_str = f"<b>{vendor_str}</b>{odo_str}"
+
+            desc_str = item.description or "-"
+
+            table_data.append([
+                Paragraph(str(idx), td_style),
+                Paragraph(date_time_str, td_style),
+                Paragraph(veh_str, td_style),
+                Paragraph(veh_driver_str, td_style),
+                Paragraph(veh_inc_str, td_style),
+                Paragraph(exp_pay_str, td_style),
+                Paragraph(amt_bill_str, td_style),
+                Paragraph(vendor_odo_str, td_style),
+                Paragraph(desc_str, td_style),
+            ])
+
+        # Footer Row (Totals)
+        table_data.append([
+            Paragraph("TOTAL EXPENSE AMOUNT:", tf_label),
+            Paragraph("", td_style),
+            Paragraph("", td_style),
+            Paragraph("", td_style),
+            Paragraph("", td_style),
+            Paragraph("", td_style),
+            Paragraph(f"<b>Rs. {total_amount:,.2f}</b>", tf_amount),
+            Paragraph("", td_style),
+            Paragraph("", td_style),
+        ])
+
+        col_widths = [25, 75, 85, 95, 95, 75, 85, 110, 155]
+
+        t_style = TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1e293b")),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ('SPAN', (0, -1), (5, -1)),
+            ('SPAN', (7, -1), (8, -1)),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor("#f1f5f9")),
+        ])
+
+        for i in range(1, len(table_data) - 1):
+            if i % 2 == 0:
+                t_style.add('BACKGROUND', (0, i), (-1, i), colors.HexColor("#f8fafc"))
+
+        t = Table(table_data, colWidths=col_widths, repeatRows=1)
+        t.setStyle(t_style)
+        elements.append(t)
+
+        doc.build(elements, canvasmaker=NumberedCanvas)
+
+        pdf_value = buffer.getvalue()
+        buffer.close()
+
+        response = HttpResponse(pdf_value, content_type='application/pdf')
+        filename = f"Transport_Expense_Report_{timezone.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
 
