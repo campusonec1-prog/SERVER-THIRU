@@ -6,17 +6,7 @@ class DynamicFormsConfig(AppConfig):
     name = 'dynamic_forms'
 
     def ready(self):
-        # Avoid querying database during migrations or tests to prevent startup warnings/errors
-        import sys
-        ignored_cmds = {'migrate', 'makemigrations', 'test', 'collectstatic', 'check', 'showmigrations'}
-        if any(cmd in sys.argv for cmd in ignored_cmds):
-            return
-
-        # Run self-healing department sync on startup
-        try:
-            self.sync_application_departments()
-        except Exception:
-            pass
+        pass
 
     def sync_application_departments(self):
         try:
