@@ -13,7 +13,17 @@ logger = logging.getLogger(__name__)
 
 
 class FacultyActivityViewSet(viewsets.ModelViewSet):
-    queryset = FacultyActivity.objects.all().order_by('-date', '-id')
+    queryset = FacultyActivity.objects.select_related(
+        'timetable', 
+        'timetable__subject', 
+        'timetable__activity_type', 
+        'timetable__period', 
+        'timetable__department', 
+        'timetable__batch', 
+        'timetable__section', 
+        'timetable__day', 
+        'created_by'
+    ).all().order_by('-date', '-id')
     serializer_class = FacultyActivitySerializer
     permission_classes = [AttendancePermission]
 
@@ -155,7 +165,7 @@ class FacultyActivityViewSet(viewsets.ModelViewSet):
 
 
 class StudentAttendanceViewSet(viewsets.ModelViewSet):
-    queryset = StudentAttendance.objects.all().order_by('id')
+    queryset = StudentAttendance.objects.select_related('student', 'student__user', 'faculty_activity', 'created_by').all().order_by('id')
     serializer_class = StudentAttendanceSerializer
     permission_classes = [AttendancePermission]
 

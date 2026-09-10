@@ -430,7 +430,7 @@ class SubjectViewSet(viewsets.ModelViewSet):
 
 
 class SharedNotesViewSet(viewsets.ModelViewSet):
-    queryset = SharedNotes.objects.all().order_by('-created_at')
+    queryset = SharedNotes.objects.select_related('department', 'batch', 'semester', 'section', 'subject', 'uploaded_by').all().order_by('-created_at')
     serializer_class = SharedNotesSerializer
     permission_classes = [permissions.IsAuthenticated]
 

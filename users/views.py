@@ -481,11 +481,13 @@ class UserDetailsViewSet(viewsets.ModelViewSet):
         except AttributeError:
             pass
 
+        qs = UserDetails.objects.select_related('user', 'department').all().order_by('id')
+
         if is_admin:
-            return UserDetails.objects.all().order_by('id')
+            return qs
 
         if isinstance(user, User):
-            return UserDetails.objects.filter(user=user).order_by('id')
+            return qs.filter(user=user)
 
         return UserDetails.objects.none()
 

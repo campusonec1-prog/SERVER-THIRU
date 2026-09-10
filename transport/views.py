@@ -238,7 +238,7 @@ class DriverViewSet(BaseTransportViewSet):
 
 
 class BusViewSet(BaseTransportViewSet):
-    queryset = Bus.objects.select_related('driver').all().order_by('-id')
+    queryset = Bus.objects.select_related('driver', 'route').all().order_by('-id')
     serializer_class = BusSerializer
 
     def get_queryset(self):

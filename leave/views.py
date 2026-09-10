@@ -103,7 +103,14 @@ class LeavePolicyViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 
 class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = FacultyLeave.objects.all().order_by('-id')
+    queryset = FacultyLeave.objects.select_related(
+        'applicant', 'department', 'academic_year'
+    ).prefetch_related(
+        'substitutions', 'substitutions__period', 'substitutions__day',
+        'substitutions__original_faculty', 'substitutions__substitute_faculty',
+        'substitutions__department', 'substitutions__batch',
+        'substitutions__section', 'substitutions__subject'
+    ).all().order_by('-id')
     serializer_class = FacultyLeaveSerializer
     permission_classes = [FacultyLeavePermission]
     model_label = "Faculty Leave"
@@ -519,7 +526,14 @@ class ClassSubstitutionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 
 class NotificationViewSet(viewsets.ModelViewSet):
-    queryset = Notification.objects.all().order_by('-created_at')
+    queryset = Notification.objects.select_related(
+        'sender', 'related_substitution', 'related_substitution__period',
+        'related_substitution__day', 'related_substitution__original_faculty',
+        'related_substitution__substitute_faculty', 'related_substitution__department',
+        'related_substitution__batch', 'related_substitution__section',
+        'related_substitution__subject', 'related_leave', 'related_leave__applicant',
+        'related_leave__department'
+    ).all().order_by('-created_at')
     serializer_class = NotificationSerializer
     permission_classes = [NotificationPermission]
 
@@ -527,7 +541,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if not user or not user.is_authenticated:
             return Notification.objects.none()
-        return Notification.objects.filter(user=user).order_by('-created_at')
+        return super().get_queryset().filter(user=user)
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)

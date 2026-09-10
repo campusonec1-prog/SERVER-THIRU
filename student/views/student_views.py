@@ -52,7 +52,7 @@ def _get_bus_to(student):
 
 
 class StudentViewSet(viewsets.ModelViewSet):
-    queryset = Student.objects.select_related('department', 'batch', 'section', 'status', 'quota', 'bus', 'route', 'stop', 'user').all().order_by('id')
+    queryset = Student.objects.select_related('department', 'batch', 'section', 'status', 'quota', 'bus', 'route', 'stop', 'user').prefetch_related('user__applications').all().order_by('id')
     serializer_class = StudentSerializer
     permission_classes = [StudentPermission]
 
@@ -270,7 +270,10 @@ class StudentViewSet(viewsets.ModelViewSet):
         """
         from users.models import User
 
-        student = get_object_or_404(Student, pk=pk)
+        student = get_object_or_404(
+            Student.objects.select_related('department', 'department__program', 'batch', 'quota', 'status', 'bus', 'route', 'stop', 'user', 'admission_slip', 'fees_payment').prefetch_related('user__applications'),
+            pk=pk
+        )
         app = student.user.applications.first() if student.user else None
         fd = app.form_data if (app and app.form_data and isinstance(app.form_data, dict)) else {}
 
@@ -387,9 +390,15 @@ class StudentViewSet(viewsets.ModelViewSet):
                 if url:
                     scanned_urls.append(url)
 
-        # If we have URLs, try to parse with pypdf
+        # If we have URLs, try to parse with pypdf ONLY when scan_pdf parameter is explicitly passed
+        # and admission_slip does not already exist with saved EMIS/UMIS numbers.
+        # Synchronous HTTP downloads over the network block response times by 3-8+ seconds per request.
         parsed_text = ""
-        if scanned_urls:
+        should_scan_pdf = (
+            request.GET.get('scan_pdf') == 'true' and 
+            (not admission_slip or not (admission_slip.emis_number and admission_slip.umis_number))
+        )
+        if scanned_urls and should_scan_pdf:
             from pypdf import PdfReader
             for url in scanned_urls:
                 try:
