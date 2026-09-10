@@ -63,7 +63,7 @@ class MarksViewSet(viewsets.ViewSet):
         return super().handle_exception(exc)
 
     def list(self, request):
-        queryset = Marks.objects.select_related('student', 'subject', 'exam', 'exam__exam_type', 'created_by').all().order_by('id')
+        queryset = Marks.objects.select_related('student', 'student__user', 'student__department', 'student__batch', 'student__section', 'subject', 'subject__semester', 'exam', 'exam__exam_type', 'created_by').all().order_by('id')
         
         user = request.user
         role_name = ""
@@ -94,11 +94,52 @@ class MarksViewSet(viewsets.ViewSet):
             else:
                 queryset = queryset.filter(student__section__sections__iexact=section_id)
 
-        serializer = MarksSerializer(queryset, many=True)
+        raw_data = list(queryset.values(
+            'id', 'student_id', 'exam_id', 'subject_id', 'subject_category', 'marks_obtained',
+            'created_at', 'updated_at', 'created_by_id', 'updated_by_id',
+            'student__roll_number', 'student__register_number', 'student__user__name',
+            'student__department_id', 'student__department__department_name',
+            'student__batch_id', 'student__batch__batch',
+            'student__section_id', 'student__section__sections',
+            'exam__exam_name', 'subject__subject_name', 'subject__subject_code', 'subject__semester_id',
+            'created_by__name'
+        ))
+
+        data = []
+        for m in raw_data:
+            sec = m['student__section__sections']
+            sec_str = ", ".join(sec) if isinstance(sec, list) else (str(sec) if sec else "")
+            data.append({
+                'id': m['id'],
+                'student_id': m['student_id'],
+                'exam_id': m['exam_id'],
+                'subject_id': m['subject_id'],
+                'subject_category': m['subject_category'],
+                'marks_obtained': str(m['marks_obtained']) if m['marks_obtained'] is not None else None,
+                'created_at': m['created_at'].isoformat() if m['created_at'] else None,
+                'updated_at': m['updated_at'].isoformat() if m['updated_at'] else None,
+                'created_by': m['created_by_id'],
+                'updated_by': m['updated_by_id'],
+                'student_roll': m['student__roll_number'],
+                'student_register': m['student__register_number'],
+                'student_name': m['student__user__name'] or "Unknown",
+                'department_id': m['student__department_id'],
+                'department_name': m['student__department__department_name'] or "",
+                'batch_id': m['student__batch_id'],
+                'batch_name': m['student__batch__batch'] or "",
+                'section_id': m['student__section_id'],
+                'section_name': sec_str,
+                'exam_name': m['exam__exam_name'] or "",
+                'subject_name': m['subject__subject_name'] or "",
+                'subject_code': m['subject__subject_code'] or "",
+                'semester_id': m['subject__semester_id'],
+                'entered_by_name': m['created_by__name'] or "—",
+            })
+
         return Response({
             "code": 200,
             "message": "Marks records listed successfully.",
-            "data": serializer.data
+            "data": data
         }, status=status.HTTP_200_OK)
 
     def retrieve(self, request, pk=None):
@@ -109,7 +150,7 @@ class MarksViewSet(viewsets.ViewSet):
         except Student.DoesNotExist:
             raise Http404()
         
-        queryset = Marks.objects.filter(student_id=student_id).order_by('id')
+        queryset = Marks.objects.select_related('student', 'student__user', 'student__department', 'student__batch', 'student__section', 'subject', 'subject__semester', 'exam', 'exam__exam_type', 'created_by').filter(student_id=student_id).order_by('id')
         serializer = MarksSerializer(queryset, many=True)
         return Response({
             "code": 200,
