@@ -765,6 +765,95 @@ class MarksViewSet(viewsets.ViewSet):
         ]))
         story.append(marks_table)
 
+        story.append(Spacer(1, 15))
+
+        total_students_cnt = len(students)
+        appeared_cnt = 0
+        absent_cnt = 0
+        passed_cnt = 0
+        failed_cnt = 0
+
+        for st in students:
+            raw_v = marks_map.get(st.id)
+            if raw_v is None or str(raw_v).strip() == '' or str(raw_v).strip().upper() in ['AB', 'ABSENT', 'UA', '-']:
+                absent_cnt += 1
+            else:
+                appeared_cnt += 1
+                res_str = evaluate_result(raw_v)
+                if 'PASS' in res_str:
+                    passed_cnt += 1
+                else:
+                    failed_cnt += 1
+
+        pass_pct_app = f"{round((passed_cnt / appeared_cnt * 100), 2):.2f}%" if appeared_cnt > 0 else "0.00%"
+        pass_pct_tot = f"{round((passed_cnt / total_students_cnt * 100), 2):.2f}%" if total_students_cnt > 0 else "0.00%"
+
+        summ_tbl_hdr_style = ParagraphStyle(
+            name='SummTblHdrMs',
+            fontName='Helvetica-Bold',
+            fontSize=8,
+            leading=10,
+            alignment=1,
+            textColor=colors.black
+        )
+        summ_tbl_cell_style = ParagraphStyle(
+            name='SummTblCellMs',
+            fontName='Helvetica',
+            fontSize=8,
+            leading=10,
+            alignment=1,
+            textColor=colors.black
+        )
+        summ_tbl_pass_style = ParagraphStyle(
+            name='SummTblPassMs',
+            fontName='Helvetica-Bold',
+            fontSize=8,
+            leading=10,
+            alignment=1,
+            textColor=colors.HexColor('#15803D')
+        )
+        summ_tbl_fail_style = ParagraphStyle(
+            name='SummTblFailMs',
+            fontName='Helvetica-Bold',
+            fontSize=8,
+            leading=10,
+            alignment=1,
+            textColor=colors.HexColor('#B91C1C')
+        )
+
+        summary_table_data = [
+            [
+                Paragraph("<b>Total Students</b>", summ_tbl_hdr_style),
+                Paragraph("<b>Appeared</b>", summ_tbl_hdr_style),
+                Paragraph("<b>Absent</b>", summ_tbl_hdr_style),
+                Paragraph("<b>Passed</b>", summ_tbl_hdr_style),
+                Paragraph("<b>Failed</b>", summ_tbl_hdr_style),
+                Paragraph("<b>Pass % (Appeared)</b>", summ_tbl_hdr_style),
+                Paragraph("<b>Pass % (Total)</b>", summ_tbl_hdr_style),
+            ],
+            [
+                Paragraph(str(total_students_cnt), summ_tbl_cell_style),
+                Paragraph(str(appeared_cnt), summ_tbl_cell_style),
+                Paragraph(str(absent_cnt), summ_tbl_cell_style),
+                Paragraph(str(passed_cnt), summ_tbl_pass_style),
+                Paragraph(str(failed_cnt), summ_tbl_fail_style),
+                Paragraph(pass_pct_app, summ_tbl_pass_style),
+                Paragraph(pass_pct_tot, summ_tbl_pass_style),
+            ]
+        ]
+        summary_table = Table(summary_table_data, colWidths=[75, 75, 75, 75, 75, 80, 80])
+        summary_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F5F5F5')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        story.append(summary_table)
+
         story.append(Spacer(1, 35))
         sig_data = [[
             Paragraph("<b>Faculty In-Charge</b>", meta_val_style),
@@ -3264,16 +3353,17 @@ class MarksViewSet(viewsets.ViewSet):
 
         student_fail_counts = {}
         for st in students:
-            st_comp_marks = {}
+            st_subj_marks = {}
             for m in all_marks:
                 if m.student_id == st.id:
-                    cat_key = (m.subject_id, m.subject_category or 'THEORY')
-                    st_comp_marks[cat_key] = m.marks_obtained
+                    if m.subject_id not in st_subj_marks:
+                        st_subj_marks[m.subject_id] = []
+                    st_subj_marks[m.subject_id].append(m.marks_obtained)
 
             fail_count = 0
-            for mark_val in st_comp_marks.values():
-                is_abs, is_pass = evaluate_mark_spr(mark_val)
-                if not is_pass:
+            for subj_id, mark_vals in st_subj_marks.items():
+                sub_passes = [evaluate_mark_spr(v)[1] for v in mark_vals]
+                if not any(sub_passes):
                     fail_count += 1
             student_fail_counts[st.id] = fail_count
 
