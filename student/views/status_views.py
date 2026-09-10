@@ -1,13 +1,35 @@
 import logging
 from rest_framework import viewsets, status
 from rest_framework.response import Response
+from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied, ValidationError
 from django.http import Http404
-from common.caching import CachedOptionViewSetMixin
+from common.caching import CachedOptionViewSetMixin, invalidate_option_cache
 from ..models import StudentStatus
 from ..serializers import StudentStatusSerializer
 from ..permissions import StudentStatusPermission
 
 logger = logging.getLogger(__name__)
+
+
+def broadcast_event(model_name, event_name, payload):
+    try:
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                'realtime_updates',
+                {
+                    'type': 'broadcast_update',
+                    'data': {
+                        'model': model_name,
+                        'event': event_name,
+                        'payload': payload
+                    }
+                }
+            )
+    except Exception:
+        pass
 
 
 class StudentStatusViewSet(CachedOptionViewSetMixin, viewsets.ModelViewSet):
@@ -59,13 +81,23 @@ class StudentStatusViewSet(CachedOptionViewSetMixin, viewsets.ModelViewSet):
         user = self.request.user if self.request.user and self.request.user.is_authenticated else None
         from users.models import User as StandardUser
         tracking_user = user if isinstance(user, StandardUser) else None
-        serializer.save(created_by=tracking_user, updated_by=tracking_user)
+        instance = serializer.save(created_by=tracking_user, updated_by=tracking_user)
+        invalidate_option_cache(self.get_cache_model_name())
+        broadcast_event('StudentStatus', 'status_created', StudentStatusSerializer(instance).data)
 
     def perform_update(self, serializer):
         user = self.request.user if self.request.user and self.request.user.is_authenticated else None
         from users.models import User as StandardUser
         tracking_user = user if isinstance(user, StandardUser) else None
-        serializer.save(updated_by=tracking_user)
+        instance = serializer.save(updated_by=tracking_user)
+        invalidate_option_cache(self.get_cache_model_name())
+        broadcast_event('StudentStatus', 'status_updated', StudentStatusSerializer(instance).data)
+
+    def perform_destroy(self, instance):
+        inst_id = instance.id
+        super().perform_destroy(instance)
+        invalidate_option_cache(self.get_cache_model_name())
+        broadcast_event('StudentStatus', 'status_deleted', {'id': inst_id})
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
