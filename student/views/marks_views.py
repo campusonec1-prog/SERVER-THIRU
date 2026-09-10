@@ -2142,7 +2142,7 @@ class MarksViewSet(viewsets.ViewSet):
                 college_header_parts.append(header_name)
             if exam_title_str:
                 college_header_parts.append(exam_title_str)
-            college_header_parts.append("INTERNAL EXAM RESULT ANALYSIS")
+            college_header_parts.append("EXAM RESULT ANALYSIS")
             header_title_text = "<br/>".join(college_header_parts)
             title_paragraph = Paragraph(f"<b>{header_title_text}</b>", header_title_style)
 
@@ -2274,6 +2274,36 @@ class MarksViewSet(viewsets.ViewSet):
             
             marks_dict = {m.student_id: m.marks_obtained for m in m_qs}
 
+            is_univ_report = False
+            if exam_type_id:
+                ex_type_obj = ExamType.objects.filter(id=exam_type_id).first()
+                if ex_type_obj and 'UNIV' in ex_type_obj.exam_type_name.upper():
+                    is_univ_report = True
+            if not is_univ_report and exams:
+                for ex in exams:
+                    if ex.exam_type and 'UNIV' in ex.exam_type.exam_type_name.upper():
+                        is_univ_report = True
+                        break
+
+            active_grades_list = list(GradeSystem.objects.filter(is_active=True).order_by('-points', 'id'))
+            db_grade_names = [g.grade.strip().upper() for g in active_grades_list]
+            db_grade_set = set(db_grade_names)
+
+            has_grade_marks = any(
+                str(raw).strip().upper() in db_grade_set
+                for raw in marks_dict.values() if raw is not None
+            )
+            use_grade_distribution = is_univ_report or has_grade_marks
+
+            display_grades = []
+            seen_grades = set()
+            for g_name in db_grade_names:
+                if g_name not in seen_grades:
+                    seen_grades.add(g_name)
+                    display_grades.append(g_name)
+
+            grade_counts = {g: 0 for g in display_grades}
+
             total_students_cnt = len(students)
             appeared_cnt = 0
             absent_cnt = 0
@@ -2284,7 +2314,7 @@ class MarksViewSet(viewsets.ViewSet):
             dist_81_90 = 0
             dist_71_80 = 0
             dist_61_70 = 0
-            dist_51_60 = 0
+            dist_50_60 = 0
             dist_less_50 = 0
 
             for st in students:
@@ -2301,18 +2331,39 @@ class MarksViewSet(viewsets.ViewSet):
                     else:
                         failed_cnt += 1
 
-                    if num_val >= 91 and num_val <= 100:
-                        dist_91_100 += 1
-                    elif num_val >= 81 and num_val <= 90:
-                        dist_81_90 += 1
-                    elif num_val >= 71 and num_val <= 80:
-                        dist_71_80 += 1
-                    elif num_val >= 61 and num_val <= 70:
-                        dist_61_70 += 1
-                    elif num_val >= 51 and num_val <= 60:
-                        dist_51_60 += 1
+                    if use_grade_distribution:
+                        matched_grade = None
+                        if str_val in grade_counts:
+                            matched_grade = str_val
+                        else:
+                            for g in active_grades_list:
+                                if g.min_mark is not None and g.max_mark is not None and not (float(g.min_mark) == 0 and float(g.max_mark) == 0):
+                                    if float(g.min_mark) <= num_val <= float(g.max_mark):
+                                        matched_grade = g.grade.strip().upper()
+                                        break
+                            if not matched_grade:
+                                if not is_pass:
+                                    fail_entry = next((g for g in active_grades_list if not g.is_pass), None)
+                                    matched_grade = fail_entry.grade.strip().upper() if fail_entry else None
+
+                        if matched_grade and matched_grade in grade_counts:
+                            grade_counts[matched_grade] += 1
+                        elif str_val and str_val not in ['AB', 'ABSENT', 'UA']:
+                            display_grades.append(str_val)
+                            grade_counts[str_val] = 1
                     else:
-                        dist_less_50 += 1
+                        if num_val >= 91 and num_val <= 100:
+                            dist_91_100 += 1
+                        elif num_val >= 81 and num_val <= 90:
+                            dist_81_90 += 1
+                        elif num_val >= 71 and num_val <= 80:
+                            dist_71_80 += 1
+                        elif num_val >= 61 and num_val <= 70:
+                            dist_61_70 += 1
+                        elif num_val >= 50 and num_val <= 60:
+                            dist_50_60 += 1
+                        else:
+                            dist_less_50 += 1
 
             pass_pct_total = f"{round((passed_cnt / total_students_cnt * 100), 2):.2f}%" if total_students_cnt > 0 else "0.00%"
             pass_pct_app = f"{round((passed_cnt / appeared_cnt * 100), 2):.2f}%" if appeared_cnt > 0 else "0.00%"
@@ -2356,27 +2407,39 @@ class MarksViewSet(viewsets.ViewSet):
             story.append(stats_table)
             story.append(Spacer(1, 24))
 
-            dist_data = [
-                [
-                    Paragraph("Description", tbl_hdr_style),
-                    Paragraph("91-100", tbl_hdr_style),
-                    Paragraph("81-90", tbl_hdr_style),
-                    Paragraph("71-80", tbl_hdr_style),
-                    Paragraph("61-70", tbl_hdr_style),
-                    Paragraph("51-60", tbl_hdr_style),
-                    Paragraph("&lt;50", tbl_hdr_style)
-                ],
-                [
-                    Paragraph("<b>No. of Students</b>", tbl_hdr_style),
-                    Paragraph(str(dist_91_100), tbl_cell_center),
-                    Paragraph(str(dist_81_90), tbl_cell_center),
-                    Paragraph(str(dist_71_80), tbl_cell_center),
-                    Paragraph(str(dist_61_70), tbl_cell_center),
-                    Paragraph(str(dist_51_60), tbl_cell_center),
-                    Paragraph(str(dist_less_50), tbl_cell_center)
+            if use_grade_distribution:
+                col_count = len(display_grades)
+                desc_w = 120
+                grade_w = (525 - desc_w) / max(1, col_count)
+                dist_widths = [desc_w] + [grade_w] * col_count
+                dist_data = [
+                    [Paragraph("<b>Description</b>", tbl_hdr_style)] + [Paragraph(f"<b>{g}</b>", tbl_hdr_style) for g in display_grades],
+                    [Paragraph("<b>No. of Students</b>", tbl_hdr_style)] + [Paragraph(str(grade_counts.get(g, 0)), tbl_cell_center) for g in display_grades]
                 ]
-            ]
-            dist_table = Table(dist_data, colWidths=[130, 60, 60, 60, 60, 60, 55])
+                dist_table = Table(dist_data, colWidths=dist_widths)
+            else:
+                dist_data = [
+                    [
+                        Paragraph("Description", tbl_hdr_style),
+                        Paragraph("91-100", tbl_hdr_style),
+                        Paragraph("81-90", tbl_hdr_style),
+                        Paragraph("71-80", tbl_hdr_style),
+                        Paragraph("61-70", tbl_hdr_style),
+                        Paragraph("50-60", tbl_hdr_style),
+                        Paragraph("&lt;50", tbl_hdr_style)
+                    ],
+                    [
+                        Paragraph("<b>No. of Students</b>", tbl_hdr_style),
+                        Paragraph(str(dist_91_100), tbl_cell_center),
+                        Paragraph(str(dist_81_90), tbl_cell_center),
+                        Paragraph(str(dist_71_80), tbl_cell_center),
+                        Paragraph(str(dist_61_70), tbl_cell_center),
+                        Paragraph(str(dist_50_60), tbl_cell_center),
+                        Paragraph(str(dist_less_50), tbl_cell_center)
+                    ]
+                ]
+                dist_table = Table(dist_data, colWidths=[130, 60, 60, 60, 60, 60, 55])
+
             dist_table.setStyle(TableStyle([
                 ('GRID', (0,0), (-1,-1), 0.5, colors.black),
                 ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -2389,7 +2452,8 @@ class MarksViewSet(viewsets.ViewSet):
             story.append(dist_table)
             story.append(Spacer(1, 10))
 
-            story.append(Paragraph("<b>Minimum Pass Marks: 50 Marks</b>", ParagraphStyle(name='MinPassNote', fontName='Helvetica-Bold', fontSize=9, leading=12)))
+            if not use_grade_distribution:
+                story.append(Paragraph("<b>Minimum Pass Marks: 50 Marks</b>", ParagraphStyle(name='MinPassNote', fontName='Helvetica-Bold', fontSize=9, leading=12)))
             story.append(Spacer(1, 60))
 
             sig_data = [[
@@ -2886,28 +2950,49 @@ class MarksViewSet(viewsets.ViewSet):
                 if ex.exam_type and 'UNIV' in ex.exam_type.exam_type_name.upper():
                     is_university_exam = True
                     break
-                if any(term in ex.exam_name.upper() for term in ['APR', 'MAY', 'NOV', 'DEC', 'UNIV']):
-                    is_university_exam = True
-                    break
 
         story.append(Paragraph("<b>Overall Student Performance</b>", header_title_style))
         story.append(Spacer(1, 6))
 
         if is_university_exam:
-            student_cum_fail_counts = {st.id: 0 for st in students}
-            all_st_marks = Marks.objects.filter(student__in=students)
-            for m in all_st_marks:
-                is_abs, is_pass, num_val, str_val = evaluate_mark(m.marks_obtained)
-                if not is_pass or is_abs:
-                    if m.student_id in student_cum_fail_counts:
-                        student_cum_fail_counts[m.student_id] += 1
+            try:
+                current_sem_val = int(sem_num)
+            except (ValueError, TypeError):
+                current_sem_val = 1
 
-            cum_fail_0 = sum(1 for f in student_cum_fail_counts.values() if f == 0)
-            cum_fail_1 = sum(1 for f in student_cum_fail_counts.values() if f == 1)
-            cum_fail_2 = sum(1 for f in student_cum_fail_counts.values() if f == 2)
-            cum_fail_3 = sum(1 for f in student_cum_fail_counts.values() if f == 3)
-            cum_fail_more = sum(1 for f in student_cum_fail_counts.values() if f > 3)
-            cum_overall_pass_pct = f"{round((cum_fail_0 / total_students_val * 100), 2):.2f}%" if total_students_val > 0 else "0.00%"
+            if current_sem_val <= 1:
+                cum_fail_0 = fail_0
+                cum_fail_1 = fail_1
+                cum_fail_2 = fail_2
+                cum_fail_3 = fail_3
+                cum_fail_more = fail_more
+                cum_overall_pass_pct = overall_pass_pct
+            else:
+                from django.db.models import Q
+                univ_marks_qs = Marks.objects.filter(
+                    student__in=students,
+                    exam__exam_type__exam_type_name__icontains='University'
+                ).select_related('exam', 'subject')
+
+                student_subject_cleared = {st.id: {} for st in students}
+                for m in univ_marks_qs:
+                    is_abs, is_pass, num_val, str_val = evaluate_mark(m.marks_obtained)
+                    if m.student_id in student_subject_cleared:
+                        current_status = student_subject_cleared[m.student_id].get(m.subject_id, False)
+                        student_subject_cleared[m.student_id][m.subject_id] = current_status or is_pass
+
+                student_cum_fail_counts = {}
+                for st in students:
+                    subj_status = student_subject_cleared.get(st.id, {})
+                    standing_arrears = sum(1 for is_cleared in subj_status.values() if not is_cleared)
+                    student_cum_fail_counts[st.id] = standing_arrears
+
+                cum_fail_0 = sum(1 for f in student_cum_fail_counts.values() if f == 0)
+                cum_fail_1 = sum(1 for f in student_cum_fail_counts.values() if f == 1)
+                cum_fail_2 = sum(1 for f in student_cum_fail_counts.values() if f == 2)
+                cum_fail_3 = sum(1 for f in student_cum_fail_counts.values() if f == 3)
+                cum_fail_more = sum(1 for f in student_cum_fail_counts.values() if f > 3)
+                cum_overall_pass_pct = f"{round((cum_fail_0 / total_students_val * 100), 2):.2f}%" if total_students_val > 0 else "0.00%"
 
             summary_hdr_style = ParagraphStyle(name='SumHdr', fontName='Helvetica-Bold', fontSize=8, alignment=1)
             summary_cell_center = ParagraphStyle(name='SumCellCenter', fontName='Helvetica', fontSize=8, alignment=1)
@@ -3105,14 +3190,18 @@ class MarksViewSet(viewsets.ViewSet):
             marks_qs = marks_qs.filter(exam__in=exams)
         elif exam_type_id:
             marks_qs = marks_qs.filter(exam__exam_type_id=exam_type_id)
-        all_marks = list(marks_qs)
+        all_marks = list(marks_qs.order_by('id'))
 
         student_fail_counts = {}
         for st in students:
-            st_marks = [m for m in all_marks if m.student_id == st.id]
+            st_subject_marks = {}
+            for m in all_marks:
+                if m.student_id == st.id:
+                    st_subject_marks[m.subject_id] = m.marks_obtained
+
             fail_count = 0
-            for m in st_marks:
-                is_abs, is_pass = evaluate_mark_spr(m.marks_obtained)
+            for mark_val in st_subject_marks.values():
+                is_abs, is_pass = evaluate_mark_spr(mark_val)
                 if not is_pass:
                     fail_count += 1
             student_fail_counts[st.id] = fail_count
