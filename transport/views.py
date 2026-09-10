@@ -390,7 +390,7 @@ class TransportRouteViewSet(BaseTransportViewSet):
 
 
 class RouteStopViewSet(BaseTransportViewSet):
-    queryset = RouteStop.objects.select_related('route', 'stop').all().order_by('route', 'stop_order')
+    queryset = RouteStop.objects.select_related('route').all().order_by('route', 'stop_order')
     serializer_class = RouteStopSerializer
 
     def get_queryset(self):
