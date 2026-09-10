@@ -218,8 +218,24 @@ class StudentSerializer(serializers.ModelSerializer):
                             if isinstance(val, dict) and val.get('photo'):
                                 photo_url = val.get('photo')
                                 break
+        # Resolve student phone number with fallbacks
+        phone_val = instance.user.phone_number if (instance.user and getattr(instance.user, 'phone_number', None)) else None
+        if not phone_val and instance.user:
+            app = instance.user.applications.first()
+            if app:
+                phone_val = getattr(app, 'phone', None)
+                if not phone_val and app.form_data and isinstance(app.form_data, dict):
+                    fd = app.form_data
+                    pd = fd.get('personal_details', {})
+                    if isinstance(pd, dict):
+                        phone_val = pd.get('phone') or pd.get('mobile') or pd.get('phone_number')
+                    if not phone_val:
+                        phone_val = fd.get('phone') or fd.get('mobile') or fd.get('phone_number')
+
         ret['student_name'] = name_val or "Unknown"
         ret['student_email'] = instance.user.email if instance.user else None
+        ret['student_phone'] = phone_val
+        ret['phone_number'] = phone_val
         ret['student_photo'] = photo_url
         ret['application_no'] = app_no
 
