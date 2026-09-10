@@ -905,8 +905,13 @@ class MarksViewSet(viewsets.ViewSet):
             m_qs = Marks.objects.filter(student__in=students, subject__in=subjects)
             if exam_ids:
                 m_qs = m_qs.filter(exam_id__in=exam_ids)
+            elif exam_type_id:
+                m_qs = m_qs.filter(exam__exam_type_id=exam_type_id)
             for m in m_qs:
                 marks_map[(m.student_id, m.subject_id)] = m.marks_obtained
+
+        if not marks_map:
+            return HttpResponse("Marks or grade not found", status=400)
 
         buffer = BytesIO()
         doc = SimpleDocTemplate(
@@ -1439,6 +1444,9 @@ class MarksViewSet(viewsets.ViewSet):
             for m in m_qs:
                 marks_dict[(m.student_id, m.subject_id, m.exam_id)] = m.marks_obtained
 
+        if not marks_dict:
+            return HttpResponse("Marks or grade not found", status=400)
+
         buffer = BytesIO()
         doc = SimpleDocTemplate(
             buffer,
@@ -1953,6 +1961,17 @@ class MarksViewSet(viewsets.ViewSet):
             exams = list(Exam.objects.filter(exam_type_id=exam_type_id))
 
         active_grades = list(GradeSystem.objects.filter(is_active=True))
+
+        marks_qs_check = Marks.objects.filter(student__in=students, subject__in=subjects)
+        if exam_ids:
+            marks_qs_check = marks_qs_check.filter(exam_id__in=exam_ids)
+        elif exams:
+            marks_qs_check = marks_qs_check.filter(exam__in=exams)
+        elif exam_type_id:
+            marks_qs_check = marks_qs_check.filter(exam__exam_type_id=exam_type_id)
+
+        if not marks_qs_check.exists():
+            return HttpResponse("Marks or grade not found", status=400)
 
         def evaluate_mark(val):
             if val is None:
@@ -3186,21 +3205,32 @@ class MarksViewSet(viewsets.ViewSet):
                 return (str_val in ['AB', 'ABSENT', 'UA']), (not is_fail_code)
 
         marks_qs = Marks.objects.filter(student__in=students)
-        if exams:
+        if exam_ids:
+            marks_qs = marks_qs.filter(exam_id__in=exam_ids)
+        elif exams:
             marks_qs = marks_qs.filter(exam__in=exams)
         elif exam_type_id:
             marks_qs = marks_qs.filter(exam__exam_type_id=exam_type_id)
+        if semester_id and str(semester_id).isdigit():
+            marks_qs = marks_qs.filter(subject__semester_id=semester_id)
+        elif semester_obj:
+            marks_qs = marks_qs.filter(subject__semester=semester_obj)
+        if regulation_id:
+            marks_qs = marks_qs.filter(subject__regulation_id=regulation_id)
         all_marks = list(marks_qs.order_by('id'))
+        if not marks_qs.exists():
+            return HttpResponse("Marks or grade not found", status=400)
 
         student_fail_counts = {}
         for st in students:
-            st_subject_marks = {}
+            st_comp_marks = {}
             for m in all_marks:
                 if m.student_id == st.id:
-                    st_subject_marks[m.subject_id] = m.marks_obtained
+                    cat_key = (m.subject_id, m.subject_category or 'THEORY')
+                    st_comp_marks[cat_key] = m.marks_obtained
 
             fail_count = 0
-            for mark_val in st_subject_marks.values():
+            for mark_val in st_comp_marks.values():
                 is_abs, is_pass = evaluate_mark_spr(mark_val)
                 if not is_pass:
                     fail_count += 1
