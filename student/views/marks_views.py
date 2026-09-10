@@ -1,9 +1,51 @@
 import os
 import io
 import math
+import re
 import urllib.request
 import datetime
 from io import BytesIO
+
+def generate_report_filename(report_name, exam_title=None, department=None, batch=None, section_obj=None, semester_id=None, extra=None):
+    """
+    Constructs report filename format:
+    [report_name]_[exam_type]_[department_short_name]_[batch]_[section]_[semester]_[subject_or_roll_no].pdf
+    """
+    parts = [report_name]
+
+    if exam_title:
+        parts.append(str(exam_title))
+
+    if department:
+        d_short = getattr(department, 'short_name', None) or getattr(department, 'department_name', None) or getattr(department, 'department_code', None) or str(department)
+        parts.append(str(d_short))
+
+    if batch:
+        b_str = getattr(batch, 'batch', None) or str(batch)
+        parts.append(str(b_str))
+
+    if section_obj:
+        sec_name = getattr(section_obj, 'sections', None) or getattr(section_obj, 'section_name', None) or str(section_obj)
+        parts.append(f"Sec-{sec_name}" if not str(sec_name).lower().startswith("sec") else str(sec_name))
+
+    if semester_id:
+        sem_val = getattr(semester_id, 'semester_name', None) or getattr(semester_id, 'id', None) or str(semester_id)
+        parts.append(f"Sem-{sem_val}" if not str(sem_val).lower().startswith("sem") else str(sem_val))
+
+    if extra:
+        parts.append(str(extra))
+
+    clean_parts = []
+    for p in parts:
+        if not p:
+            continue
+        clean_p = re.sub(r'[\/\s\\:\*\?\"<>\|]+', '_', str(p).strip())
+        clean_p = re.sub(r'_+', '_', clean_p).strip('_')
+        if clean_p:
+            clean_parts.append(clean_p)
+
+    filename = "_".join(clean_parts) + ".pdf"
+    return filename
 
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
@@ -871,8 +913,10 @@ class MarksViewSet(viewsets.ViewSet):
         pdf = buffer.getvalue()
         buffer.close()
 
+        filename = generate_report_filename("Marksheet_Report", exam_title_str, department, batch, section_obj, semester_id or semester_obj, subject_obj.subject_code if subject_obj else None)
         response = HttpResponse(content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="Marksheet_Report_{datetime.date.today().strftime("%Y%m%d")}.pdf"'
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Access-Control-Expose-Headers'] = 'Content-Disposition'
         response.write(pdf)
         return response
 
@@ -1486,8 +1530,10 @@ class MarksViewSet(viewsets.ViewSet):
         pdf = buffer.getvalue()
         buffer.close()
 
+        filename = generate_report_filename("Consolidated_Marksheet_Report", exam_title_str, department, batch, section_obj, semester_id or semester_obj)
         response = HttpResponse(content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="Consolidated_Marksheet_{datetime.date.today().strftime("%Y%m%d")}.pdf"'
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Access-Control-Expose-Headers'] = 'Content-Disposition'
         response.write(pdf)
         return response
 
@@ -2011,7 +2057,16 @@ class MarksViewSet(viewsets.ViewSet):
         pdf = buffer.getvalue()
         buffer.close()
 
-        response = HttpResponse(pdf, content_type='application/pdf')
+        extra_roll = None
+        if len(students) == 1:
+            extra_roll = students[0].register_number or students[0].roll_number
+        elif len(students) > 1:
+            extra_roll = "Bulk"
+        filename = generate_report_filename("Progress_Report", exam_title_str, department, batch, section_obj, semester_id or semester_obj, extra_roll)
+        response = HttpResponse(content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Access-Control-Expose-Headers'] = 'Content-Disposition'
+        response.write(pdf)
         return response
 
     @action(detail=False, methods=['post', 'get'], url_path='internal-exam-result-analysis-report/pdf')
@@ -2621,8 +2676,11 @@ class MarksViewSet(viewsets.ViewSet):
         pdf = buffer.getvalue()
         buffer.close()
 
+        extra_subj_code = sub_obj.subject_code if sub_obj else (subjects[0].subject_code if len(subjects) == 1 else None)
+        filename = generate_report_filename("Internal_Exam_Result_Analysis", exam_title_str, department, batch, section_obj, semester_id or semester_obj, extra_subj_code)
         response = HttpResponse(content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="Internal_Exam_Result_Analysis_{datetime.date.today().strftime("%Y%m%d")}.pdf"'
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Access-Control-Expose-Headers'] = 'Content-Disposition'
         response.write(pdf)
         return response
 
@@ -3235,8 +3293,10 @@ class MarksViewSet(viewsets.ViewSet):
         pdf = buffer.getvalue()
         buffer.close()
 
+        filename = generate_report_filename("Consolidated_Exam_Result_Analysis", exam_title_str, department, batch, section_obj, semester_id or semester_obj)
         response = HttpResponse(content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="Consolidated_Exam_Result_Analysis_{datetime.date.today().strftime("%Y%m%d")}.pdf"'
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Access-Control-Expose-Headers'] = 'Content-Disposition'
         response.write(pdf)
         return response
 
@@ -3599,8 +3659,10 @@ class MarksViewSet(viewsets.ViewSet):
         pdf = buffer.getvalue()
         buffer.close()
 
+        filename = generate_report_filename("Student_Performance_Report", exam_title_str, department, batch, section_obj, semester_id or semester_obj)
         response = HttpResponse(content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="Student_Performance_Report_{datetime.date.today().strftime("%Y%m%d")}.pdf"'
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Access-Control-Expose-Headers'] = 'Content-Disposition'
         response.write(pdf)
         return response
 
@@ -3987,7 +4049,9 @@ class MarksViewSet(viewsets.ViewSet):
         pdf = buffer.getvalue()
         buffer.close()
 
+        filename = generate_report_filename("CAPA_Report", exam_title_str, department, batch, section_obj, semester_id or semester_obj, subject_obj.subject_code if subject_obj else None)
         response = HttpResponse(content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="CAPA_Form_{datetime.date.today().strftime("%Y%m%d")}.pdf"'
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Access-Control-Expose-Headers'] = 'Content-Disposition'
         response.write(pdf)
         return response
