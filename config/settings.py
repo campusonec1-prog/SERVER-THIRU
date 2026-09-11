@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     'timetable',
     'transport',
     'leave',
+    'lms',
 ]
 
 
