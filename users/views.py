@@ -62,6 +62,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def login(self, request, *args, **kwargs):
         username = request.data.get('username')
         password = request.data.get('password')
+        login_type = request.data.get('login_type') or request.data.get('loginType')
 
         if username is None or password is None:
             return Response({
@@ -90,6 +91,21 @@ class UserViewSet(viewsets.ModelViewSet):
         
         if user:
             if bcrypt.checkpw(password_str.encode('utf-8'), user.password.encode('utf-8')):
+                user_role_name = (user.role.role_name if user.role else '').upper()
+
+                # Role separation checks
+                if login_type == 'institution' and user_role_name == 'STUDENT':
+                    return Response({
+                        "code": 403,
+                        "message": "Student accounts are not allowed to log in via Institution Login. Please use Student Login."
+                    }, status=status.HTTP_403_FORBIDDEN)
+                
+                if login_type == 'student' and user_role_name and user_role_name != 'STUDENT':
+                    return Response({
+                        "code": 403,
+                        "message": "Only students can log in via Student Login. Please use Institution Login."
+                    }, status=status.HTTP_403_FORBIDDEN)
+
                 refresh = RefreshToken.for_user(user)
                 user_data = UserSerializer(user).data
 
@@ -121,6 +137,12 @@ class UserViewSet(viewsets.ModelViewSet):
         ).first()
 
         if student:
+            if login_type == 'institution':
+                return Response({
+                    "code": 403,
+                    "message": "Student accounts are not allowed to log in via Institution Login. Please use Student Login."
+                }, status=status.HTTP_403_FORBIDDEN)
+
             # Extract DOB from application form_data or user details
             app = student.user.applications.first() if (student.user and hasattr(student.user, 'applications')) else None
             fd = app.form_data if (app and app.form_data and isinstance(app.form_data, dict)) else {}
