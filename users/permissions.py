@@ -76,7 +76,7 @@ class UserPermission(BaseRolePermission):
     write_roles = ['admin', 'administrator']
 
     def has_permission(self, request, view):
-        if view.action == 'login':
+        if view.action in ['login', 'change_password']:
             return True
         return super().has_permission(request, view)
 

@@ -8,6 +8,7 @@ urlpatterns = [
     re_path(r'^edit/(?P<pk>\d+)/?$', UserViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='user-edit'),
     re_path(r'^remove/(?P<pk>\d+)/?$', UserViewSet.as_view({'delete': 'destroy'}), name='user-remove'),
     re_path(r'^login/?$', UserViewSet.as_view({'post': 'login'}), name='user-login'),
+    re_path(r'^change-password/?$', UserViewSet.as_view({'post': 'change_password'}), name='user-change-password'),
     re_path(r'^bulk-import/?$', UserViewSet.as_view({'post': 'bulk_import'}), name='user-bulk-import'),
 
     # User Details endpoints
