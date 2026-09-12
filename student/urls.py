@@ -75,6 +75,8 @@ urlpatterns = [
     path('attendance/activity/remove/<int:pk>', FacultyActivityViewSet.as_view({'delete': 'destroy'}), name='attendance-activity-remove'),
     path('attendance/submit', StudentAttendanceViewSet.as_view({'post': 'bulk_submit'}), name='attendance-submit'),
     path('attendance/list', StudentAttendanceViewSet.as_view({'get': 'list'}), name='attendance-list'),
+    path('attendance/subject-wise-report/pdf', StudentAttendanceViewSet.as_view({'post': 'subject_wise_attendance_report_pdf', 'get': 'subject_wise_attendance_report_pdf'}), name='subject-wise-attendance-report-pdf'),
+    path('attendance/consolidated-report/pdf', StudentAttendanceViewSet.as_view({'post': 'consolidated_attendance_report_pdf', 'get': 'consolidated_attendance_report_pdf'}), name='consolidated-attendance-report-pdf'),
 
     # Counselling Report endpoints
     path('counselling/create', CounsellingReportViewSet.as_view({'post': 'create'}), name='counselling-create'),
