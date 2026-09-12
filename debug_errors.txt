@@ -156,3 +156,39 @@
   }
 }
 
+{
+  "path": "/api/users/edit/36",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "Password: Password is required."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid username or password."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid password."
+  }
+}
+
+{
+  "path": "/api/lms/assignments/",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Attachment: Not a valid string."
+  }
+}
+

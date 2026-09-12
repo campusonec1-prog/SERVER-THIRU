@@ -62,6 +62,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def login(self, request, *args, **kwargs):
         username = request.data.get('username')
         password = request.data.get('password')
+        login_type = request.data.get('login_type') or request.data.get('loginType')
 
         if username is None or password is None:
             return Response({
@@ -85,17 +86,34 @@ class UserViewSet(viewsets.ModelViewSet):
         from role.models import Role
         from rest_framework_simplejwt.tokens import RefreshToken
 
-        # 1. First try matching standard User model by username
-        user = User.objects.filter(username=username_str).first()
+        # 1. First try matching standard User model by username or mobile_number
+        user = User.objects.filter(
+            Q(username__iexact=username_str) | Q(mobile_number=username_str)
+        ).first()
         
         if user:
             if bcrypt.checkpw(password_str.encode('utf-8'), user.password.encode('utf-8')):
+                user_role_name = (user.role.role_name if user.role else '').upper()
+
+                # Role separation checks
+                if login_type == 'institution' and user_role_name == 'STUDENT':
+                    return Response({
+                        "code": 403,
+                        "message": "Student accounts are not allowed to log in via Institution Login. Please use Student Login."
+                    }, status=status.HTTP_403_FORBIDDEN)
+                
+                if login_type == 'student' and user_role_name and user_role_name != 'STUDENT':
+                    return Response({
+                        "code": 403,
+                        "message": "Only students can log in via Student Login. Please use Institution Login."
+                    }, status=status.HTTP_403_FORBIDDEN)
+
                 refresh = RefreshToken.for_user(user)
                 user_data = UserSerializer(user).data
 
                 # Attach student_id if user belongs to a student
                 student = Student.objects.filter(
-                    Q(roll_number__iexact=username_str) | Q(register_number__iexact=username_str) | Q(user__phone_number=user.mobile_number)
+                    Q(roll_number__iexact=username_str) | Q(register_number__iexact=username_str) | Q(user__phone_number=user.mobile_number) | Q(user__name=user.name)
                 ).first()
                 if student:
                     user_data['student_id'] = student.id
@@ -110,8 +128,14 @@ class UserViewSet(viewsets.ModelViewSet):
                         "user": user_data
                     }
                 }, status=status.HTTP_200_OK)
+            else:
+                # User exists in User model but password failed -> reject immediately
+                return Response({
+                    "code": 400,
+                    "message": "Invalid password."
+                }, status=status.HTTP_400_BAD_REQUEST)
 
-        # 2. Try Student lookup by Roll Number, Register Number, or Phone Number
+        # 2. Try Student lookup by Roll Number, Register Number, or Phone Number if User record does NOT exist
         import re
 
         student = Student.objects.filter(
@@ -121,6 +145,12 @@ class UserViewSet(viewsets.ModelViewSet):
         ).first()
 
         if student:
+            if login_type == 'institution':
+                return Response({
+                    "code": 403,
+                    "message": "Student accounts are not allowed to log in via Institution Login. Please use Student Login."
+                }, status=status.HTTP_403_FORBIDDEN)
+
             # Extract DOB from application form_data or user details
             app = student.user.applications.first() if (student.user and hasattr(student.user, 'applications')) else None
             fd = app.form_data if (app and app.form_data and isinstance(app.form_data, dict)) else {}
@@ -200,6 +230,59 @@ class UserViewSet(viewsets.ModelViewSet):
             "code": 400,
             "message": "Invalid username or password."
         }, status=status.HTTP_400_BAD_REQUEST)
+
+    def change_password(self, request, *args, **kwargs):
+        old_password = request.data.get('old_password')
+        new_password = request.data.get('new_password')
+        confirm_password = request.data.get('confirm_password')
+
+        if not old_password or not new_password or not confirm_password:
+            return Response({
+                "code": 400,
+                "message": "Old password, new password, and confirm password are required."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if str(new_password).strip() != str(confirm_password).strip():
+            return Response({
+                "code": 400,
+                "message": "New password and confirm password do not match."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        user = getattr(request, 'user', None)
+        if not user or not getattr(user, 'is_authenticated', False):
+            user_id = request.data.get('user_id')
+            if user_id:
+                user = User.objects.filter(id=user_id).first()
+
+        if not user:
+            return Response({
+                "code": 401,
+                "message": "Authentication required to change password."
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Enforce role access: Student or Admin allowed
+        user_role = (user.role.role_name if hasattr(user, 'role') and user.role else '').upper()
+        if user_role not in ['STUDENT', 'ADMIN', 'ADMINISTRATOR'] and getattr(user, 'id', None) != getattr(request.user, 'id', None):
+            return Response({
+                "code": 403,
+                "message": "Only students or administrators are allowed to change passwords."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        import bcrypt
+        if not bcrypt.checkpw(str(old_password).strip().encode('utf-8'), user.password.encode('utf-8')):
+            return Response({
+                "code": 400,
+                "message": "Old password is incorrect."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        hashed_new = bcrypt.hashpw(str(new_password).strip().encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        user.password = hashed_new
+        user.save(update_fields=['password'])
+
+        return Response({
+            "code": 200,
+            "message": "Password updated successfully."
+        }, status=status.HTTP_200_OK)
 
     def handle_exception(self, exc):
         from django.http import Http404

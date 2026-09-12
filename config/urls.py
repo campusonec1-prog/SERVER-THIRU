@@ -31,6 +31,7 @@ urlpatterns = [
     path('api/timetable/', include('timetable.urls')),
     path('api/transport/', include('transport.urls')),
     path('api/leave/', include('leave.urls')),
+    path('api/lms/', include('lms.urls')),
     path('api/documents/upload', DocumentUploadView.as_view(), name='document-upload'),
 ]
 
