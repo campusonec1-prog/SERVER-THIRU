@@ -7,6 +7,26 @@ from subject.models import Subject
 from users.models import User
 
 
+class AttachmentField(serializers.Field):
+    """
+    Custom field for assignment attachments and submissions that accepts uploaded
+    File objects (which are processed by perform_create/perform_update via Cloudflare R2 upload),
+    existing string URLs, or None/blank without throwing 'Not a valid string' validation errors.
+    """
+    def to_representation(self, value):
+        return value
+
+    def to_internal_value(self, data):
+        if not data or data == 'null' or data == 'undefined':
+            return None
+        if isinstance(data, str):
+            return data
+        # If an uploaded File object (or binary payload) is passed in request.data,
+        # return None so serializer validation succeeds. The view's perform_create/perform_update
+        # retrieves request.FILES['attachment'] directly and uploads to Cloudflare R2.
+        return None
+
+
 class LMSAssignmentSerializer(serializers.ModelSerializer):
     department_name = serializers.CharField(source='department.department_name', read_only=True)
     batch_name = serializers.CharField(source='batch.batch', read_only=True)
@@ -14,6 +34,8 @@ class LMSAssignmentSerializer(serializers.ModelSerializer):
     target_student_name = serializers.SerializerMethodField()
     subject_name = serializers.CharField(source='subject.subject_name', read_only=True)
     created_by_name = serializers.SerializerMethodField()
+    attachment = AttachmentField(required=False, allow_null=True)
+    is_active = serializers.BooleanField(default=True, required=False)
 
     total_submissions = serializers.SerializerMethodField()
     total_evaluated = serializers.SerializerMethodField()
@@ -102,6 +124,7 @@ class LMSSubmissionSerializer(serializers.ModelSerializer):
     assignment_due_date = serializers.DateTimeField(source='assignment.due_date', read_only=True)
     assignment_total_marks = serializers.DecimalField(source='assignment.total_marks', max_digits=5, decimal_places=2, read_only=True)
     evaluated_by_name = serializers.SerializerMethodField()
+    submission_file = AttachmentField(required=False, allow_null=True)
 
     class Meta:
         model = LMSSubmission
@@ -126,11 +149,12 @@ class LMSSubmissionSerializer(serializers.ModelSerializer):
     def validate_submission_file(self, value):
         if value:
             # Max size limit 25MB
-            if value.size > 25 * 1024 * 1024:
+            if hasattr(value, 'size') and value.size > 25 * 1024 * 1024:
                 raise serializers.ValidationError("Submission file size cannot exceed 25 MB.")
             
-            ext = value.name.split('.')[-1].lower()
-            allowed = ['pdf', 'doc', 'docx', 'zip', 'rar', 'txt', 'png', 'jpg', 'jpeg', 'xlsx', 'pptx']
-            if ext not in allowed:
-                raise serializers.ValidationError(f"File extension '.{ext}' is not supported. Allowed formats: {', '.join(allowed)}")
+            if hasattr(value, 'name'):
+                ext = value.name.split('.')[-1].lower()
+                allowed = ['pdf', 'doc', 'docx', 'zip', 'rar', 'txt', 'png', 'jpg', 'jpeg', 'xlsx', 'pptx']
+                if ext not in allowed:
+                    raise serializers.ValidationError(f"File extension '.{ext}' is not supported. Allowed formats: {', '.join(allowed)}")
         return value

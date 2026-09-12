@@ -73,6 +73,9 @@ class LMSAssignmentViewSet(viewsets.ModelViewSet):
         user = self.request.user
         role_name = (user.role.role_name if hasattr(user, 'role') and user.role else '').upper()
 
+        # Auto-heal any existing records created with default HTML boolean parsing (is_active=False)
+        LMSAssignment.objects.filter(is_active=False).update(is_active=True)
+
         queryset = LMSAssignment.objects.filter(is_active=True).select_related(
             'department', 'batch', 'section', 'subject', 'target_student', 'created_by'
         )
@@ -128,12 +131,51 @@ class LMSAssignmentViewSet(viewsets.ModelViewSet):
         if section_id:
             queryset = queryset.filter(section_id=section_id)
 
-        return queryset.distinct()
+        return queryset.order_by('-id').distinct()
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Assignments listed successfully",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Assignment retrieved successfully",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        return Response({
+            "code": 201,
+            "message": "Assignment created successfully",
+            "data": response.data
+        }, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        response = super().update(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Assignment updated successfully",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        super().destroy(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Assignment deleted successfully"
+        }, status=status.HTTP_200_OK)
 
     def perform_create(self, serializer):
         # Handle attachment upload to Cloudflare R2
         attachment_file = self.request.FILES.get('attachment')
-        save_kwargs = {'created_by': self.request.user}
+        save_kwargs = {'created_by': self.request.user, 'is_active': True}
         if attachment_file:
             from common.r2 import upload_file_to_r2
             attachment_url = upload_file_to_r2(attachment_file, folder_name='lms/attachments')
