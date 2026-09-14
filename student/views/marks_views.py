@@ -1148,6 +1148,14 @@ class MarksViewSet(viewsets.ViewSet):
             alignment=0,
             textColor=colors.black
         )
+        tbl_cell_fail = ParagraphStyle(
+            name='TblCellFailStyleCons',
+            fontName='Helvetica-Bold',
+            fontSize=7.5,
+            leading=9,
+            alignment=1,
+            textColor=colors.HexColor('#CC0000')
+        )
 
         logo_url = college_header_obj.primary_logo if college_header_obj else None
         logo_flowable = None
@@ -1393,7 +1401,11 @@ class MarksViewSet(viewsets.ViewSet):
                         if sub.id in conducted_subjects:
                             student_failed_conducted_count += 1
 
-                row.append(Paragraph(display_val, tbl_cell_center))
+                # Use red bold style for fail marks
+                if not is_abs and not is_pass and display_val not in ["-", "AB", "UA"]:
+                    row.append(Paragraph(display_val, tbl_cell_fail))
+                else:
+                    row.append(Paragraph(display_val, tbl_cell_center))
 
             table_data.append(row)
 
