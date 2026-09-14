@@ -177,6 +177,7 @@ class Notification(TrackingModel):
         ('SUBSTITUTION_REQUEST', 'Substitution Request'),
         ('SUBSTITUTION_RESPONSE', 'Substitution Response'),
         ('LEAVE_STATUS', 'Leave Status Update'),
+        ('HOSTEL_LEAVE', 'Hostel Leave Request'),
         ('GENERAL', 'General Notice'),
     ]
 
@@ -213,6 +214,14 @@ class Notification(TrackingModel):
         null=True,
         blank=True
     )
+    related_hostel_leave = models.ForeignKey(
+        'leave.HostelLeaveRequest',
+        on_delete=models.CASCADE,
+        db_column='related_hostel_leave_id',
+        related_name='notifications',
+        null=True,
+        blank=True
+    )
     is_read = models.BooleanField(default=False)
 
     class Meta:
@@ -221,3 +230,65 @@ class Notification(TrackingModel):
 
     def __str__(self):
         return f"Notification for {self.user.username}: {self.title} (Read: {self.is_read})"
+
+
+class HostelLeaveRequest(TrackingModel):
+    STATUS_CHOICES = [
+        ('PENDING_HOSTEL', 'Pending Hostel Approval'),
+        ('PENDING_HOD', 'Pending HOD Approval'),
+        ('APPROVED', 'Approved (Leave Guaranteed)'),
+        ('REJECTED_HOSTEL', 'Rejected by Hostel'),
+        ('REJECTED_HOD', 'Rejected by HOD'),
+        ('CANCELLED', 'Cancelled by Student'),
+    ]
+
+    student = models.ForeignKey(
+        'student.Student',
+        on_delete=models.CASCADE,
+        db_column='student_id',
+        related_name='hostel_leave_requests'
+    )
+    from_date = models.DateField()
+    to_date = models.DateField()
+    total_days = models.DecimalField(max_digits=5, decimal_places=1, default=1.0)
+    reason = models.TextField()
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='PENDING_HOSTEL', db_index=True)
+
+    # Hostel Approval details
+    hostel_approved_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        db_column='hostel_approved_by_id',
+        related_name='hostel_approved_student_leaves',
+        null=True,
+        blank=True
+    )
+    hostel_approved_at = models.DateTimeField(null=True, blank=True)
+    hostel_remarks = models.TextField(null=True, blank=True)
+
+    # HOD Approval details
+    hod_approved_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        db_column='hod_approved_by_id',
+        related_name='hod_approved_student_leaves',
+        null=True,
+        blank=True
+    )
+    hod_approved_at = models.DateTimeField(null=True, blank=True)
+    hod_remarks = models.TextField(null=True, blank=True)
+
+    rejection_reason = models.TextField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'hostel_leave_requests'
+        ordering = ['-id']
+        indexes = [
+            models.Index(fields=['student', 'status']),
+            models.Index(fields=['status']),
+            models.Index(fields=['from_date', 'to_date']),
+        ]
+
+    def __str__(self):
+        return f"Hostel Leave #{self.id} - Student ID {self.student_id} ({self.from_date} to {self.to_date}) [{self.status}]"
+

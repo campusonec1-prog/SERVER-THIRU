@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import LeavePolicy, FacultyLeave, ClassSubstitution, Notification
+from .models import LeavePolicy, FacultyLeave, ClassSubstitution, Notification, HostelLeaveRequest
 from users.models import User
 from institution.models import AcademicYear, Department, Batch, Semester, Section
 from schedule.models import Period, Day
@@ -106,17 +106,97 @@ class FacultyLeaveSerializer(serializers.ModelSerializer):
         return ""
 
 
+from student.models import Student
+
+class HostelLeaveRequestSerializer(serializers.ModelSerializer):
+    student = serializers.PrimaryKeyRelatedField(
+        queryset=Student.objects.all(),
+        required=False,
+        allow_null=True
+    )
+    student_name = serializers.SerializerMethodField()
+    roll_number = serializers.CharField(source='student.roll_number', read_only=True)
+    register_number = serializers.CharField(source='student.register_number', read_only=True)
+    department_name = serializers.CharField(source='student.department.department_name', read_only=True)
+    department_code = serializers.CharField(source='student.department.department_code', read_only=True)
+    batch_name = serializers.CharField(source='student.batch.batch', read_only=True)
+    section_name = serializers.CharField(source='student.section.sections', read_only=True)
+    hostel_building_type = serializers.CharField(source='student.hostel_building_type', read_only=True)
+    hostel_room_number = serializers.CharField(source='student.hostel_room_number', read_only=True)
+    
+    hostel_approved_by_name = serializers.SerializerMethodField()
+    hod_approved_by_name = serializers.SerializerMethodField()
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+
+    class Meta:
+        model = HostelLeaveRequest
+        fields = [
+            'id', 'student', 'student_name', 'roll_number', 'register_number',
+            'department_name', 'department_code', 'batch_name', 'section_name',
+            'hostel_building_type', 'hostel_room_number',
+            'from_date', 'to_date', 'total_days', 'reason', 'status', 'status_display',
+            'hostel_approved_by', 'hostel_approved_by_name', 'hostel_approved_at', 'hostel_remarks',
+            'hod_approved_by', 'hod_approved_by_name', 'hod_approved_at', 'hod_remarks',
+            'rejection_reason', 'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'total_days', 'status', 'hostel_approved_by', 'hostel_approved_at',
+            'hod_approved_by', 'hod_approved_at', 'created_at', 'updated_at'
+        ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+    def get_student_name(self, obj):
+        if obj.student and obj.student.user:
+            return getattr(obj.student.user, 'name', '') or getattr(obj.student.user, 'username', '')
+        return f"Student #{obj.student_id}"
+
+    def get_hostel_approved_by_name(self, obj):
+        if obj.hostel_approved_by:
+            return getattr(obj.hostel_approved_by, 'name', '') or obj.hostel_approved_by.username
+        return ""
+
+    def get_hod_approved_by_name(self, obj):
+        if obj.hod_approved_by:
+            return getattr(obj.hod_approved_by, 'name', '') or obj.hod_approved_by.username
+        return ""
+
+    def validate(self, attrs):
+        from_date = attrs.get('from_date') or (self.instance.from_date if self.instance else None)
+        to_date = attrs.get('to_date') or (self.instance.to_date if self.instance else None)
+        
+        if from_date and to_date and from_date > to_date:
+            raise serializers.ValidationError({
+                "to_date": "To Date cannot be earlier than From Date."
+            })
+
+        student = attrs.get('student')
+        if student and not student.is_hostler:
+            student_name = getattr(student.user, 'name', '') if getattr(student, 'user', None) else f"Student #{student.id}"
+            raise serializers.ValidationError({
+                "student": f"Student '{student_name}' is marked as a Day Scholar (not a Hostler). Only verified Hostler students can apply for hostel leave."
+            })
+
+        return attrs
+
+
 class NotificationSerializer(serializers.ModelSerializer):
     sender_name = serializers.SerializerMethodField()
     related_substitution_detail = ClassSubstitutionSerializer(source='related_substitution', read_only=True)
     related_leave_detail = FacultyLeaveSerializer(source='related_leave', read_only=True)
+    related_hostel_leave_detail = HostelLeaveRequestSerializer(source='related_hostel_leave', read_only=True)
 
     class Meta:
         model = Notification
         fields = [
             'id', 'user', 'sender', 'sender_name', 'title', 'message',
             'notification_type', 'related_substitution', 'related_substitution_detail',
-            'related_leave', 'related_leave_detail', 'is_read', 'created_at'
+            'related_leave', 'related_leave_detail',
+            'related_hostel_leave', 'related_hostel_leave_detail',
+            'is_read', 'created_at'
         ]
         read_only_fields = ['created_at']
 
@@ -125,4 +205,3 @@ class NotificationSerializer(serializers.ModelSerializer):
         if obj.sender:
             return obj.sender.name or obj.sender.username
         return "System"
-
