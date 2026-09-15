@@ -192,3 +192,57 @@
   }
 }
 
+{
+  "path": "/api/users/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "User is already exist"
+  }
+}
+
+{
+  "path": "/api/users/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "User is already exist"
+  }
+}
+
+{
+  "path": "/api/leave/hostel-requests",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Student: Student is required."
+  }
+}
+
+{
+  "path": "/api/leave/hostel-requests/1/hostel-approve",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Cannot approve request with current status 'Pending HOD Approval'."
+  }
+}
+
+{
+  "path": "/api/users/login",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Invalid password."
+  }
+}
+
+{
+  "path": "/api/institution/departments/edit/6",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "Hod Id: Selected user does not have the HOD role. Their role is 'FACULTY'."
+  }
+}
+

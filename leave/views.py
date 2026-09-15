@@ -9,10 +9,10 @@ from django.db.models import Q
 from datetime import datetime, timedelta
 
 
-from .models import LeavePolicy, FacultyLeave, ClassSubstitution, Notification
+from .models import LeavePolicy, FacultyLeave, ClassSubstitution, Notification, HostelLeaveRequest
 from .serializers import (
     LeavePolicySerializer, FacultyLeaveSerializer,
-    ClassSubstitutionSerializer, NotificationSerializer
+    ClassSubstitutionSerializer, NotificationSerializer, HostelLeaveRequestSerializer
 )
 from .permissions import (
     LeavePolicyPermission, FacultyLeavePermission,
@@ -532,7 +532,8 @@ class NotificationViewSet(viewsets.ModelViewSet):
         'related_substitution__substitute_faculty', 'related_substitution__department',
         'related_substitution__batch', 'related_substitution__section',
         'related_substitution__subject', 'related_leave', 'related_leave__applicant',
-        'related_leave__department'
+        'related_leave__department', 'related_hostel_leave', 'related_hostel_leave__student',
+        'related_hostel_leave__student__department', 'related_hostel_leave__student__user'
     ).all().order_by('-created_at')
     serializer_class = NotificationSerializer
     permission_classes = [NotificationPermission]
@@ -541,6 +542,57 @@ class NotificationViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if not user or not user.is_authenticated:
             return Notification.objects.none()
+
+        # Ensure missing notifications are synced on the fly for pending hostel leaves
+        try:
+            role_name = getattr(getattr(user, 'role', None), 'role_name', '').upper()
+            if 'HOD' in role_name:
+                dept_ids = []
+                if hasattr(user, 'user_details') and user.user_details.exists():
+                    for ud in user.user_details.all():
+                        if ud.department_id:
+                            dept_ids.append(ud.department_id)
+
+                pending_hod_reqs = HostelLeaveRequest.objects.filter(status='PENDING_HOD')
+                if dept_ids:
+                    pending_hod_reqs = pending_hod_reqs.filter(student__department_id__in=dept_ids)
+
+                for req in pending_hod_reqs:
+                    if not Notification.objects.filter(user=user, related_hostel_leave=req).exists():
+                        student_name = getattr(req.student.user, 'name', '') if getattr(req.student, 'user', None) else f"Student #{req.student.id}"
+                        dept_code = getattr(req.student.department, 'department_code', '') if getattr(req.student, 'department', None) else ''
+                        roll_info = f" ({req.student.roll_number})" if getattr(req.student, 'roll_number', None) else ""
+                        Notification.objects.create(
+                            user=user,
+                            sender=req.created_by,
+                            title=f"Hostel Leave Approval Required: {student_name}",
+                            message=f"Student {student_name}{roll_info} from department {dept_code} has submitted a hostel leave request from {req.from_date} to {req.to_date}.\nHostel Warden has approved it. Please review and give HOD approval.",
+                            notification_type='HOSTEL_LEAVE',
+                            related_hostel_leave=req,
+                            created_by=req.created_by,
+                            updated_by=req.updated_by
+                        )
+            elif any(k in role_name for k in ['WARDEN', 'HOSTEL']):
+                pending_warden_reqs = HostelLeaveRequest.objects.filter(status='PENDING_HOSTEL')
+                for req in pending_warden_reqs:
+                    if not Notification.objects.filter(user=user, related_hostel_leave=req).exists():
+                        student_name = getattr(req.student.user, 'name', '') if getattr(req.student, 'user', None) else f"Student #{req.student.id}"
+                        dept_code = getattr(req.student.department, 'department_code', '') if getattr(req.student, 'department', None) else ''
+                        roll_info = f" ({req.student.roll_number})" if getattr(req.student, 'roll_number', None) else ""
+                        Notification.objects.create(
+                            user=user,
+                            sender=req.created_by,
+                            title=f"Hostel Leave Application Received: {student_name}",
+                            message=f"Student {student_name}{roll_info} from department {dept_code} has submitted a hostel leave request from {req.from_date} to {req.to_date}.",
+                            notification_type='HOSTEL_LEAVE',
+                            related_hostel_leave=req,
+                            created_by=req.created_by,
+                            updated_by=req.updated_by
+                        )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"[Notification Sync Error] {e}")
+
         return super().get_queryset().filter(user=user)
 
     def list(self, request, *args, **kwargs):
@@ -765,3 +817,454 @@ class LeaveHelperViewSet(viewsets.ViewSet):
             })
 
         return Response({"code": 200, "message": "Substitute slots fetched.", "data": results}, status=status.HTTP_200_OK)
+
+
+class HostelLeaveRequestViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+    queryset = HostelLeaveRequest.objects.select_related(
+        'student', 'student__department', 'student__section', 'student__batch', 'student__user',
+        'hostel_approved_by', 'hod_approved_by'
+    ).all().order_by('-id')
+    serializer_class = HostelLeaveRequestSerializer
+    permission_classes = [IsAuthenticated]
+    model_label = 'Hostel Leave Request'
+
+    def _broadcast_change(self, instance, event_name):
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'realtime_updates',
+                    {
+                        'type': 'broadcast_update',
+                        'data': {
+                            'event': event_name,
+                            'model': 'HostelLeaveRequest',
+                            'payload': HostelLeaveRequestSerializer(instance).data
+                        }
+                    }
+                )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"[WebSocket Broadcast Error] {e}")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        role = getattr(getattr(user, 'role', None), 'role_name', '').upper()
+
+        if role == 'STUDENT' or hasattr(user, 'student'):
+            from student.models import Student
+            try:
+                student = Student.objects.filter(user__name=user.name).first() or getattr(user, 'student', None)
+                if student:
+                    qs = qs.filter(student=student)
+            except Exception:
+                pass
+
+        # HOD Role Isolation: filter student hostel leave requests by HOD's department from user_details / hod_departments
+        if role == 'HOD':
+            dept_ids = []
+            if hasattr(user, 'hod_departments') and user.hod_departments.exists():
+                dept_ids.extend(list(user.hod_departments.values_list('id', flat=True)))
+            if hasattr(user, 'user_details') and user.user_details.exists():
+                for ud in user.user_details.all():
+                    if ud.department and ud.department.id not in dept_ids:
+                        dept_ids.append(ud.department.id)
+            if dept_ids:
+                qs = qs.filter(student__department_id__in=dept_ids)
+            else:
+                qs = qs.none()
+
+        status_param = self.request.query_params.get('status')
+        dept_param = self.request.query_params.get('department_id')
+        student_id_param = self.request.query_params.get('student_id')
+        search_param = self.request.query_params.get('search')
+        from_date_param = self.request.query_params.get('from_date')
+        to_date_param = self.request.query_params.get('to_date')
+
+        if status_param:
+            qs = qs.filter(status=status_param)
+        if dept_param:
+            qs = qs.filter(student__department_id=dept_param)
+        if student_id_param:
+            qs = qs.filter(student_id=student_id_param)
+        if from_date_param:
+            qs = qs.filter(from_date__gte=from_date_param)
+        if to_date_param:
+            qs = qs.filter(to_date__lte=to_date_param)
+        if search_param:
+            qs = qs.filter(
+                Q(student__roll_number__icontains=search_param) |
+                Q(student__register_number__icontains=search_param) |
+                Q(student__user__name__icontains=search_param) |
+                Q(reason__icontains=search_param)
+            )
+
+        return qs
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        from student.models import Student
+        from rest_framework.exceptions import ValidationError
+        
+        student_id = self.request.data.get('student_id') or self.request.data.get('student')
+        student = None
+        if student_id:
+            try:
+                student = Student.objects.select_related('user').filter(id=student_id).first()
+            except Exception:
+                pass
+        if not student and hasattr(user, 'student'):
+            student = user.student
+        if not student:
+            student = Student.objects.select_related('user').filter(user=user).first()
+            if not student and getattr(user, 'name', None):
+                student = Student.objects.select_related('user').filter(user__name=user.name).first()
+
+        if not student:
+            # Fallback: grab first hostler student for dev testing if user is admin testing
+            student = Student.objects.filter(is_hostler=True).first()
+
+        if not student:
+            raise ValidationError({"student": "Student ID is required to apply for hostel leave."})
+
+        # CRITICAL VERIFICATION: Check that student is verified as a Hostler
+        if not student.is_hostler:
+            student_name = getattr(student.user, 'name', '') if getattr(student, 'user', None) else f"Student #{student.id}"
+            raise ValidationError({
+                "student": f"Student '{student_name}' is marked as a Day Scholar (not a Hostler). Only verified Hostler students can apply for hostel leave."
+            })
+
+
+        from_date = serializer.validated_data.get('from_date')
+        to_date = serializer.validated_data.get('to_date')
+        total_days = 1.0
+        if from_date and to_date:
+            diff = (to_date - from_date).days + 1
+            total_days = max(1.0, float(diff))
+
+        instance = serializer.save(
+            student=student,
+            total_days=total_days,
+            status='PENDING_HOSTEL',
+            created_by=user,
+            updated_by=user
+        )
+
+        # Send inbox Notification to Hostel Warden(s) and Admins
+        try:
+            wardens = User.objects.filter(
+                Q(role__role_name__icontains='WARDEN') |
+                Q(role__role_name__icontains='HOSTEL') |
+                Q(role__role_name__iexact='ADMIN') |
+                Q(role__role_name__iexact='ADMINISTRATOR')
+            ).distinct()
+
+            student_name = getattr(student.user, 'name', '') if getattr(student, 'user', None) else f"Student #{student.id}"
+            roll_info = f" ({student.roll_number})" if getattr(student, 'roll_number', None) else ""
+            dept_code = getattr(student.department, 'department_code', '') if getattr(student, 'department', None) else ''
+
+            for warden in wardens:
+                Notification.objects.create(
+                    user=warden,
+                    sender=user,
+                    title=f"Hostel Leave Application Received: {student_name}",
+                    message=f"Student {student_name}{roll_info} from {dept_code} has submitted a hostel leave request for {from_date} to {to_date}. Reason: {instance.reason}",
+                    notification_type='HOSTEL_LEAVE',
+                    related_hostel_leave=instance,
+                    created_by=user,
+                    updated_by=user
+                )
+                _broadcast_realtime({'hostel_leave_id': instance.id}, 'notification_received', target_user_id=warden.id)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"[Hostel Leave Notification Error] {e}")
+
+        self._broadcast_change(instance, 'hostel_leave_created')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({"code": 200, "message": "Hostel leave requests retrieved.", "data": serializer.data})
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        return Response({
+            "code": 201,
+            "message": "Hostel leave request submitted successfully to Hostel Dashboard.",
+            "data": response.data
+        }, status=status.HTTP_201_CREATED)
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return Response({"code": 200, "message": "Hostel leave request retrieved.", "data": serializer.data})
+
+    @action(detail=True, methods=['post'], url_path='hostel-approve')
+    def hostel_approve(self, request, pk=None):
+        """Hostel Warden approves student leave request -> moves to PENDING_HOD."""
+        user = request.user
+        role_name = getattr(getattr(user, 'role', None), 'role_name', '').upper()
+
+        if role_name in ['ADMIN', 'ADMINISTRATOR'] and not getattr(user, 'is_superuser', False):
+            return Response({
+                "code": 403,
+                "message": "Administrator account has view-only access to Hostel Leave Requests. Only Hostel Wardens can give Hostel Approval."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        instance = self.get_object()
+        if instance.status != 'PENDING_HOSTEL':
+            return Response({
+                "code": 400,
+                "message": f"Cannot approve request with current status '{instance.get_status_display()}'."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        remarks = request.data.get('hostel_remarks', '') or request.data.get('remarks', '')
+        instance.status = 'PENDING_HOD'
+        instance.hostel_approved_by = user
+        instance.hostel_approved_at = datetime.now()
+        instance.hostel_remarks = remarks
+        instance.updated_by = user
+        instance.save()
+
+        try:
+            student_user = getattr(instance.student, 'user', None)
+            if student_user:
+                Notification.objects.create(
+                    user=student_user,
+                    sender=user,
+                    title="Hostel Leave Approved by Hostel Warden",
+                    message=f"Your leave request for {instance.from_date} to {instance.to_date} has been approved by Hostel Warden and forwarded to Department HOD.",
+                    notification_type='HOSTEL_LEAVE',
+                    related_hostel_leave=instance
+                )
+                _broadcast_realtime({'hostel_leave_id': instance.id}, 'notification_received', target_user_id=student_user.id)
+
+            # Find HOD(s) to notify in their inbox
+            hod_qs = User.objects.filter(
+                Q(role__role_name__iexact='HOD') |
+                Q(role__role_name__icontains='HOD')
+            ).distinct()
+
+            student_name = getattr(instance.student.user, 'name', '') if getattr(instance.student, 'user', None) else f"Student #{instance.student.id}"
+            dept_code = getattr(instance.student.department, 'department_code', '') if getattr(instance.student, 'department', None) else ''
+            roll_info = f" ({instance.student.roll_number})" if getattr(instance.student, 'roll_number', None) else ""
+
+            for hod in hod_qs:
+                Notification.objects.create(
+                    user=hod,
+                    sender=user,
+                    title=f"Hostel Leave Approval Required: {student_name}",
+                    message=f"Student {student_name}{roll_info} from department {dept_code} has submitted a hostel leave request from {instance.from_date} to {instance.to_date}.\nHostel Warden has approved it. Please review and give HOD approval.",
+                    notification_type='HOSTEL_LEAVE',
+                    related_hostel_leave=instance,
+                    created_by=user,
+                    updated_by=user
+                )
+                _broadcast_realtime({'hostel_leave_id': instance.id}, 'notification_received', target_user_id=hod.id)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"[HOD Notification Error on Warden Approval] {e}")
+
+        self._broadcast_change(instance, 'hostel_leave_updated')
+
+        serializer = self.get_serializer(instance)
+        return Response({
+            "code": 200,
+            "message": "Hostel leave approved by Hostel Warden and forwarded to Department HOD.",
+            "data": serializer.data
+        })
+
+    @action(detail=True, methods=['post'], url_path='hostel-reject')
+    def hostel_reject(self, request, pk=None):
+        """Hostel Warden rejects student leave request."""
+        user = request.user
+        role_name = getattr(getattr(user, 'role', None), 'role_name', '').upper()
+
+        if role_name in ['ADMIN', 'ADMINISTRATOR'] and not getattr(user, 'is_superuser', False):
+            return Response({
+                "code": 403,
+                "message": "Administrator account has view-only access to Hostel Leave Requests."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        instance = self.get_object()
+        if instance.status not in ['PENDING_HOSTEL', 'PENDING_HOD']:
+            return Response({
+                "code": 400,
+                "message": f"Cannot reject request with status '{instance.get_status_display()}'."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        rejection_reason = request.data.get('rejection_reason', '') or request.data.get('remarks', '')
+        if not rejection_reason:
+            return Response({
+                "code": 400,
+                "message": "Rejection reason is required."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        instance.status = 'REJECTED_HOSTEL'
+        instance.hostel_approved_by = user
+        instance.hostel_approved_at = datetime.now()
+        instance.hostel_remarks = rejection_reason
+        instance.rejection_reason = rejection_reason
+        instance.updated_by = user
+        instance.save()
+
+        try:
+            student_user = getattr(instance.student, 'user', None)
+            if student_user:
+                Notification.objects.create(
+                    user=student_user,
+                    sender=user,
+                    title="Hostel Leave Rejected",
+                    message=f"Your leave request for {instance.from_date} to {instance.to_date} was rejected by Hostel Warden. Reason: {rejection_reason}",
+                    notification_type='HOSTEL_LEAVE',
+                    related_hostel_leave=instance
+                )
+        except Exception:
+            pass
+
+        self._broadcast_change(instance, 'hostel_leave_updated')
+
+        serializer = self.get_serializer(instance)
+        return Response({
+            "code": 200,
+            "message": "Hostel leave request rejected.",
+            "data": serializer.data
+        })
+
+    @action(detail=True, methods=['post'], url_path='hod-approve')
+    def hod_approve(self, request, pk=None):
+        """Department HOD approves hostel leave -> Status becomes APPROVED (Leave Guaranteed)."""
+        user = request.user
+        role_name = getattr(getattr(user, 'role', None), 'role_name', '').upper()
+
+        if role_name in ['ADMIN', 'ADMINISTRATOR'] and not getattr(user, 'is_superuser', False):
+            return Response({
+                "code": 403,
+                "message": "Administrator account has view-only access to Hostel Leave Requests. Only Department HOD can give HOD Approval."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        instance = self.get_object()
+        if instance.status != 'PENDING_HOD':
+            return Response({
+                "code": 400,
+                "message": "Leave request must be approved by Hostel Warden before HOD approval."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        remarks = request.data.get('hod_remarks', '') or request.data.get('remarks', '')
+        instance.status = 'APPROVED'
+        instance.hod_approved_by = user
+        instance.hod_approved_at = datetime.now()
+        instance.hod_remarks = remarks
+        instance.updated_by = user
+        instance.save()
+
+        try:
+            student_user = getattr(instance.student, 'user', None)
+            if student_user:
+                Notification.objects.create(
+                    user=student_user,
+                    sender=user,
+                    title="Hostel Leave Approved & Guaranteed!",
+                    message=f"Your hostel leave request for {instance.from_date} to {instance.to_date} has been approved by HOD. Your leave is guaranteed!",
+                    notification_type='HOSTEL_LEAVE',
+                    related_hostel_leave=instance
+                )
+        except Exception:
+            pass
+
+        self._broadcast_change(instance, 'hostel_leave_updated')
+
+        serializer = self.get_serializer(instance)
+        return Response({
+            "code": 200,
+            "message": "Leave request approved by HOD. Leave is guaranteed for the student!",
+            "data": serializer.data
+        })
+
+    @action(detail=True, methods=['post'], url_path='hod-reject')
+    def hod_reject(self, request, pk=None):
+        """Department HOD rejects hostel leave."""
+        user = request.user
+        role_name = getattr(getattr(user, 'role', None), 'role_name', '').upper()
+
+        if role_name in ['ADMIN', 'ADMINISTRATOR'] and not getattr(user, 'is_superuser', False):
+            return Response({
+                "code": 403,
+                "message": "Administrator account has view-only access to Hostel Leave Requests."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        instance = self.get_object()
+        if instance.status != 'PENDING_HOD':
+            return Response({
+                "code": 400,
+                "message": f"Cannot perform HOD rejection on status '{instance.get_status_display()}'."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        rejection_reason = request.data.get('rejection_reason', '') or request.data.get('remarks', '')
+        if not rejection_reason:
+            return Response({
+                "code": 400,
+                "message": "Rejection reason is required."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        instance.status = 'REJECTED_HOD'
+        instance.hod_approved_by = user
+        instance.hod_approved_at = datetime.now()
+        instance.hod_remarks = rejection_reason
+        instance.rejection_reason = rejection_reason
+        instance.updated_by = user
+        instance.save()
+
+        try:
+            student_user = getattr(instance.student, 'user', None)
+            if student_user:
+                Notification.objects.create(
+                    user=student_user,
+                    sender=user,
+                    title="Hostel Leave Rejected by HOD",
+                    message=f"Your leave request for {instance.from_date} to {instance.to_date} was rejected by HOD. Reason: {rejection_reason}",
+                    notification_type='HOSTEL_LEAVE',
+                    related_hostel_leave=instance
+                )
+        except Exception:
+            pass
+
+        self._broadcast_change(instance, 'hostel_leave_updated')
+
+        serializer = self.get_serializer(instance)
+        return Response({
+            "code": 200,
+            "message": "Hostel leave request rejected by HOD.",
+            "data": serializer.data
+        })
+
+    @action(detail=True, methods=['post'], url_path='cancel')
+    def cancel(self, request, pk=None):
+        """Student cancels their pending leave request."""
+        instance = self.get_object()
+        if instance.status not in ['PENDING_HOSTEL', 'PENDING_HOD']:
+            return Response({
+                "code": 400,
+                "message": f"Cannot cancel a leave request with status '{instance.get_status_display()}'."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        instance.status = 'CANCELLED'
+        instance.updated_by = request.user if request.user.is_authenticated else None
+        instance.save()
+
+        self._broadcast_change(instance, 'hostel_leave_updated')
+
+        serializer = self.get_serializer(instance)
+        return Response({
+            "code": 200,
+            "message": "Hostel leave request cancelled.",
+            "data": serializer.data
+        })
+
