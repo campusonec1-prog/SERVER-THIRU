@@ -246,3 +246,93 @@
   }
 }
 
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset Category is already exist"
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Category name cannot be blank."
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Ensure this field has no more than 100 characters."
+  }
+}
+
+{
+  "path": "/api/asset-categories/edit/26",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset Category is already exist"
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Category name cannot be blank."
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset Category is already exist"
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Category name cannot be blank."
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Ensure this field has no more than 100 characters."
+  }
+}
+
+{
+  "path": "/api/asset-categories/edit/26",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset Category is already exist"
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Category name cannot be blank."
+  }
+}
+

@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     'transport',
     'leave',
     'lms',
+    'asset',
 ]
 
 
