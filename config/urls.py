@@ -32,6 +32,7 @@ urlpatterns = [
     path('api/transport/', include('transport.urls')),
     path('api/leave/', include('leave.urls')),
     path('api/lms/', include('lms.urls')),
+    path('api/library/', include('library.urls')),
     path('api/documents/upload', DocumentUploadView.as_view(), name='document-upload'),
 ]
 

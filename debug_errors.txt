@@ -246,3 +246,3408 @@
   }
 }
 
+{
+  "path": "/api/library/books/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Some book rows failed validation.",
+    "errors": [
+      {
+        "row": 1,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 2,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 3,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 4,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 5,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 6,
+        "errors": [
+          "Duplicate ISBN '81-7008-825-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 7,
+        "errors": [
+          "Duplicate ISBN '81-7008-825-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 8,
+        "errors": [
+          "Duplicate ISBN '81-7008-825-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 9,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 10,
+        "errors": [
+          "Duplicate ISBN '81-7008-891-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 11,
+        "errors": [
+          "Duplicate ISBN '81-7008-891-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 12,
+        "errors": [
+          "Duplicate ISBN '81-7008-891-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 13,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 14,
+        "errors": [
+          "Duplicate ISBN '81-7008-618-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 15,
+        "errors": [
+          "Duplicate ISBN '81-7008-618-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 16,
+        "errors": [
+          "Duplicate ISBN '81-7008-618-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 17,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 18,
+        "errors": [
+          "Duplicate ISBN '81-7008-093-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 19,
+        "errors": [
+          "Duplicate ISBN '81-7008-093-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 20,
+        "errors": [
+          "Duplicate ISBN '81-7008-093-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 21,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 22,
+        "errors": [
+          "Duplicate ISBN '81-7008-099-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 23,
+        "errors": [
+          "Duplicate ISBN '81-7008-099-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 24,
+        "errors": [
+          "Duplicate ISBN '81-7008-099-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 25,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 26,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 27,
+        "errors": [
+          "Duplicate ISBN '81-7008-092-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 28,
+        "errors": [
+          "Duplicate ISBN '81-7008-092-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 29,
+        "errors": [
+          "Duplicate ISBN '81-7008-092-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 30,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 31,
+        "errors": [
+          "Duplicate ISBN '81-7008-091-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 32,
+        "errors": [
+          "Duplicate ISBN '81-7008-091-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 33,
+        "errors": [
+          "Duplicate ISBN '81-7008-091-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 34,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 35,
+        "errors": [
+          "Duplicate ISBN '81-7008-796-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 36,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 37,
+        "errors": [
+          "Duplicate ISBN '81-7008-796-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 38,
+        "errors": [
+          "Duplicate ISBN '81-7008-796-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 39,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 40,
+        "errors": [
+          "Duplicate ISBN '81-7008-837-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 41,
+        "errors": [
+          "Duplicate ISBN '81-7008-837-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 42,
+        "errors": [
+          "Duplicate ISBN '81-7008-837-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 43,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 44,
+        "errors": [
+          "Duplicate ISBN '81-7008-372-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 45,
+        "errors": [
+          "Duplicate ISBN '81-7008-372-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 46,
+        "errors": [
+          "Duplicate ISBN '81-7008-372-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 47,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 48,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 49,
+        "errors": [
+          "Duplicate ISBN '81-7008-311-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 50,
+        "errors": [
+          "Duplicate ISBN '81-7008-311-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 51,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 52,
+        "errors": [
+          "Duplicate ISBN '81-7008-309-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 53,
+        "errors": [
+          "Duplicate ISBN '81-7008-309-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 54,
+        "errors": [
+          "Duplicate ISBN '81-7008-309-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 55,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 56,
+        "errors": [
+          "Duplicate ISBN '81-7008-082-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 57,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 58,
+        "errors": [
+          "Duplicate ISBN '81-7008-082-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 59,
+        "errors": [
+          "Duplicate ISBN '81-7008-082-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 60,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 61,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 62,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 63,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 64,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 65,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 66,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 67,
+        "errors": [
+          "Duplicate ISBN '0074518658' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 68,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 69,
+        "errors": [
+          "Duplicate ISBN '81-7008-791-0' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 70,
+        "errors": [
+          "Duplicate ISBN '81-7008-791-0' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 71,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 72,
+        "errors": [
+          "Duplicate ISBN '81-318-0000-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 73,
+        "errors": [
+          "Duplicate ISBN '81-318-0000-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 74,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 75,
+        "errors": [
+          "Duplicate ISBN '81-7008-083-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 76,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 77,
+        "errors": [
+          "Duplicate ISBN '81-7008-083-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 78,
+        "errors": [
+          "Duplicate ISBN '81-7008-083-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 79,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 80,
+        "errors": [
+          "Duplicate ISBN '81-7008-193-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 81,
+        "errors": [
+          "Duplicate ISBN '81-7008-193-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 82,
+        "errors": [
+          "Duplicate ISBN '81-7008-193-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 83,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 84,
+        "errors": [
+          "Duplicate ISBN '81-7008-215-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 85,
+        "errors": [
+          "Duplicate ISBN '81-7008-215-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 86,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 87,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 88,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 89,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 90,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 91,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 92,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 93,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 94,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 95,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 96,
+        "errors": [
+          "Duplicate ISBN '81-7008-053-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 97,
+        "errors": [
+          "Duplicate ISBN '81-7008-053-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 98,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 99,
+        "errors": [
+          "Duplicate ISBN '81-7008-053-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 100,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 101,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 102,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 103,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 104,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 105,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 106,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 107,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 108,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 109,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 110,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 111,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 112,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 113,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 114,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 115,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 116,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 117,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 118,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 119,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 120,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 121,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 122,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 123,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 124,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 125,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 126,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 127,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 128,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 129,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 130,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 131,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 132,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 133,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 134,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 135,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 136,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 137,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 138,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 139,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 140,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 141,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 142,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 143,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 144,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 145,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 146,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 147,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 148,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 149,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 150,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 151,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 152,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 153,
+        "errors": [
+          "Duplicate ISBN '81-219-2822-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 154,
+        "errors": [
+          "Duplicate ISBN '81-219-2822-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 155,
+        "errors": [
+          "Duplicate ISBN '81-219-2822-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 156,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 157,
+        "errors": [
+          "Duplicate ISBN '81-219-0520-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 158,
+        "errors": [
+          "Duplicate ISBN '81-219-0520-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 159,
+        "errors": [
+          "Duplicate ISBN '81-219-0520-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 160,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 161,
+        "errors": [
+          "Duplicate ISBN '81-219-1960-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 162,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 163,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 164,
+        "errors": [
+          "Duplicate ISBN '81-219-1547-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 165,
+        "errors": [
+          "Duplicate ISBN '81-219-1547-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 166,
+        "errors": [
+          "Duplicate ISBN '81-219-1547-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 167,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 168,
+        "errors": [
+          "Duplicate ISBN '81-219-2457-x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 169,
+        "errors": [
+          "Duplicate ISBN '81-219-2457-x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 170,
+        "errors": [
+          "Duplicate ISBN '81-219-2457-x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 171,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 172,
+        "errors": [
+          "Duplicate ISBN '81-219-2353-0' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 173,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 174,
+        "errors": [
+          "Duplicate ISBN '81-219-2353-0' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 175,
+        "errors": [
+          "Duplicate ISBN '81-219-2353-0' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 176,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 177,
+        "errors": [
+          "Duplicate ISBN '81-219-0003-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 178,
+        "errors": [
+          "Duplicate ISBN '81-219-0003-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 179,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 180,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 181,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 182,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 183,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 184,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 185,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 186,
+        "errors": [
+          "Duplicate ISBN '81-318-0000-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 187,
+        "errors": [
+          "Duplicate ISBN '81-318-0000-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 188,
+        "errors": [
+          "Duplicate ISBN '81-318-0000-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 189,
+        "errors": [
+          "Duplicate ISBN '81-7008-053-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 190,
+        "errors": [
+          "Duplicate ISBN '81-7008-215-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 191,
+        "errors": [
+          "Duplicate ISBN '81-7008-215-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 192,
+        "errors": [
+          "Duplicate ISBN '81-7008-215-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 193,
+        "errors": [
+          "Duplicate ISBN '81-7008-215-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 194,
+        "errors": [
+          "Duplicate ISBN '81-7008-215-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 195,
+        "errors": [
+          "Duplicate ISBN '81-7008-215-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 196,
+        "errors": [
+          "Duplicate ISBN '81-7008-311-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 197,
+        "errors": [
+          "Duplicate ISBN '81-7008-311-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 198,
+        "errors": [
+          "Duplicate ISBN '81-7008-311-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 199,
+        "errors": [
+          "Duplicate ISBN '81-7008-311-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 200,
+        "errors": [
+          "Duplicate ISBN '81-7008-311-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 201,
+        "errors": [
+          "Duplicate ISBN '81-7008-311-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 202,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 203,
+        "errors": [
+          "Duplicate ISBN '81-7008-311-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 204,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 205,
+        "errors": [
+          "Duplicate ISBN '0070606587' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 206,
+        "errors": [
+          "Duplicate ISBN '0070606587' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 207,
+        "errors": [
+          "Duplicate ISBN '0070606587' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 208,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 209,
+        "errors": [
+          "Duplicate ISBN '81-203-3030-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 210,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 211,
+        "errors": [
+          "Duplicate ISBN '981-240-611-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 212,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 213,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 214,
+        "errors": [
+          "Duplicate ISBN '981-240-611-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 215,
+        "errors": [
+          "Duplicate ISBN '981-240-611-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 216,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 217,
+        "errors": [
+          "Duplicate ISBN '0-07-058202-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 218,
+        "errors": [
+          "Duplicate ISBN '0-07-058202-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 219,
+        "errors": [
+          "Duplicate ISBN '0-07-058202-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 220,
+        "errors": [
+          "Duplicate ISBN '0-07-058202-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 221,
+        "errors": [
+          "Duplicate ISBN '0-07-058202-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 222,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 223,
+        "errors": [
+          "Duplicate ISBN '00-061668x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 224,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 225,
+        "errors": [
+          "Duplicate ISBN '00-061668x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 226,
+        "errors": [
+          "Duplicate ISBN '00-061668x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 227,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 228,
+        "errors": [
+          "Duplicate ISBN '0-07-462244-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 229,
+        "errors": [
+          "Duplicate ISBN '0-07-462244-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 230,
+        "errors": [
+          "Duplicate ISBN '0-07-462244-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 231,
+        "errors": [
+          "Duplicate ISBN '0-07-462244-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 232,
+        "errors": [
+          "Duplicate ISBN '0-07-462244-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 233,
+        "errors": [
+          "Duplicate ISBN '0-07-462244-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 234,
+        "errors": [
+          "Duplicate ISBN '0-07-462244-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 235,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 236,
+        "errors": [
+          "Duplicate ISBN '0-07-462244-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 237,
+        "errors": [
+          "Duplicate ISBN '0-07-462244-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 238,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 239,
+        "errors": [
+          "Duplicate ISBN '81-203-0929-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 240,
+        "errors": [
+          "Duplicate ISBN '81-203-0929-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 241,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 242,
+        "errors": [
+          "Duplicate ISBN '81-7758-903-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 243,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 244,
+        "errors": [
+          "Duplicate ISBN '81-203-1501-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 245,
+        "errors": [
+          "Duplicate ISBN '81-203-1501-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 246,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 247,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 248,
+        "errors": [
+          "Duplicate ISBN '81-203-0124-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 249,
+        "errors": [
+          "Duplicate ISBN '81-203-0124-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 250,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 251,
+        "errors": [
+          "Duplicate ISBN '81-203-0850-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 252,
+        "errors": [
+          "Duplicate ISBN '81-203-0850-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 253,
+        "errors": [
+          "Duplicate ISBN '81-203-0850-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 254,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 255,
+        "errors": [
+          "Duplicate ISBN '0-07-048302-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 256,
+        "errors": [
+          "Duplicate ISBN '0-07-048302-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 257,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 258,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 259,
+        "errors": [
+          "Duplicate ISBN '0-19-568084-7-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 260,
+        "errors": [
+          "Duplicate ISBN '0-19-568084-7-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 261,
+        "errors": [
+          "Duplicate ISBN '0-19-568084-7-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 262,
+        "errors": [
+          "Duplicate ISBN '0-19-568084-7-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 263,
+        "errors": [
+          "Duplicate ISBN '0-19-568084-7-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 264,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 265,
+        "errors": [
+          "Duplicate ISBN '81-265-0904-x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 266,
+        "errors": [
+          "Duplicate ISBN '81-265-0904-x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 267,
+        "errors": [
+          "Duplicate ISBN '81-265-0904-x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 268,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 269,
+        "errors": [
+          "Duplicate ISBN '81-265-0904-x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 270,
+        "errors": [
+          "Duplicate ISBN '81-265-0904-x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 271,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 272,
+        "errors": [
+          "Duplicate ISBN '0-07-462245-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 273,
+        "errors": [
+          "Duplicate ISBN '0-07-462245-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 274,
+        "errors": [
+          "Duplicate ISBN '0-07-462245-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 275,
+        "errors": [
+          "Duplicate ISBN '0-07-462245-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 276,
+        "errors": [
+          "Duplicate ISBN '0-07-462245-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 277,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 278,
+        "errors": [
+          "Duplicate ISBN '0-07-052898-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 279,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 280,
+        "errors": [
+          "Duplicate ISBN '0-07-052898-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 281,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 282,
+        "errors": [
+          "Duplicate ISBN '81-203-1246-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 283,
+        "errors": [
+          "Duplicate ISBN '81-203-1246-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 284,
+        "errors": [
+          "Duplicate ISBN '81-203-1246-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 285,
+        "errors": [
+          "Duplicate ISBN '81-203-1246-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 286,
+        "errors": [
+          "Duplicate ISBN '81-203-1246-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 287,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 288,
+        "errors": [
+          "Duplicate ISBN '981-240-060-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 289,
+        "errors": [
+          "Duplicate ISBN '981-240-060-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 290,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 291,
+        "errors": [
+          "Duplicate ISBN '981-240-060-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 292,
+        "errors": [
+          "Duplicate ISBN '981-240-060-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 293,
+        "errors": [
+          "Duplicate ISBN '981-240-060-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 294,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 295,
+        "errors": [
+          "Duplicate ISBN '81-7758-264-x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 296,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 297,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 298,
+        "errors": [
+          "Duplicate ISBN '81-203-0713-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 299,
+        "errors": [
+          "Duplicate ISBN '81-203-0713-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 300,
+        "errors": [
+          "Duplicate ISBN '81-203-0713-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 301,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 302,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 303,
+        "errors": [
+          "Duplicate ISBN '0-07-052906-x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 304,
+        "errors": [
+          "Duplicate ISBN '981-240-611-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 305,
+        "errors": [
+          "Duplicate ISBN '981-240-611-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 306,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 307,
+        "errors": [
+          "Duplicate ISBN '81-203-0409-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 308,
+        "errors": [
+          "Duplicate ISBN '81-203-0409-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 309,
+        "errors": [
+          "Duplicate ISBN '81-203-0409-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 310,
+        "errors": [
+          "Duplicate ISBN '81-203-0124-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 311,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 312,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 313,
+        "errors": [
+          "Duplicate ISBN '81-203-2095-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 314,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 315,
+        "errors": [
+          "Duplicate ISBN '0-07-048677-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 316,
+        "errors": [
+          "Duplicate ISBN '0-07-048677-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 317,
+        "errors": [
+          "Duplicate ISBN '0-07-048677-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 318,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 319,
+        "errors": [
+          "Duplicate ISBN '81-8128-519-0' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 320,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 321,
+        "errors": [
+          "Duplicate ISBN '0-07-463386-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 322,
+        "errors": [
+          "Duplicate ISBN '0-07-463386-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 323,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 324,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 325,
+        "errors": [
+          "Duplicate ISBN '0-07-463386-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 326,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 327,
+        "errors": [
+          "Duplicate ISBN '80-203-29546-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 328,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 329,
+        "errors": [
+          "Duplicate ISBN '81-203-0986-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 330,
+        "errors": [
+          "Duplicate ISBN '81-203-0986-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 331,
+        "errors": [
+          "Duplicate ISBN '81-203-0986-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 332,
+        "errors": [
+          "Duplicate ISBN '0-07-052906-x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 333,
+        "errors": [
+          "Duplicate ISBN '0-07-052906-x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 334,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 335,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 336,
+        "errors": [
+          "Duplicate ISBN '81-203-0516-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 337,
+        "errors": [
+          "Duplicate ISBN '81-203-0516-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 338,
+        "errors": [
+          "Duplicate ISBN '81-203-0516-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 339,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 340,
+        "errors": [
+          "Duplicate ISBN '81-265-0394-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 341,
+        "errors": [
+          "Duplicate ISBN '81-265-0394-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 342,
+        "errors": [
+          "Duplicate ISBN '81-265-0394-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 343,
+        "errors": [
+          "Duplicate ISBN '81-265-0394-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 344,
+        "errors": [
+          "Duplicate ISBN '81-265-0394-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 345,
+        "errors": [
+          "Duplicate ISBN '81-265-0394-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 346,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 347,
+        "errors": [
+          "Duplicate ISBN '81-265-0394-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 348,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 349,
+        "errors": [
+          "Duplicate ISBN '81-7853-007-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 350,
+        "errors": [
+          "Duplicate ISBN '81-7853-007-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 351,
+        "errors": [
+          "Duplicate ISBN '81-7853-007-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 352,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 353,
+        "errors": [
+          "Duplicate ISBN '81-317-0505-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 354,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 355,
+        "errors": [
+          "Duplicate ISBN '81-203-0778-x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 356,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 357,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 358,
+        "errors": [
+          "Duplicate ISBN '81-203-2457-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 359,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 360,
+        "errors": [
+          "Duplicate ISBN '81-7808-387-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 361,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 362,
+        "errors": [
+          "Duplicate ISBN '81-203-2177-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 363,
+        "errors": [
+          "Duplicate ISBN '81-203-2177-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 364,
+        "errors": [
+          "Duplicate ISBN '81-203-2177-4' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 365,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 366,
+        "errors": [
+          "Duplicate ISBN '81-265-0271-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 367,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 368,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 369,
+        "errors": [
+          "Duplicate ISBN '81-7853-005-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 370,
+        "errors": [
+          "Duplicate ISBN '81-7853-005-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 371,
+        "errors": [
+          "Duplicate ISBN '81-7853-005-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 372,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 373,
+        "errors": [
+          "Duplicate ISBN '981-243-135-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 374,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 375,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 376,
+        "errors": [
+          "Duplicate ISBN '81-265-0-19-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 377,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 378,
+        "errors": [
+          "Duplicate ISBN '81-312-0535-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 379,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 380,
+        "errors": [
+          "Duplicate ISBN '81-312-0535-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 381,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 382,
+        "errors": [
+          "Duplicate ISBN '81-7758-199-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 383,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 384,
+        "errors": [
+          "Duplicate ISBN '0070587418' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 385,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 386,
+        "errors": [
+          "Duplicate ISBN '81-7758-875-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 387,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 388,
+        "errors": [
+          "Duplicate ISBN '0-07-048289-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 389,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 390,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 391,
+        "errors": [
+          "Duplicate ISBN '81-203-0953-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 392,
+        "errors": [
+          "Duplicate ISBN '81-203-0953-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 393,
+        "errors": [
+          "Duplicate ISBN '81-203-0953-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 394,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 395,
+        "errors": [
+          "Duplicate ISBN '0-07-058494-x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 396,
+        "errors": [
+          "Duplicate ISBN '0-07-058494-x' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 397,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 398,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 399,
+        "errors": [
+          "Duplicate ISBN '0-07-060177-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 400,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 401,
+        "errors": [
+          "Duplicate ISBN '0-07-060177-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 402,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 403,
+        "errors": [
+          "Duplicate ISBN '81-203-1954-0' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 404,
+        "errors": [
+          "Duplicate ISBN '81-203-1954-0' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 405,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 406,
+        "errors": [
+          "Duplicate ISBN '81-20320581' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 407,
+        "errors": [
+          "Duplicate ISBN '81-20320581' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 408,
+        "errors": [
+          "Duplicate ISBN '81-20320581' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 409,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 410,
+        "errors": [
+          "Duplicate ISBN '81-88458-93-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 411,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 412,
+        "errors": [
+          "Duplicate ISBN '81-88458-93-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 413,
+        "errors": [
+          "Duplicate ISBN '81-88458-93-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 414,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 415,
+        "errors": [
+          "Duplicate ISBN '81-203-1484-0' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 416,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 417,
+        "errors": [
+          "Duplicate ISBN '0-07-053044-0' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 418,
+        "errors": [
+          "Duplicate ISBN '0-07-053044-0' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 419,
+        "errors": [
+          "Duplicate ISBN '0-07-053044-0' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 420,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 421,
+        "errors": [
+          "Duplicate ISBN '81-224-0503-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 422,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 423,
+        "errors": [
+          "Duplicate ISBN '81-224-0503-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 424,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 425,
+        "errors": [
+          "Duplicate ISBN '81-203-1015-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 426,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 427,
+        "errors": [
+          "Duplicate ISBN '0-07-048739-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 428,
+        "errors": [
+          "Duplicate ISBN '0-07-048739-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 429,
+        "errors": [
+          "Duplicate ISBN '0-07-048739-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 430,
+        "errors": [
+          "Duplicate ISBN '0-07-048739-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 431,
+        "errors": [
+          "Duplicate ISBN '0-07-048739-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 432,
+        "errors": [
+          "Duplicate ISBN '0-07-048739-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 433,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 434,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 435,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 436,
+        "errors": [
+          "Duplicate ISBN '981-234-106-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 437,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 438,
+        "errors": [
+          "Duplicate ISBN '81-7758-368-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 439,
+        "errors": [
+          "Duplicate ISBN '81-7758-368-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 440,
+        "errors": [
+          "Duplicate ISBN '81-7758-368-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 441,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 442,
+        "errors": [
+          "Duplicate ISBN '0-07-463311-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 443,
+        "errors": [
+          "Duplicate ISBN '0-07-463311-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 444,
+        "errors": [
+          "Duplicate ISBN '0-07-463311-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 445,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 446,
+        "errors": [
+          "Duplicate ISBN '0-07-463311-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 447,
+        "errors": [
+          "Duplicate ISBN '0-07-463311-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 448,
+        "errors": [
+          "Duplicate ISBN '0-07-463311-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 449,
+        "errors": [
+          "Duplicate ISBN '0-07-463311-2' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 450,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 451,
+        "errors": [
+          "Duplicate ISBN '81-7808-938-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 452,
+        "errors": [
+          "Duplicate ISBN '81-7808-938-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 453,
+        "errors": [
+          "Duplicate ISBN '81-7808-938-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 454,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 455,
+        "errors": [
+          "Duplicate ISBN '81-219-1438-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 456,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 457,
+        "errors": [
+          "Duplicate ISBN '81-219-1438-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 458,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 459,
+        "errors": [
+          "Duplicate ISBN '0-07-049482-7' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 460,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 461,
+        "errors": [
+          "Duplicate ISBN '81-203-3043-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 462,
+        "errors": [
+          "Duplicate ISBN '81-203-3043-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 463,
+        "errors": [
+          "Duplicate ISBN '81-203-3043-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 464,
+        "errors": [
+          "Duplicate ISBN '81-203-3043-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 465,
+        "errors": [
+          "Duplicate ISBN '81-203-3043-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 466,
+        "errors": [
+          "Duplicate ISBN '81-203-3043-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 467,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 468,
+        "errors": [
+          "Duplicate ISBN '81-203-3043-9' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 469,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 470,
+        "errors": [
+          "Duplicate ISBN '81-203-2642-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 471,
+        "errors": [
+          "Duplicate ISBN '81-203-2642-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 472,
+        "errors": [
+          "Duplicate ISBN '81-203-2642-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 473,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 474,
+        "errors": [
+          "Duplicate ISBN '0-07-451715-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 475,
+        "errors": [
+          "Duplicate ISBN '0-07-451715-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 476,
+        "errors": [
+          "Duplicate ISBN '0-07-451715-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 477,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 478,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 479,
+        "errors": [
+          "Duplicate ISBN '9971-51-433-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 480,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 481,
+        "errors": [
+          "Duplicate ISBN '81-203-2107-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 482,
+        "errors": [
+          "Duplicate ISBN '81-203-2107-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 483,
+        "errors": [
+          "Duplicate ISBN '81-203-2107-3' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 484,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 485,
+        "errors": [
+          "Duplicate ISBN '81-224-1223-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 486,
+        "errors": [
+          "Duplicate ISBN '81-224-1223-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 487,
+        "errors": [
+          "Duplicate ISBN '81-224-1223-8' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 488,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 489,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 490,
+        "errors": [
+          "Duplicate ISBN '81-8147-558-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 491,
+        "errors": [
+          "Duplicate ISBN '81-8147-558-1' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 492,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 493,
+        "errors": [
+          "Duplicate ISBN '81-8318-140-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 494,
+        "errors": [
+          "Duplicate ISBN '81-8318-140-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 495,
+        "errors": [
+          "Duplicate ISBN '81-8318-140-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 496,
+        "errors": [
+          "Duplicate ISBN '81-8318-140-6' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 497,
+        "errors": [
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 498,
+        "errors": [
+          "Duplicate ISBN '81-224-0549-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 499,
+        "errors": [
+          "Duplicate ISBN '81-224-0549-5' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      },
+      {
+        "row": 500,
+        "errors": [
+          "Duplicate ISBN '-' in the spreadsheet.",
+          "Total copies must be a positive number."
+        ]
+      }
+    ]
+  }
+}
+
