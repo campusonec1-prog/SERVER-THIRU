@@ -1081,7 +1081,7 @@ class MarksViewSet(viewsets.ViewSet):
                 m_qs = m_qs.filter(exam_id__in=exam_ids)
             elif exam_type_id:
                 m_qs = m_qs.filter(exam__exam_type_id=exam_type_id)
-            for m in m_qs:
+            for m in m_qs.order_by('id'):
                 marks_map[(m.student_id, m.subject_id)] = m.marks_obtained
 
         if not marks_map:
@@ -3428,14 +3428,13 @@ class MarksViewSet(viewsets.ViewSet):
             st_subj_marks = {}
             for m in all_marks:
                 if m.student_id == st.id:
-                    if m.subject_id not in st_subj_marks:
-                        st_subj_marks[m.subject_id] = []
-                    st_subj_marks[m.subject_id].append(m.marks_obtained)
+                    # Match the marksheet: one displayed value per subject, using
+                    # the last stored mark for the selected exam.
+                    st_subj_marks[m.subject_id] = m.marks_obtained
 
             fail_count = 0
-            for subj_id, mark_vals in st_subj_marks.items():
-                sub_passes = [evaluate_mark_spr(v)[1] for v in mark_vals]
-                if not any(sub_passes):
+            for mark_val in st_subj_marks.values():
+                if not evaluate_mark_spr(mark_val)[1]:
                     fail_count += 1
             student_fail_counts[st.id] = fail_count
 
