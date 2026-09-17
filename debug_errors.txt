@@ -5405,3 +5405,369 @@
   }
 }
 
+{
+  "path": "/api/asset-allocations/assign",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be assigned because it is currently under maintenance."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/cancel/4",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Maintenance record is already cancelled."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/cancel/5",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Maintenance record is already completed."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/complete/8",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Maintenance record is already completed."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/complete/9",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Completion date cannot be before maintenance date.",
+    "errors": {
+      "completion_date": [
+        "Completion date cannot be before maintenance date."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/complete/10",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Cost cannot be negative.",
+    "errors": {
+      "cost": [
+        "Cost cannot be negative."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/complete/13",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Please correct the highlighted fields.",
+    "errors": {
+      "completion_date": [
+        "Completion date is required."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is already under maintenance."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be sent for maintenance because it has been disposed."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be sent for maintenance because it is lost."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Please correct the highlighted fields.",
+    "errors": {
+      "issue_description": [
+        "Issue description cannot be blank."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Please correct the highlighted fields.",
+    "errors": {
+      "cost": [
+        "Cost cannot be negative."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is already under maintenance."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Please correct the highlighted fields.",
+    "errors": {
+      "maintenance_date": [
+        "Date has wrong format. Use one of these formats instead: YYYY-MM-DD."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/start/24",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Maintenance record is already cancelled."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/start/25",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Maintenance record is already completed."
+  }
+}
+
+{
+  "path": "/api/asset-transfers/transfer",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be transferred because it is under maintenance."
+  }
+}
+
+{
+  "path": "/api/asset-allocations/assign",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be assigned because it is currently under maintenance."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/cancel/4",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Maintenance record is already cancelled."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/cancel/5",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Maintenance record is already completed."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/complete/8",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Maintenance record is already completed."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/complete/9",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Completion date cannot be before maintenance date.",
+    "errors": {
+      "completion_date": [
+        "Completion date cannot be before maintenance date."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/complete/10",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Cost cannot be negative.",
+    "errors": {
+      "cost": [
+        "Cost cannot be negative."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/complete/13",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Please correct the highlighted fields.",
+    "errors": {
+      "completion_date": [
+        "Completion date is required."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is already under maintenance."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be sent for maintenance because it has been disposed."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be sent for maintenance because it is lost."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Please correct the highlighted fields.",
+    "errors": {
+      "issue_description": [
+        "Issue description cannot be blank."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Please correct the highlighted fields.",
+    "errors": {
+      "cost": [
+        "Cost cannot be negative."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is already under maintenance."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Please correct the highlighted fields.",
+    "errors": {
+      "maintenance_date": [
+        "Date has wrong format. Use one of these formats instead: YYYY-MM-DD."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/start/24",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Maintenance record is already cancelled."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/start/25",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Maintenance record is already completed."
+  }
+}
+
+{
+  "path": "/api/asset-transfers/transfer",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be transferred because it is under maintenance."
+  }
+}
+

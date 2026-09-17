@@ -36,3 +36,11 @@ class AssetTransferPermission(BaseRolePermission):
     read_roles = ['authenticated']
     write_roles = ['admin', 'administrator', 'hod']
 
+
+class AssetMaintenancePermission(BaseRolePermission):
+    """
+    Permission class for Asset Maintenance operations.
+    Allows authenticated users to read, and admin/administrator/hod users to create/manage maintenance.
+    """
+    read_roles = ['authenticated']
+    write_roles = ['admin', 'administrator', 'hod']

@@ -162,3 +162,61 @@ class AssetTransfer(models.Model):
     def __str__(self):
         return f"Transfer of {self.asset.asset_code} on {self.transfer_date}"
 
+
+class MaintenanceType(models.TextChoices):
+    PREVENTIVE = 'preventive', 'Preventive'
+    REPAIR = 'repair', 'Repair'
+    SERVICE = 'service', 'Service'
+    INSPECTION = 'inspection', 'Inspection'
+    OTHER = 'other', 'Other'
+
+
+class MaintenanceStatus(models.TextChoices):
+    PENDING = 'pending', 'Pending'
+    IN_PROGRESS = 'in_progress', 'In Progress'
+    COMPLETED = 'completed', 'Completed'
+    CANCELLED = 'cancelled', 'Cancelled'
+
+
+class PreviousAssetStatus(models.TextChoices):
+    AVAILABLE = 'available', 'Available'
+    ASSIGNED = 'assigned', 'Assigned'
+
+
+class AssetMaintenance(models.Model):
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.PROTECT,
+        related_name='maintenance_records'
+    )
+    maintenance_type = models.CharField(
+        max_length=100,
+        choices=MaintenanceType.choices
+    )
+    issue_description = models.TextField()
+    maintenance_date = models.DateField()
+    vendor_name = models.CharField(max_length=200, blank=True, null=True)
+    technician_name = models.CharField(max_length=200, blank=True, null=True)
+    cost = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
+    status = models.CharField(
+        max_length=20,
+        choices=MaintenanceStatus.choices,
+        default=MaintenanceStatus.PENDING
+    )
+    completion_date = models.DateField(blank=True, null=True)
+    remarks = models.TextField(blank=True, null=True)
+    previous_status = models.CharField(
+        max_length=20,
+        choices=PreviousAssetStatus.choices,
+        blank=True,
+        null=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'asset_maintenance'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Maintenance of {self.asset.asset_code} ({self.get_status_display()})"

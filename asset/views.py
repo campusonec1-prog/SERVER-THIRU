@@ -10,9 +10,18 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
 from common.pagination import CustomPageNumberPagination
-from .models import AssetCategory, Asset, AssetAllocation, AssetStatus, AssetTransfer
-from .serializers import AssetCategorySerializer, AssetSerializer, AssetAllocationSerializer, AssetTransferSerializer
-from .permissions import AssetCategoryPermission, AssetPermission, AssetAllocationPermission, AssetTransferPermission
+from .models import (
+    AssetCategory, Asset, AssetAllocation, AssetStatus, AssetTransfer,
+    AssetMaintenance, MaintenanceStatus, PreviousAssetStatus
+)
+from .serializers import (
+    AssetCategorySerializer, AssetSerializer, AssetAllocationSerializer,
+    AssetTransferSerializer, AssetMaintenanceSerializer
+)
+from .permissions import (
+    AssetCategoryPermission, AssetPermission, AssetAllocationPermission,
+    AssetTransferPermission, AssetMaintenancePermission
+)
 from users.models import User
 from institution.models import Department
 
@@ -696,6 +705,402 @@ class AssetTransferViewSet(viewsets.ModelViewSet):
         return Response({
             "code": 200,
             "message": "Asset transfer history retrieved successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+class AssetMaintenanceViewSet(viewsets.ModelViewSet):
+    queryset = AssetMaintenance.objects.select_related(
+        'asset', 'asset__category'
+    ).all().order_by('-created_at')
+    serializer_class = AssetMaintenanceSerializer
+    permission_classes = [AssetMaintenancePermission]
+    pagination_class = CustomPageNumberPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    search_fields = [
+        'asset__asset_code',
+        'asset__asset_name',
+        'asset__serial_number',
+        'maintenance_type',
+        'issue_description',
+        'vendor_name',
+        'technician_name',
+    ]
+    filterset_fields = ['status', 'maintenance_type', 'asset']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        # Date range filter
+        date_from = self.request.query_params.get('date_from', None)
+        date_to = self.request.query_params.get('date_to', None)
+        vendor = self.request.query_params.get('vendor', None)
+        if date_from:
+            qs = qs.filter(maintenance_date__gte=date_from)
+        if date_to:
+            qs = qs.filter(maintenance_date__lte=date_to)
+        if vendor:
+            qs = qs.filter(vendor_name__icontains=vendor)
+        return qs
+
+    def handle_exception(self, exc):
+        if isinstance(exc, (Http404, NotFound)):
+            return Response({
+                "code": 404,
+                "message": "Maintenance record not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if isinstance(exc, NotAuthenticated):
+            return Response({
+                "code": 401,
+                "message": "You don't have access to this resource."
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        if isinstance(exc, PermissionDenied):
+            return Response({
+                "code": 403,
+                "message": "You are not authorized to manage asset maintenance."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        return super().handle_exception(exc)
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Maintenance records retrieved successfully.",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Maintenance record retrieved successfully.",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        asset_id = request.data.get('asset')
+        if not asset_id:
+            return Response({
+                "code": 400,
+                "message": "Please correct the highlighted fields.",
+                "errors": {"asset": ["Asset is required."]}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        asset = Asset.objects.filter(pk=asset_id).first()
+        if not asset:
+            return Response({
+                "code": 404,
+                "message": "Asset not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Validate asset eligibility for maintenance
+        if asset.status == AssetStatus.MAINTENANCE:
+            return Response({
+                "code": 400,
+                "message": "Asset is already under maintenance."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if asset.status == AssetStatus.DISPOSED:
+            return Response({
+                "code": 400,
+                "message": "Asset cannot be sent for maintenance because it has been disposed."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if asset.status == AssetStatus.LOST:
+            return Response({
+                "code": 400,
+                "message": "Asset cannot be sent for maintenance because it is lost."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check for existing active maintenance
+        active_maintenance = AssetMaintenance.objects.filter(
+            asset=asset,
+            status__in=[MaintenanceStatus.PENDING, MaintenanceStatus.IN_PROGRESS]
+        ).first()
+        if active_maintenance:
+            return Response({
+                "code": 400,
+                "message": "Active maintenance already exists for this asset."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                "code": 400,
+                "message": "Please correct the highlighted fields.",
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Determine previous status before changing asset status
+        prev_status = asset.status  # available or assigned
+
+        with transaction.atomic():
+            maintenance = serializer.save(
+                status=MaintenanceStatus.PENDING,
+                previous_status=prev_status
+            )
+            asset.status = AssetStatus.MAINTENANCE
+            asset.save(update_fields=['status', 'updated_at'])
+
+        broadcast_custom_ws_event('asset_maintenance_created', {
+            'model': 'AssetMaintenance',
+            'id': maintenance.id,
+            'asset_id': asset.id,
+        })
+
+        return Response({
+            "code": 201,
+            "message": "Maintenance record created successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        """Partial update of non-lifecycle fields only."""
+        maintenance = self.get_object()
+        if maintenance.status in [MaintenanceStatus.COMPLETED, MaintenanceStatus.CANCELLED]:
+            return Response({
+                "code": 400,
+                "message": "Maintenance record is already {}.".format(maintenance.get_status_display().lower())
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Allow updating: vendor_name, technician_name, cost, remarks, maintenance_date, maintenance_type, issue_description
+        allowed_fields = {'vendor_name', 'technician_name', 'cost', 'remarks',
+                          'maintenance_date', 'maintenance_type', 'issue_description'}
+        update_data = {k: v for k, v in request.data.items() if k in allowed_fields}
+
+        serializer = self.get_serializer(maintenance, data=update_data, partial=True)
+        if not serializer.is_valid():
+            return Response({
+                "code": 400,
+                "message": "Please correct the highlighted fields.",
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer.save()
+        broadcast_custom_ws_event('asset_maintenance_updated', {
+            'model': 'AssetMaintenance',
+            'id': maintenance.id,
+        })
+        return Response({
+            "code": 200,
+            "message": "Maintenance record updated successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def partial_update(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({
+            "code": 405,
+            "message": "Maintenance records cannot be deleted."
+        }, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    @action(detail=True, methods=['post'], url_path='start')
+    def start_maintenance(self, request, pk=None):
+        maintenance = self.get_object()
+
+        if maintenance.status == MaintenanceStatus.COMPLETED:
+            return Response({
+                "code": 400,
+                "message": "Maintenance record is already completed."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if maintenance.status == MaintenanceStatus.CANCELLED:
+            return Response({
+                "code": 400,
+                "message": "Maintenance record is already cancelled."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if maintenance.status == MaintenanceStatus.IN_PROGRESS:
+            return Response({
+                "code": 400,
+                "message": "Maintenance is already in progress."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            maintenance.status = MaintenanceStatus.IN_PROGRESS
+            maintenance.save(update_fields=['status', 'updated_at'])
+            # Ensure asset is still in maintenance status
+            asset = maintenance.asset
+            if asset.status != AssetStatus.MAINTENANCE:
+                asset.status = AssetStatus.MAINTENANCE
+                asset.save(update_fields=['status', 'updated_at'])
+
+        serializer = self.get_serializer(maintenance)
+        broadcast_custom_ws_event('asset_maintenance_started', {
+            'model': 'AssetMaintenance',
+            'id': maintenance.id,
+            'asset_id': asset.id,
+        })
+        return Response({
+            "code": 200,
+            "message": "Maintenance started successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='complete')
+    def complete_maintenance(self, request, pk=None):
+        maintenance = self.get_object()
+
+        if maintenance.status == MaintenanceStatus.COMPLETED:
+            return Response({
+                "code": 400,
+                "message": "Maintenance record is already completed."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if maintenance.status == MaintenanceStatus.CANCELLED:
+            return Response({
+                "code": 400,
+                "message": "Maintenance record is already cancelled."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        completion_date = request.data.get('completion_date')
+        cost = request.data.get('cost', maintenance.cost)
+        remarks = request.data.get('remarks', maintenance.remarks)
+
+        if not completion_date:
+            return Response({
+                "code": 400,
+                "message": "Please correct the highlighted fields.",
+                "errors": {"completion_date": ["Completion date is required."]}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        from datetime import date as dt_date
+        try:
+            from django.utils.dateparse import parse_date
+            comp_date = parse_date(str(completion_date))
+            if not comp_date:
+                raise ValueError()
+        except (ValueError, TypeError):
+            return Response({
+                "code": 400,
+                "message": "Please correct the highlighted fields.",
+                "errors": {"completion_date": ["Enter a valid date."]}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if comp_date < maintenance.maintenance_date:
+            return Response({
+                "code": 400,
+                "message": "Completion date cannot be before maintenance date.",
+                "errors": {"completion_date": ["Completion date cannot be before maintenance date."]}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if cost is not None:
+            try:
+                from decimal import Decimal
+                cost_val = Decimal(str(cost))
+                if cost_val < 0:
+                    return Response({
+                        "code": 400,
+                        "message": "Cost cannot be negative.",
+                        "errors": {"cost": ["Cost cannot be negative."]}
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            except Exception:
+                return Response({
+                    "code": 400,
+                    "message": "Please correct the highlighted fields.",
+                    "errors": {"cost": ["Enter a valid number."]}
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        asset = maintenance.asset
+
+        with transaction.atomic():
+            maintenance.status = MaintenanceStatus.COMPLETED
+            maintenance.completion_date = comp_date
+            if cost is not None:
+                from decimal import Decimal
+                maintenance.cost = Decimal(str(cost))
+            if remarks is not None:
+                maintenance.remarks = str(remarks).strip() or None
+            maintenance.save(update_fields=['status', 'completion_date', 'cost', 'remarks', 'updated_at'])
+
+            # Restore asset status based on previous_status
+            # Check if there is still an active allocation
+            has_active_alloc = AssetAllocation.objects.filter(asset=asset, is_current=True).exists()
+            if has_active_alloc or maintenance.previous_status == PreviousAssetStatus.ASSIGNED:
+                restored_status = AssetStatus.ASSIGNED
+            else:
+                restored_status = AssetStatus.AVAILABLE
+            asset.status = restored_status
+            asset.save(update_fields=['status', 'updated_at'])
+
+        serializer = self.get_serializer(maintenance)
+        broadcast_custom_ws_event('asset_maintenance_completed', {
+            'model': 'AssetMaintenance',
+            'id': maintenance.id,
+            'asset_id': asset.id,
+            'restored_status': asset.status,
+        })
+        return Response({
+            "code": 200,
+            "message": "Maintenance completed successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='cancel')
+    def cancel_maintenance(self, request, pk=None):
+        maintenance = self.get_object()
+
+        if maintenance.status == MaintenanceStatus.COMPLETED:
+            return Response({
+                "code": 400,
+                "message": "Maintenance record is already completed."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if maintenance.status == MaintenanceStatus.CANCELLED:
+            return Response({
+                "code": 400,
+                "message": "Maintenance record is already cancelled."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        asset = maintenance.asset
+
+        with transaction.atomic():
+            maintenance.status = MaintenanceStatus.CANCELLED
+            maintenance.save(update_fields=['status', 'updated_at'])
+
+            # Restore asset status
+            has_active_alloc = AssetAllocation.objects.filter(asset=asset, is_current=True).exists()
+            if has_active_alloc or maintenance.previous_status == PreviousAssetStatus.ASSIGNED:
+                restored_status = AssetStatus.ASSIGNED
+            else:
+                restored_status = AssetStatus.AVAILABLE
+            asset.status = restored_status
+            asset.save(update_fields=['status', 'updated_at'])
+
+        serializer = self.get_serializer(maintenance)
+        broadcast_custom_ws_event('asset_maintenance_cancelled', {
+            'model': 'AssetMaintenance',
+            'id': maintenance.id,
+            'asset_id': asset.id,
+            'restored_status': asset.status,
+        })
+        return Response({
+            "code": 200,
+            "message": "Maintenance cancelled successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path=r'history/(?P<asset_id>\d+)')
+    def asset_maintenance_history(self, request, asset_id=None):
+        asset = Asset.objects.filter(pk=asset_id).first()
+        if not asset:
+            return Response({
+                "code": 404,
+                "message": "Asset not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        records = self.get_queryset().filter(asset_id=asset_id)
+        page = self.paginate_queryset(records)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            paginated_res = self.get_paginated_response(serializer.data)
+            return Response({
+                "code": 200,
+                "message": "Asset maintenance history retrieved successfully.",
+                "data": paginated_res.data
+            }, status=status.HTTP_200_OK)
+
+        serializer = self.get_serializer(records, many=True)
+        return Response({
+            "code": 200,
+            "message": "Asset maintenance history retrieved successfully.",
             "data": serializer.data
         }, status=status.HTTP_200_OK)
 

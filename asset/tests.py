@@ -4,7 +4,7 @@ from rest_framework.test import APIClient
 from rest_framework import status
 from role.models import Role
 from users.models import User
-from asset.models import AssetCategory, Asset, AssetCondition, AssetStatus, AssetAllocation, AssetTransfer
+from asset.models import AssetCategory, Asset, AssetCondition, AssetStatus, AssetAllocation, AssetTransfer, AssetMaintenance
 from institution.models import Department, Program
 
 
@@ -777,4 +777,390 @@ class AssetTransferTests(TestCase):
 
         response = self.client.post(url, payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+class AssetMaintenanceTests(TestCase):
+    """Tests for the AssetMaintenance lifecycle."""
+
+    def setUp(self):
+        self.client = APIClient()
+
+        self.admin_role, _ = Role.objects.get_or_create(role_name='Admin')
+        self.student_role, _ = Role.objects.get_or_create(role_name='Student')
+
+        self.admin_user = User.objects.create(
+            name='Admin User',
+            username='maint_admin',
+            mail='maint_admin@test.com',
+            mobile_number='9000000001',
+            password='Password123!',
+            role=self.admin_role
+        )
+        self.student_user = User.objects.create(
+            name='Student User',
+            username='maint_student',
+            mail='maint_student@test.com',
+            mobile_number='9000000002',
+            password='Password123!',
+            role=self.student_role
+        )
+
+        self.category = AssetCategory.objects.create(name='Electronics Test')
+        self.asset = Asset.objects.create(
+            asset_code='MAINT-001',
+            asset_name='Test Laptop',
+            category=self.category,
+            status=AssetStatus.AVAILABLE
+        )
+        self.today = date.today()
+        self.client.force_authenticate(user=self.admin_user)
+
+    def _create_maintenance(self, asset=None, extra=None):
+        """Helper to create a maintenance record."""
+        payload = {
+            'asset': (asset or self.asset).id,
+            'maintenance_type': 'repair',
+            'issue_description': 'Screen cracked',
+            'maintenance_date': str(self.today),
+        }
+        if extra:
+            payload.update(extra)
+        return self.client.post('/api/asset-maintenance/create', payload, format='json')
+
+    # --- Create Maintenance ---
+    def test_create_maintenance_success(self):
+        resp = self._create_maintenance()
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data['code'], 201)
+        self.assertIn('created successfully', resp.data['message'].lower())
+        self.assertEqual(resp.data['data']['status'], 'pending')
+        # Asset status should now be maintenance
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.status, AssetStatus.MAINTENANCE)
+
+    def test_create_maintenance_asset_not_found(self):
+        payload = {
+            'asset': 99999,
+            'maintenance_type': 'repair',
+            'issue_description': 'Screen',
+            'maintenance_date': str(self.today),
+        }
+        resp = self.client.post('/api/asset-maintenance/create', payload, format='json')
+        self.assertEqual(resp.status_code, 404)
+
+    def test_create_maintenance_missing_issue_fails(self):
+        payload = {
+            'asset': self.asset.id,
+            'maintenance_type': 'repair',
+            'issue_description': '',
+            'maintenance_date': str(self.today),
+        }
+        resp = self.client.post('/api/asset-maintenance/create', payload, format='json')
+        self.assertEqual(resp.status_code, 400)
+
+    def test_create_maintenance_negative_cost_fails(self):
+        resp = self._create_maintenance(extra={'cost': -100})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('errors', resp.data)
+
+    def test_create_maintenance_disposed_asset_fails(self):
+        self.asset.status = AssetStatus.DISPOSED
+        self.asset.save()
+        resp = self._create_maintenance()
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('disposed', resp.data['message'].lower())
+
+    def test_create_maintenance_lost_asset_fails(self):
+        self.asset.status = AssetStatus.LOST
+        self.asset.save()
+        resp = self._create_maintenance()
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('lost', resp.data['message'].lower())
+
+    def test_create_maintenance_already_under_maintenance_fails(self):
+        self._create_maintenance()
+        # Try to create another maintenance for the same asset
+        asset2 = Asset.objects.create(
+            asset_code='MAINT-002', asset_name='Laptop 2',
+            category=self.category, status=AssetStatus.MAINTENANCE
+        )
+        resp = self._create_maintenance(asset=asset2)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('already under maintenance', resp.data['message'].lower())
+
+    def test_duplicate_active_maintenance_fails(self):
+        self._create_maintenance()
+        # asset is now under maintenance, try to create another
+        resp = self._create_maintenance()
+        self.assertEqual(resp.status_code, 400)
+
+    # --- Previous Status ---
+    def test_previous_status_available_stored(self):
+        self.assertEqual(self.asset.status, AssetStatus.AVAILABLE)
+        resp = self._create_maintenance()
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data['data']['previous_status'], 'available')
+
+    def test_previous_status_assigned_stored(self):
+        self.asset.status = AssetStatus.ASSIGNED
+        self.asset.save()
+        resp = self._create_maintenance()
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data['data']['previous_status'], 'assigned')
+
+    # --- Start Maintenance ---
+    def test_start_maintenance_success(self):
+        create_resp = self._create_maintenance()
+        maint_id = create_resp.data['data']['id']
+        resp = self.client.post(f'/api/asset-maintenance/start/{maint_id}', format='json')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['data']['status'], 'in_progress')
+        self.assertIn('started successfully', resp.data['message'].lower())
+
+    def test_start_completed_maintenance_fails(self):
+        create_resp = self._create_maintenance()
+        maint_id = create_resp.data['data']['id']
+        self.client.post(f'/api/asset-maintenance/start/{maint_id}', format='json')
+        self.client.post(f'/api/asset-maintenance/complete/{maint_id}', {
+            'completion_date': str(self.today)
+        }, format='json')
+        resp = self.client.post(f'/api/asset-maintenance/start/{maint_id}', format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('completed', resp.data['message'].lower())
+
+    def test_start_cancelled_maintenance_fails(self):
+        create_resp = self._create_maintenance()
+        maint_id = create_resp.data['data']['id']
+        self.client.post(f'/api/asset-maintenance/cancel/{maint_id}', format='json')
+        resp = self.client.post(f'/api/asset-maintenance/start/{maint_id}', format='json')
+        self.assertEqual(resp.status_code, 400)
+
+    # --- Complete Maintenance ---
+    def test_complete_maintenance_success(self):
+        create_resp = self._create_maintenance()
+        maint_id = create_resp.data['data']['id']
+        resp = self.client.post(f'/api/asset-maintenance/complete/{maint_id}', {
+            'completion_date': str(self.today),
+            'cost': '1500.00',
+        }, format='json')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['data']['status'], 'completed')
+        self.assertIn('completed successfully', resp.data['message'].lower())
+        # Asset should be restored to available
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.status, AssetStatus.AVAILABLE)
+
+    def test_complete_maintenance_restores_assigned_status(self):
+        """Assigned → maintenance → assigned"""
+        self.asset.status = AssetStatus.ASSIGNED
+        self.asset.save()
+        # Create an active allocation
+        alloc = AssetAllocation.objects.create(
+            asset=self.asset, is_current=True
+        )
+        resp = self._create_maintenance()
+        maint_id = resp.data['data']['id']
+        self.assertEqual(resp.data['data']['previous_status'], 'assigned')
+
+        complete_resp = self.client.post(f'/api/asset-maintenance/complete/{maint_id}', {
+            'completion_date': str(self.today),
+        }, format='json')
+        self.assertEqual(complete_resp.status_code, 200)
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.status, AssetStatus.ASSIGNED)
+
+    def test_complete_maintenance_without_completion_date_fails(self):
+        create_resp = self._create_maintenance()
+        maint_id = create_resp.data['data']['id']
+        resp = self.client.post(f'/api/asset-maintenance/complete/{maint_id}', {}, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('completion_date', resp.data.get('errors', {}))
+
+    def test_complete_maintenance_invalid_date_fails(self):
+        create_resp = self._create_maintenance()
+        maint_id = create_resp.data['data']['id']
+        resp = self.client.post(f'/api/asset-maintenance/complete/{maint_id}', {
+            'completion_date': str(self.today - timedelta(days=10)),
+        }, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('cannot be before', resp.data['message'].lower())
+
+    def test_complete_maintenance_negative_cost_fails(self):
+        create_resp = self._create_maintenance()
+        maint_id = create_resp.data['data']['id']
+        resp = self.client.post(f'/api/asset-maintenance/complete/{maint_id}', {
+            'completion_date': str(self.today),
+            'cost': '-500',
+        }, format='json')
+        self.assertEqual(resp.status_code, 400)
+
+    def test_complete_already_completed_fails(self):
+        create_resp = self._create_maintenance()
+        maint_id = create_resp.data['data']['id']
+        self.client.post(f'/api/asset-maintenance/complete/{maint_id}', {
+            'completion_date': str(self.today)
+        }, format='json')
+        resp = self.client.post(f'/api/asset-maintenance/complete/{maint_id}', {
+            'completion_date': str(self.today)
+        }, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('already completed', resp.data['message'].lower())
+
+    # --- Cancel Maintenance ---
+    def test_cancel_maintenance_success(self):
+        create_resp = self._create_maintenance()
+        maint_id = create_resp.data['data']['id']
+        resp = self.client.post(f'/api/asset-maintenance/cancel/{maint_id}', format='json')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['data']['status'], 'cancelled')
+        self.assertIn('cancelled successfully', resp.data['message'].lower())
+        # Asset should be restored to available
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.status, AssetStatus.AVAILABLE)
+
+    def test_cancel_already_cancelled_fails(self):
+        create_resp = self._create_maintenance()
+        maint_id = create_resp.data['data']['id']
+        self.client.post(f'/api/asset-maintenance/cancel/{maint_id}', format='json')
+        resp = self.client.post(f'/api/asset-maintenance/cancel/{maint_id}', format='json')
+        self.assertEqual(resp.status_code, 400)
+
+    def test_cancel_completed_fails(self):
+        create_resp = self._create_maintenance()
+        maint_id = create_resp.data['data']['id']
+        self.client.post(f'/api/asset-maintenance/complete/{maint_id}', {
+            'completion_date': str(self.today)
+        }, format='json')
+        resp = self.client.post(f'/api/asset-maintenance/cancel/{maint_id}', format='json')
+        self.assertEqual(resp.status_code, 400)
+
+    # --- Allocation Blocked During Maintenance ---
+    def test_allocation_blocked_during_maintenance(self):
+        self._create_maintenance()
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.status, AssetStatus.MAINTENANCE)
+        resp = self.client.post('/api/asset-allocations/assign', {
+            'asset': self.asset.id,
+            'assigned_to': self.admin_user.id,
+        }, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('maintenance', resp.data['message'].lower())
+
+    # --- Transfer Blocked During Maintenance ---
+    def test_transfer_blocked_during_maintenance(self):
+        self._create_maintenance()
+        resp = self.client.post('/api/asset-transfers/transfer', {
+            'asset': self.asset.id,
+            'to_user': self.admin_user.id,
+        }, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('maintenance', resp.data['message'].lower())
+
+    # --- History Preserved ---
+    def test_maintenance_history_not_deleted_on_lifecycle(self):
+        create_resp = self._create_maintenance()
+        maint_id = create_resp.data['data']['id']
+        self.client.post(f'/api/asset-maintenance/complete/{maint_id}', {
+            'completion_date': str(self.today)
+        }, format='json')
+        from asset.models import AssetMaintenance
+        self.assertTrue(AssetMaintenance.objects.filter(id=maint_id).exists())
+
+    # --- History Endpoint ---
+    def test_asset_maintenance_history(self):
+        self._create_maintenance()
+        resp = self.client.get(f'/api/asset-maintenance/history/{self.asset.id}')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('data', resp.data)
+
+    # --- Pagination ---
+    def test_maintenance_list_pagination(self):
+        resp = self.client.get('/api/asset-maintenance/list?page=1&page_size=5')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('data', resp.data)
+
+    # --- Search ---
+    def test_maintenance_list_search(self):
+        self._create_maintenance()
+        resp = self.client.get('/api/asset-maintenance/list?search=MAINT-001')
+        self.assertEqual(resp.status_code, 200)
+        self.assertGreaterEqual(len(resp.data['data']['results']), 1)
+
+    # --- Filter by status ---
+    def test_maintenance_list_filter_by_status(self):
+        self._create_maintenance()
+        resp = self.client.get('/api/asset-maintenance/list?status=pending')
+        self.assertEqual(resp.status_code, 200)
+        results = resp.data['data']['results']
+        for r in results:
+            self.assertEqual(r['status'], 'pending')
+
+    # --- Permissions ---
+    def test_student_cannot_create_maintenance(self):
+        self.client.force_authenticate(user=self.student_user)
+        resp = self._create_maintenance()
+        self.assertEqual(resp.status_code, 403)
+
+    def test_student_can_read_maintenance(self):
+        self.client.force_authenticate(user=self.student_user)
+        resp = self.client.get('/api/asset-maintenance/list')
+        self.assertEqual(resp.status_code, 200)
+
+    def test_unauthenticated_cannot_access(self):
+        self.client.force_authenticate(user=None)
+        resp = self.client.get('/api/asset-maintenance/list')
+        self.assertEqual(resp.status_code, 401)
+
+    # --- Messages ---
+    def test_create_success_message(self):
+        resp = self._create_maintenance()
+        self.assertIn('created successfully', resp.data['message'].lower())
+
+    def test_start_success_message(self):
+        create_resp = self._create_maintenance()
+        maint_id = create_resp.data['data']['id']
+        resp = self.client.post(f'/api/asset-maintenance/start/{maint_id}', format='json')
+        self.assertIn('started successfully', resp.data['message'].lower())
+
+    def test_complete_success_message(self):
+        create_resp = self._create_maintenance()
+        maint_id = create_resp.data['data']['id']
+        resp = self.client.post(f'/api/asset-maintenance/complete/{maint_id}', {
+            'completion_date': str(self.today)
+        }, format='json')
+        self.assertIn('completed successfully', resp.data['message'].lower())
+
+    def test_cancel_success_message(self):
+        create_resp = self._create_maintenance()
+        maint_id = create_resp.data['data']['id']
+        resp = self.client.post(f'/api/asset-maintenance/cancel/{maint_id}', format='json')
+        self.assertIn('cancelled successfully', resp.data['message'].lower())
+
+    # --- Transaction Rollback ---
+    def test_invalid_maintenance_date_rolls_back(self):
+        """Creating with bad date should not change asset status"""
+        original_status = self.asset.status
+        payload = {
+            'asset': self.asset.id,
+            'maintenance_type': 'repair',
+            'issue_description': 'Issue',
+            'maintenance_date': 'not-a-date',
+        }
+        resp = self.client.post('/api/asset-maintenance/create', payload, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.status, original_status)
+
+    # --- Available → Maintenance → Available Flow ---
+    def test_available_maintenance_available_flow(self):
+        self.assertEqual(self.asset.status, AssetStatus.AVAILABLE)
+        create_resp = self._create_maintenance()
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.status, AssetStatus.MAINTENANCE)
+
+        maint_id = create_resp.data['data']['id']
+        self.client.post(f'/api/asset-maintenance/complete/{maint_id}', {
+            'completion_date': str(self.today)
+        }, format='json')
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.status, AssetStatus.AVAILABLE)
 
