@@ -511,18 +511,18 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
             Paragraph("S.No", tbl_hdr_style),
             Paragraph("Reg. No", tbl_hdr_style),
             Paragraph("Student Name", tbl_hdr_style),
-            Paragraph("Total Hrs", tbl_hdr_style),
+            Paragraph("Total Hours", tbl_hdr_style),
             Paragraph("Present", tbl_hdr_style),
             Paragraph("Absent", tbl_hdr_style),
             Paragraph("OD", tbl_hdr_style),
+            Paragraph("Total Attended", tbl_hdr_style),
             Paragraph("Overall %", tbl_hdr_style),
             Paragraph("Status", tbl_hdr_style),
         ]
 
         # Column widths
-        # We have 9 columns. A4 portrait width = 595. Margins = 20*2 = 40. Usable = 555.
         # Adjusted for ~555 total:
-        col_widths = [25, 70, 140, 50, 65, 75, 45, 45, 40] 
+        col_widths = [25, 70, 135, 50, 45, 45, 35, 60, 50, 40] 
 
         table_rows = [header_row]
         eligible_cnt = 0
@@ -534,6 +534,7 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
 
             st_total_conducted = 0
             st_total_attended = 0
+            st_total_present = 0
             st_total_od = 0
 
             for sub in subjects_list:
@@ -543,6 +544,8 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
                     status = att_map.get((st.id, act.id))
                     if status in ['P', 'OD']:
                         st_total_attended += 1
+                    if status == 'P':
+                        st_total_present += 1
                     if status == 'OD':
                         st_total_od += 1
                         
@@ -561,9 +564,10 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
                 Paragraph(reg_no, tbl_cell_center),
                 Paragraph(st_name.upper(), tbl_cell_left),
                 Paragraph(str(st_total_conducted), tbl_cell_center),
-                Paragraph(str(st_total_attended), tbl_cell_center),
+                Paragraph(str(st_total_present), tbl_cell_center),
                 Paragraph(str(st_total_not_attended), tbl_cell_center),
                 Paragraph(str(st_total_od), tbl_cell_center),
+                Paragraph(str(st_total_attended), tbl_cell_center),
                 Paragraph(f"<b>{overall_pct:.1f}%</b>", tbl_cell_center),
                 status_p,
             ]
@@ -896,14 +900,16 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
             Paragraph("Reg. No", tbl_hdr_style),
             Paragraph("Student Name", tbl_hdr_style),
             Paragraph("Total Hours", tbl_hdr_style),
-            Paragraph("Attended Hours", tbl_hdr_style),
-            Paragraph("Total OD", tbl_hdr_style),
+            Paragraph("Present", tbl_hdr_style),
+            Paragraph("Absent", tbl_hdr_style),
+            Paragraph("OD", tbl_hdr_style),
+            Paragraph("Total Attended", tbl_hdr_style),
             Paragraph("Overall %", tbl_hdr_style),
             Paragraph("Status", tbl_hdr_style),
         ]
 
         table_rows = [table_header]
-        col_widths = [25, 75, 155, 55, 60, 50, 55, 65]
+        col_widths = [25, 70, 130, 50, 45, 45, 30, 55, 45, 45]
 
         eligible_cnt = 0
         shortage_cnt = 0
@@ -914,17 +920,22 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
 
             st_total_conducted = 0
             st_total_attended = 0
+            st_total_present = 0
             st_total_od = 0
 
             for sub in subjects_list:
                 act_list = subject_activities.get(sub.id, [])
                 sub_conducted = len(act_list)
                 sub_attended = sum(1 for act in act_list if att_map.get((st.id, act.id)) in ['P', 'OD'])
+                sub_present = sum(1 for act in act_list if att_map.get((st.id, act.id)) == 'P')
                 sub_od = sum(1 for act in act_list if att_map.get((st.id, act.id)) == 'OD')
 
                 st_total_conducted += sub_conducted
                 st_total_attended += sub_attended
+                st_total_present += sub_present
                 st_total_od += sub_od
+                
+            st_total_not_attended = st_total_conducted - st_total_attended
 
             overall_pct = (st_total_attended / st_total_conducted * 100) if st_total_conducted > 0 else 100.0
             if overall_pct >= 75.0:
@@ -939,8 +950,10 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
                 Paragraph(reg_no, tbl_cell_center),
                 Paragraph(st_name.upper(), tbl_cell_left),
                 Paragraph(str(st_total_conducted), tbl_cell_center),
-                Paragraph(str(st_total_attended), tbl_cell_center),
+                Paragraph(str(st_total_present), tbl_cell_center),
+                Paragraph(str(st_total_not_attended), tbl_cell_center),
                 Paragraph(str(st_total_od), tbl_cell_center),
+                Paragraph(str(st_total_attended), tbl_cell_center),
                 Paragraph(f"<b>{overall_pct:.1f}%</b>", tbl_cell_center),
                 status_p
             ]

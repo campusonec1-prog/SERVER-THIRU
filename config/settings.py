@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     'leave',
     'lms',
     'asset',
+    'library',
 ]
 
 
