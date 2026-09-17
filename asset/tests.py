@@ -4,7 +4,8 @@ from rest_framework.test import APIClient
 from rest_framework import status
 from role.models import Role
 from users.models import User
-from asset.models import AssetCategory, Asset, AssetCondition, AssetStatus
+from asset.models import AssetCategory, Asset, AssetCondition, AssetStatus, AssetAllocation
+from institution.models import Department, Program
 
 
 class AssetCategoryTests(TestCase):
@@ -382,3 +383,156 @@ class AssetTests(TestCase):
         res2 = self.client.get('/api/assets/list?status=damaged')
         self.assertEqual(len(res2.data['data']['results']), 1)
         self.assertEqual(res2.data['data']['results'][0]['asset_code'], 'AST-400')
+
+
+class AssetAllocationTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        # Create role & admin user
+        self.admin_role, _ = Role.objects.get_or_create(role_name='Admin')
+        self.admin_user = User.objects.create(
+            name='Allocation Admin',
+            username='alloc_admin',
+            mail='alloc_admin@test.com',
+            mobile_number='9876543230',
+            password='Password123!',
+            role=self.admin_role
+        )
+
+        # Create target user to allocate asset to
+        self.target_user = User.objects.create(
+            name='Target Staff User',
+            username='target_staff',
+            mail='target_staff@test.com',
+            mobile_number='9876543231',
+            password='Password123!',
+            role=self.admin_role
+        )
+
+        # Create program & department
+        self.program = Program.objects.create(
+            program_name='B.Tech CS',
+            program_level='UG',
+            duration=4
+        )
+        self.dept = Department.objects.create(
+            department_name='Computer Science',
+            department_code='CSE',
+            short_name='CS',
+            program=self.program
+        )
+
+        # Authenticate admin
+        self.client.force_authenticate(user=self.admin_user)
+
+        # Create category and available asset
+        self.category = AssetCategory.objects.create(name='Hardware', is_active=True)
+        self.asset = Asset.objects.create(
+            asset_code='AST-ALLOC-01',
+            asset_name='Dell Workstation',
+            category=self.category,
+            status=AssetStatus.AVAILABLE
+        )
+
+    def test_assign_asset_success(self):
+        url = '/api/asset-allocations/assign'
+        payload = {
+            'asset': self.asset.id,
+            'assigned_to': self.target_user.id,
+            'department': self.dept.id,
+            'remarks': 'Assigned for AI lab research'
+        }
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['code'], 201)
+        self.assertTrue(response.data['data']['is_current'])
+        self.assertEqual(response.data['data']['asset_code'], 'AST-ALLOC-01')
+
+        # Verify asset status updated to 'assigned'
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.status, AssetStatus.ASSIGNED)
+
+    def test_assign_non_available_asset_fails(self):
+        # Update asset to assigned
+        self.asset.status = AssetStatus.ASSIGNED
+        self.asset.save()
+
+        url = '/api/asset-allocations/assign'
+        payload = {
+            'asset': self.asset.id,
+            'assigned_to': self.target_user.id,
+        }
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('cannot be assigned', response.data['message'].lower())
+
+    def test_return_asset_success(self):
+        # Create active allocation first
+        alloc = AssetAllocation.objects.create(
+            asset=self.asset,
+            assigned_to=self.target_user,
+            department=self.dept,
+            is_current=True
+        )
+        self.asset.status = AssetStatus.ASSIGNED
+        self.asset.save()
+
+        url = f'/api/asset-allocations/return/{alloc.id}'
+        payload = {
+            'remarks': 'Returned after project completion'
+        }
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['data']['is_current'])
+        self.assertIsNotNone(response.data['data']['returned_date'])
+
+        # Verify asset status reset to 'available'
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.status, AssetStatus.AVAILABLE)
+
+    def test_return_already_returned_asset_fails(self):
+        alloc = AssetAllocation.objects.create(
+            asset=self.asset,
+            assigned_to=self.target_user,
+            is_current=False
+        )
+
+        url = f'/api/asset-allocations/return/{alloc.id}'
+        response = self.client.post(url, {}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('not currently assigned', response.data['message'].lower())
+
+    def test_reassign_returned_asset_success(self):
+        # Step 1: Assign and Return
+        alloc1 = AssetAllocation.objects.create(
+            asset=self.asset,
+            assigned_to=self.target_user,
+            is_current=False
+        )
+        self.asset.status = AssetStatus.AVAILABLE
+        self.asset.save()
+
+        # Step 2: Assign again
+        url = '/api/asset-allocations/assign'
+        payload = {
+            'asset': self.asset.id,
+            'assigned_to': self.target_user.id
+        }
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        # Check total allocation history count is 2
+        self.assertEqual(AssetAllocation.objects.filter(asset=self.asset).count(), 2)
+
+    def test_list_and_filter_allocations(self):
+        AssetAllocation.objects.create(
+            asset=self.asset,
+            assigned_to=self.target_user,
+            is_current=True
+        )
+
+        url = f'/api/asset-allocations/list?is_current=true&asset={self.asset.id}'
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['data']['results']), 1)

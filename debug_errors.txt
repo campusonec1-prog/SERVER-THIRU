@@ -561,3 +561,444 @@
   }
 }
 
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset Category is already exist"
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Category name cannot be blank."
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Ensure this field has no more than 100 characters."
+  }
+}
+
+{
+  "path": "/api/asset-categories/edit/26",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset Category is already exist"
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Category name cannot be blank."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset is already exist"
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is already exist"
+  }
+}
+
+{
+  "path": "/api/asset-categories/remove/35",
+  "method": "DELETE",
+  "response_content": {
+    "code": 400,
+    "message": "Cannot delete asset category because assets are associated with it."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Category: Cannot assign an inactive category to a new asset."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Warranty Expiry: Warranty expiry date cannot be earlier than purchase date."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Purchase Price: Purchase price cannot be negative."
+  }
+}
+
+{
+  "path": "/api/asset-allocations/assign",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be assigned because it is currently assigned."
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset Category is already exist"
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Category name cannot be blank."
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Ensure this field has no more than 100 characters."
+  }
+}
+
+{
+  "path": "/api/asset-categories/edit/32",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset Category is already exist"
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Category name cannot be blank."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset is already exist"
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is already exist"
+  }
+}
+
+{
+  "path": "/api/asset-categories/remove/41",
+  "method": "DELETE",
+  "response_content": {
+    "code": 400,
+    "message": "Cannot delete asset category because assets are associated with it."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Category: Cannot assign an inactive category to a new asset."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Warranty Expiry: Warranty expiry date cannot be earlier than purchase date."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Purchase Price: Purchase price cannot be negative."
+  }
+}
+
+{
+  "path": "/api/asset-allocations/assign",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be assigned because it is currently assigned."
+  }
+}
+
+{
+  "path": "/api/asset-allocations/return/5",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is not currently assigned."
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset Category is already exist"
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Category name cannot be blank."
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Ensure this field has no more than 100 characters."
+  }
+}
+
+{
+  "path": "/api/asset-categories/edit/32",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset Category is already exist"
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Category name cannot be blank."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset is already exist"
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is already exist"
+  }
+}
+
+{
+  "path": "/api/asset-categories/remove/41",
+  "method": "DELETE",
+  "response_content": {
+    "code": 400,
+    "message": "Cannot delete asset category because assets are associated with it."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Category: Cannot assign an inactive category to a new asset."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Warranty Expiry: Warranty expiry date cannot be earlier than purchase date."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Purchase Price: Purchase price cannot be negative."
+  }
+}
+
+{
+  "path": "/api/asset-allocations/assign",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be assigned because it is currently assigned."
+  }
+}
+
+{
+  "path": "/api/asset-allocations/return/5",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is not currently assigned."
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset Category is already exist"
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Category name cannot be blank."
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Ensure this field has no more than 100 characters."
+  }
+}
+
+{
+  "path": "/api/asset-categories/edit/32",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset Category is already exist"
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Category name cannot be blank."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset is already exist"
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is already exist"
+  }
+}
+
+{
+  "path": "/api/asset-categories/remove/41",
+  "method": "DELETE",
+  "response_content": {
+    "code": 400,
+    "message": "Cannot delete asset category because assets are associated with it."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Category: Cannot assign an inactive category to a new asset."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Warranty Expiry: Warranty expiry date cannot be earlier than purchase date."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Purchase Price: Purchase price cannot be negative."
+  }
+}
+

@@ -17,3 +17,12 @@ class AssetPermission(BaseRolePermission):
     """
     read_roles = ['authenticated']
     write_roles = ['admin', 'administrator']
+
+
+class AssetAllocationPermission(BaseRolePermission):
+    """
+    Permission class for Asset Allocation operations.
+    Allows authenticated users to read, and admin/administrator users to perform assign/return actions.
+    """
+    read_roles = ['authenticated']
+    write_roles = ['admin', 'administrator', 'hod']

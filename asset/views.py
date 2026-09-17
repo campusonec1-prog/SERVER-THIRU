@@ -1,15 +1,37 @@
 from django.http import Http404
-from django.db import IntegrityError, models
+from django.db import IntegrityError, models, transaction
+from django.utils import timezone
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied, ValidationError
 from django_filters.rest_framework import DjangoFilterBackend
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 from common.pagination import CustomPageNumberPagination
-from .models import AssetCategory, Asset
-from .serializers import AssetCategorySerializer, AssetSerializer
-from .permissions import AssetCategoryPermission, AssetPermission
+from .models import AssetCategory, Asset, AssetAllocation, AssetStatus
+from .serializers import AssetCategorySerializer, AssetSerializer, AssetAllocationSerializer
+from .permissions import AssetCategoryPermission, AssetPermission, AssetAllocationPermission
+
+
+def broadcast_custom_ws_event(event_name, data):
+    channel_layer = get_channel_layer()
+    if channel_layer:
+        try:
+            async_to_sync(channel_layer.group_send)(
+                'realtime_updates',
+                {
+                    'type': 'broadcast_update',
+                    'data': {
+                        'model': 'AssetAllocation',
+                        'event': event_name,
+                        'data': data
+                    }
+                }
+            )
+        except Exception:
+            pass
 
 
 class AssetCategoryViewSet(viewsets.ModelViewSet):
@@ -217,4 +239,228 @@ class AssetViewSet(viewsets.ModelViewSet):
         return Response({
             "code": 200,
             "message": "Asset deleted successfully."
+        }, status=status.HTTP_200_OK)
+
+
+class AssetAllocationViewSet(viewsets.ModelViewSet):
+    queryset = AssetAllocation.objects.select_related(
+        'asset', 'asset__category', 'assigned_to', 'department'
+    ).all().order_by('-assigned_date')
+    serializer_class = AssetAllocationSerializer
+    permission_classes = [AssetAllocationPermission]
+    pagination_class = CustomPageNumberPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    search_fields = [
+        'asset__asset_code',
+        'asset__asset_name',
+        'asset__serial_number',
+        'assigned_to__name',
+        'assigned_to__username',
+        'department__department_name',
+        'department__department_code',
+    ]
+    filterset_fields = ['department', 'asset', 'assigned_to']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        is_current_param = self.request.query_params.get('is_current', None)
+        if is_current_param is not None and is_current_param != '' and is_current_param.lower() != 'all':
+            val = is_current_param.lower()
+            if val in ['true', '1']:
+                qs = qs.filter(is_current=True)
+            elif val in ['false', '0']:
+                qs = qs.filter(is_current=False)
+        return qs
+
+    def handle_exception(self, exc):
+        if isinstance(exc, (Http404, NotFound)):
+            return Response({
+                "code": 404,
+                "message": "Asset allocation record not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if isinstance(exc, NotAuthenticated):
+            return Response({
+                "code": 401,
+                "message": "You don't have access to this resource."
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        if isinstance(exc, PermissionDenied):
+            return Response({
+                "code": 403,
+                "message": "You don't have permission to perform this action."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        if isinstance(exc, IntegrityError):
+            return Response({
+                "code": 400,
+                "message": "Asset is already assigned.",
+                "errors": {
+                    "asset": ["This asset already has an active allocation."]
+                }
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        return super().handle_exception(exc)
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Asset allocations retrieved successfully.",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Asset allocation retrieved successfully.",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='assign')
+    def assign_asset(self, request):
+        asset_id = request.data.get('asset')
+        if not asset_id:
+            return Response({
+                "code": 400,
+                "message": "Please correct the highlighted fields.",
+                "errors": {"asset": ["Asset is required."]}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        asset = Asset.objects.filter(pk=asset_id).first()
+        if not asset:
+            return Response({
+                "code": 404,
+                "message": "Asset not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # 1. Status validation
+        if asset.status != AssetStatus.AVAILABLE:
+            status_labels = {
+                AssetStatus.ASSIGNED: "assigned",
+                AssetStatus.MAINTENANCE: "under maintenance",
+                AssetStatus.DAMAGED: "damaged",
+                AssetStatus.LOST: "lost",
+                AssetStatus.DISPOSED: "disposed",
+            }
+            label = status_labels.get(asset.status, asset.get_status_display().lower())
+            return Response({
+                "code": 400,
+                "message": f"Asset cannot be assigned because it is currently {label}."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2. Check active allocation
+        if AssetAllocation.objects.filter(asset=asset, is_current=True).exists():
+            return Response({
+                "code": 400,
+                "message": "Asset is already assigned.",
+                "errors": {
+                    "asset": ["This asset already has an active allocation."]
+                }
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                "code": 400,
+                "message": "Please correct the highlighted fields.",
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            allocation = serializer.save(is_current=True)
+            asset.status = AssetStatus.ASSIGNED
+            asset.save(update_fields=['status', 'updated_at'])
+
+        broadcast_custom_ws_event('asset_assigned', serializer.data)
+
+        return Response({
+            "code": 201,
+            "message": "Asset assigned successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post', 'patch'], url_path='return')
+    def return_asset(self, request):
+        allocation_id = request.data.get('allocation_id') or request.data.get('id')
+        asset_id = request.data.get('asset_id') or request.data.get('asset')
+
+        allocation = None
+        if allocation_id:
+            allocation = AssetAllocation.objects.filter(pk=allocation_id, is_current=True).first()
+        elif asset_id:
+            allocation = AssetAllocation.objects.filter(asset_id=asset_id, is_current=True).first()
+
+        if not allocation:
+            return Response({
+                "code": 400,
+                "message": "Asset is not currently assigned."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            allocation.is_current = False
+            allocation.returned_date = timezone.now()
+            allocation.save(update_fields=['is_current', 'returned_date'])
+
+            asset = allocation.asset
+            asset.status = AssetStatus.AVAILABLE
+            asset.save(update_fields=['status', 'updated_at'])
+
+        result_serializer = self.get_serializer(allocation)
+        broadcast_custom_ws_event('asset_returned', result_serializer.data)
+
+        return Response({
+            "code": 200,
+            "message": "Asset returned successfully.",
+            "data": result_serializer.data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post', 'patch'], url_path='return-by-id')
+    def return_asset_by_id(self, request, pk=None):
+        allocation = AssetAllocation.objects.filter(pk=pk, is_current=True).first()
+        if not allocation:
+            return Response({
+                "code": 400,
+                "message": "Asset is not currently assigned."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            allocation.is_current = False
+            allocation.returned_date = timezone.now()
+            allocation.save(update_fields=['is_current', 'returned_date'])
+
+            asset = allocation.asset
+            asset.status = AssetStatus.AVAILABLE
+            asset.save(update_fields=['status', 'updated_at'])
+
+        result_serializer = self.get_serializer(allocation)
+        broadcast_custom_ws_event('asset_returned', result_serializer.data)
+
+        return Response({
+            "code": 200,
+            "message": "Asset returned successfully.",
+            "data": result_serializer.data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='history/(?P<asset_id>\\d+)')
+    def asset_history(self, request, asset_id=None):
+        asset = Asset.objects.filter(pk=asset_id).first()
+        if not asset:
+            return Response({
+                "code": 404,
+                "message": "Asset not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        allocations = self.get_queryset().filter(asset_id=asset_id)
+        page = self.paginate_queryset(allocations)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(allocations, many=True)
+        return Response({
+            "code": 200,
+            "message": "Asset allocation history retrieved successfully.",
+            "data": serializer.data
         }, status=status.HTTP_200_OK)

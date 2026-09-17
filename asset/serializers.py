@@ -1,5 +1,7 @@
 from rest_framework import serializers
-from .models import AssetCategory, Asset, AssetCondition, AssetStatus
+from users.models import User
+from institution.models import Department
+from .models import AssetCategory, Asset, AssetCondition, AssetStatus, AssetAllocation
 
 
 class AssetCategorySerializer(serializers.ModelSerializer):
@@ -223,3 +225,69 @@ class AssetSerializer(serializers.ModelSerializer):
             })
 
         return attrs
+
+
+class AssetAllocationSerializer(serializers.ModelSerializer):
+    asset_code = serializers.CharField(source='asset.asset_code', read_only=True)
+    asset_name = serializers.CharField(source='asset.asset_name', read_only=True)
+    serial_number = serializers.CharField(source='asset.serial_number', read_only=True)
+    category_name = serializers.CharField(source='asset.category.name', read_only=True)
+    assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True, default=None)
+    assigned_to_username = serializers.CharField(source='assigned_to.username', read_only=True, default=None)
+    department_name = serializers.CharField(source='department.department_name', read_only=True, default=None)
+    department_code = serializers.CharField(source='department.department_code', read_only=True, default=None)
+
+    asset = serializers.PrimaryKeyRelatedField(
+        queryset=Asset.objects.all(),
+        required=True,
+        error_messages={
+            'required': 'Asset is required.',
+            'does_not_exist': 'Asset not found.',
+        }
+    )
+    assigned_to = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(),
+        required=False,
+        allow_null=True,
+        error_messages={
+            'does_not_exist': 'Assigned user does not exist.',
+        }
+    )
+    department = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.all(),
+        required=False,
+        allow_null=True,
+        error_messages={
+            'does_not_exist': 'Department does not exist.',
+        }
+    )
+    remarks = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    class Meta:
+        model = AssetAllocation
+        fields = [
+            'id',
+            'asset',
+            'asset_code',
+            'asset_name',
+            'serial_number',
+            'category_name',
+            'assigned_to',
+            'assigned_to_name',
+            'assigned_to_username',
+            'department',
+            'department_name',
+            'department_code',
+            'assigned_date',
+            'returned_date',
+            'remarks',
+            'is_current',
+            'created_at',
+        ]
+        read_only_fields = ['id', 'assigned_date', 'returned_date', 'is_current', 'created_at']
+
+    def validate_remarks(self, value):
+        if value is not None:
+            trimmed = str(value).strip()
+            return trimmed or None
+        return value
