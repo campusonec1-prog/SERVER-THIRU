@@ -36,6 +36,7 @@ urlpatterns = [
     path('api/assets/', include('asset.asset_urls')),
     path('api/library/', include('library.urls')),
     path('api/asset-allocations/', include('asset.allocation_urls')),
+    path('api/asset-transfers/', include('asset.transfer_urls')),
     path('api/documents/upload', DocumentUploadView.as_view(), name='document-upload'),
 ]
 

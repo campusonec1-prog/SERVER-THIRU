@@ -26,3 +26,13 @@ class AssetAllocationPermission(BaseRolePermission):
     """
     read_roles = ['authenticated']
     write_roles = ['admin', 'administrator', 'hod']
+
+
+class AssetTransferPermission(BaseRolePermission):
+    """
+    Permission class for Asset Transfer operations.
+    Allows authenticated users to read, and admin/administrator/hod users to perform transfer actions.
+    """
+    read_roles = ['authenticated']
+    write_roles = ['admin', 'administrator', 'hod']
+

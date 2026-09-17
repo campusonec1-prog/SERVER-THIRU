@@ -92,6 +92,7 @@ class AssetAllocation(models.Model):
         blank=True,
         related_name='asset_allocations'
     )
+    location = models.CharField(max_length=200, blank=True, null=True)
     assigned_date = models.DateTimeField(auto_now_add=True)
     returned_date = models.DateTimeField(blank=True, null=True)
     remarks = models.TextField(blank=True, null=True)
@@ -112,3 +113,52 @@ class AssetAllocation(models.Model):
     def __str__(self):
         assigned_name = self.assigned_to.name if self.assigned_to else "Unassigned"
         return f"{self.asset.asset_code} assigned to {assigned_name} ({'Current' if self.is_current else 'Returned'})"
+
+
+class AssetTransfer(models.Model):
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.PROTECT,
+        related_name='transfers'
+    )
+    from_user = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='asset_transfers_from'
+    )
+    to_user = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='asset_transfers_to'
+    )
+    from_department = models.ForeignKey(
+        'institution.Department',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='asset_transfers_from'
+    )
+    to_department = models.ForeignKey(
+        'institution.Department',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='asset_transfers_to'
+    )
+    from_location = models.CharField(max_length=200, null=True, blank=True)
+    to_location = models.CharField(max_length=200, null=True, blank=True)
+    transfer_date = models.DateTimeField(auto_now_add=True)
+    remarks = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'asset_transfers'
+        ordering = ['-transfer_date']
+
+    def __str__(self):
+        return f"Transfer of {self.asset.asset_code} on {self.transfer_date}"
+

@@ -4,7 +4,7 @@ from rest_framework.test import APIClient
 from rest_framework import status
 from role.models import Role
 from users.models import User
-from asset.models import AssetCategory, Asset, AssetCondition, AssetStatus, AssetAllocation
+from asset.models import AssetCategory, Asset, AssetCondition, AssetStatus, AssetAllocation, AssetTransfer
 from institution.models import Department, Program
 
 
@@ -536,3 +536,245 @@ class AssetAllocationTests(TestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data['data']['results']), 1)
+
+
+class AssetTransferTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        self.admin_role, _ = Role.objects.get_or_create(role_name='Admin')
+        self.student_role, _ = Role.objects.get_or_create(role_name='Student')
+
+        self.admin_user = User.objects.create(
+            name='Admin User',
+            username='admin_transfer_test',
+            mail='admin_transfer@test.com',
+            mobile_number='9876543230',
+            password='Password123!',
+            role=self.admin_role
+        )
+
+        self.user_a = User.objects.create(
+            name='User Alpha',
+            username='user_a',
+            mail='user_a@test.com',
+            mobile_number='9876543231',
+            password='Password123!',
+            role=self.admin_role
+        )
+
+        self.user_b = User.objects.create(
+            name='User Beta',
+            username='user_b',
+            mail='user_b@test.com',
+            mobile_number='9876543232',
+            password='Password123!',
+            role=self.admin_role
+        )
+
+        self.student_user = User.objects.create(
+            name='Student User',
+            username='student_transfer',
+            mail='student_transfer@test.com',
+            mobile_number='9876543233',
+            password='Password123!',
+            role=self.student_role
+        )
+
+        self.program = Program.objects.create(
+            program_name='B.Tech Engineering',
+            program_level='UG',
+            duration=4
+        )
+
+        self.dept_a = Department.objects.create(
+            department_name='Computer Science & Engineering',
+            department_code='CSE',
+            short_name='CSE',
+            program=self.program
+        )
+
+        self.dept_b = Department.objects.create(
+            department_name='Electrical & Electronics Engineering',
+            department_code='EEE',
+            short_name='EEE',
+            program=self.program
+        )
+
+        self.category = AssetCategory.objects.create(
+            name='Laptops & Computers',
+            description='High performance workstations'
+        )
+
+        self.asset = Asset.objects.create(
+            asset_code='AST-TRF-001',
+            asset_name='Dell XPS 15',
+            category=self.category,
+            status=AssetStatus.ASSIGNED,
+            location='Room 101'
+        )
+
+        self.active_alloc = AssetAllocation.objects.create(
+            asset=self.asset,
+            assigned_to=self.user_a,
+            department=self.dept_a,
+            is_current=True
+        )
+
+        self.client.force_authenticate(user=self.admin_user)
+
+    def test_transfer_asset_success(self):
+        url = '/api/asset-transfers/transfer'
+        payload = {
+            'asset': self.asset.id,
+            'to_user': self.user_b.id,
+            'to_department': self.dept_b.id,
+            'to_location': 'Room 202',
+            'remarks': 'Transferring laptop for new project requirement'
+        }
+
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['code'], 201)
+        self.assertEqual(response.data['message'], 'Asset transferred successfully.')
+
+        # 1. Old allocation closed
+        self.active_alloc.refresh_from_db()
+        self.assertFalse(self.active_alloc.is_current)
+        self.assertIsNotNone(self.active_alloc.returned_date)
+
+        # 2. New allocation active
+        new_alloc = AssetAllocation.objects.get(asset=self.asset, is_current=True)
+        self.assertEqual(new_alloc.assigned_to, self.user_b)
+        self.assertEqual(new_alloc.department, self.dept_b)
+
+        # 3. Asset status remains assigned & location updated
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.status, AssetStatus.ASSIGNED)
+        self.assertEqual(self.asset.location, 'Room 202')
+
+        # 4. AssetTransfer record created
+        transfer = AssetTransfer.objects.get(id=response.data['data']['id'])
+        self.assertEqual(transfer.asset, self.asset)
+        self.assertEqual(transfer.from_user, self.user_a)
+        self.assertEqual(transfer.to_user, self.user_b)
+        self.assertEqual(transfer.from_department, self.dept_a)
+        self.assertEqual(transfer.to_department, self.dept_b)
+
+    def test_transfer_unassigned_available_asset_fails(self):
+        self.asset.status = AssetStatus.AVAILABLE
+        self.asset.save()
+        self.active_alloc.delete()
+
+        url = '/api/asset-transfers/transfer'
+        payload = {
+            'asset': self.asset.id,
+            'to_user': self.user_b.id
+        }
+
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('currently available', response.data['message'].lower())
+
+    def test_transfer_maintenance_asset_fails(self):
+        self.asset.status = AssetStatus.MAINTENANCE
+        self.asset.save()
+
+        url = '/api/asset-transfers/transfer'
+        payload = {
+            'asset': self.asset.id,
+            'to_user': self.user_b.id
+        }
+
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('under maintenance', response.data['message'].lower())
+
+    def test_transfer_damaged_asset_fails(self):
+        self.asset.status = AssetStatus.DAMAGED
+        self.asset.save()
+
+        url = '/api/asset-transfers/transfer'
+        payload = {
+            'asset': self.asset.id,
+            'to_user': self.user_b.id
+        }
+
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('damaged', response.data['message'].lower())
+
+    def test_transfer_lost_asset_fails(self):
+        self.asset.status = AssetStatus.LOST
+        self.asset.save()
+
+        url = '/api/asset-transfers/transfer'
+        payload = {
+            'asset': self.asset.id,
+            'to_user': self.user_b.id
+        }
+
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('lost', response.data['message'].lower())
+
+    def test_transfer_disposed_asset_fails(self):
+        self.asset.status = AssetStatus.DISPOSED
+        self.asset.save()
+
+        url = '/api/asset-transfers/transfer'
+        payload = {
+            'asset': self.asset.id,
+            'to_user': self.user_b.id
+        }
+
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('disposed', response.data['message'].lower())
+
+    def test_transfer_same_source_and_destination_fails(self):
+        url = '/api/asset-transfers/transfer'
+        payload = {
+            'asset': self.asset.id,
+            'to_user': self.user_a.id,
+            'to_department': self.dept_a.id,
+            'to_location': 'Room 101'
+        }
+
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('different from the current assignment', response.data['message'].lower())
+
+    def test_transfer_list_and_history(self):
+        # Perform transfer
+        url = '/api/asset-transfers/transfer'
+        payload = {
+            'asset': self.asset.id,
+            'to_user': self.user_b.id,
+            'to_department': self.dept_b.id
+        }
+        self.client.post(url, payload, format='json')
+
+        # Test list endpoint
+        list_url = '/api/asset-transfers/list?search=AST-TRF-001'
+        res_list = self.client.get(list_url)
+        self.assertEqual(res_list.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res_list.data['data']['results']), 1)
+
+        # Test history endpoint
+        hist_url = f'/api/asset-transfers/history/{self.asset.id}'
+        res_hist = self.client.get(hist_url)
+        self.assertEqual(res_hist.status_code, status.HTTP_200_OK)
+
+    def test_student_permission_denied(self):
+        self.client.force_authenticate(user=self.student_user)
+
+        url = '/api/asset-transfers/transfer'
+        payload = {
+            'asset': self.asset.id,
+            'to_user': self.user_b.id
+        }
+
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+

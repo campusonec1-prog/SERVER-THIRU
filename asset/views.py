@@ -10,9 +10,11 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
 from common.pagination import CustomPageNumberPagination
-from .models import AssetCategory, Asset, AssetAllocation, AssetStatus
-from .serializers import AssetCategorySerializer, AssetSerializer, AssetAllocationSerializer
-from .permissions import AssetCategoryPermission, AssetPermission, AssetAllocationPermission
+from .models import AssetCategory, Asset, AssetAllocation, AssetStatus, AssetTransfer
+from .serializers import AssetCategorySerializer, AssetSerializer, AssetAllocationSerializer, AssetTransferSerializer
+from .permissions import AssetCategoryPermission, AssetPermission, AssetAllocationPermission, AssetTransferPermission
+from users.models import User
+from institution.models import Department
 
 
 def broadcast_custom_ws_event(event_name, data):
@@ -254,6 +256,8 @@ class AssetAllocationViewSet(viewsets.ModelViewSet):
         'asset__asset_code',
         'asset__asset_name',
         'asset__serial_number',
+        'location',
+        'asset__location',
         'assigned_to__name',
         'assigned_to__username',
         'department__department_name',
@@ -371,7 +375,12 @@ class AssetAllocationViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             allocation = serializer.save(is_current=True)
             asset.status = AssetStatus.ASSIGNED
-            asset.save(update_fields=['status', 'updated_at'])
+            location_input = request.data.get('location')
+            if location_input is not None:
+                asset.location = str(location_input).strip() or None
+                asset.save(update_fields=['status', 'location', 'updated_at'])
+            else:
+                asset.save(update_fields=['status', 'updated_at'])
 
         broadcast_custom_ws_event('asset_assigned', serializer.data)
 
@@ -456,7 +465,12 @@ class AssetAllocationViewSet(viewsets.ModelViewSet):
         page = self.paginate_queryset(allocations)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
+            paginated_res = self.get_paginated_response(serializer.data)
+            return Response({
+                "code": 200,
+                "message": "Asset allocation history retrieved successfully.",
+                "data": paginated_res.data
+            }, status=status.HTTP_200_OK)
 
         serializer = self.get_serializer(allocations, many=True)
         return Response({
@@ -464,3 +478,224 @@ class AssetAllocationViewSet(viewsets.ModelViewSet):
             "message": "Asset allocation history retrieved successfully.",
             "data": serializer.data
         }, status=status.HTTP_200_OK)
+
+
+class AssetTransferViewSet(viewsets.ModelViewSet):
+    queryset = AssetTransfer.objects.select_related(
+        'asset', 'from_user', 'to_user', 'from_department', 'to_department'
+    ).all().order_by('-transfer_date')
+    serializer_class = AssetTransferSerializer
+    permission_classes = [AssetTransferPermission]
+    pagination_class = CustomPageNumberPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    search_fields = [
+        'asset__asset_code',
+        'asset__asset_name',
+        'asset__serial_number',
+        'from_user__name',
+        'from_user__username',
+        'to_user__name',
+        'to_user__username',
+        'from_department__department_name',
+        'from_department__department_code',
+        'to_department__department_name',
+        'to_department__department_code',
+        'from_location',
+        'to_location'
+    ]
+    filterset_fields = ['asset', 'from_department', 'to_department', 'from_user', 'to_user']
+
+    def handle_exception(self, exc):
+        if isinstance(exc, (Http404, NotFound)):
+            return Response({
+                "code": 404,
+                "message": "Asset transfer record not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if isinstance(exc, NotAuthenticated):
+            return Response({
+                "code": 401,
+                "message": "You don't have access to this resource."
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        if isinstance(exc, PermissionDenied):
+            return Response({
+                "code": 403,
+                "message": "You don't have permission to perform this action."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        return super().handle_exception(exc)
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Asset transfers retrieved successfully.",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Asset transfer retrieved successfully.",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='transfer')
+    def transfer_asset(self, request):
+        asset_id = request.data.get('asset')
+        if not asset_id:
+            return Response({
+                "code": 400,
+                "message": "Please correct the highlighted fields.",
+                "errors": {"asset": ["Asset is required."]}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        asset = Asset.objects.filter(pk=asset_id).first()
+        if not asset:
+            return Response({
+                "code": 404,
+                "message": "Asset not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # 1. Validate asset status
+        if asset.status == AssetStatus.AVAILABLE:
+            return Response({
+                "code": 400,
+                "message": "Asset cannot be transferred because it is currently available."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        elif asset.status == AssetStatus.MAINTENANCE:
+            return Response({
+                "code": 400,
+                "message": "Asset cannot be transferred because it is under maintenance."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        elif asset.status == AssetStatus.DAMAGED:
+            return Response({
+                "code": 400,
+                "message": "Asset cannot be transferred because it is damaged."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        elif asset.status == AssetStatus.LOST:
+            return Response({
+                "code": 400,
+                "message": "Asset cannot be transferred because it is lost."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        elif asset.status == AssetStatus.DISPOSED:
+            return Response({
+                "code": 400,
+                "message": "Asset cannot be transferred because it has been disposed."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        elif asset.status != AssetStatus.ASSIGNED:
+            return Response({
+                "code": 400,
+                "message": "Asset is not currently assigned."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2. Find active allocation
+        active_alloc = AssetAllocation.objects.filter(asset=asset, is_current=True).first()
+        if not active_alloc:
+            return Response({
+                "code": 400,
+                "message": "Asset is not currently assigned."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        from_user = active_alloc.assigned_to
+        from_department = active_alloc.department
+        from_location = asset.location
+
+        to_user_id = request.data.get('to_user') or None
+        to_dept_id = request.data.get('to_department') or None
+        to_location = request.data.get('to_location') or None
+        remarks = request.data.get('remarks') or None
+
+        if not to_user_id and not to_dept_id and not to_location:
+            return Response({
+                "code": 400,
+                "message": "Destination user, department, or location is required.",
+                "errors": {"to_user": ["Must select a destination User or Department or Location."]}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 3. Check if destination is different from current source assignment
+        curr_user_id = from_user.id if from_user else None
+        curr_dept_id = from_department.id if from_department else None
+        curr_loc = (from_location or '').strip()
+        new_loc = (to_location or '').strip()
+
+        target_user_id = int(to_user_id) if to_user_id else None
+        target_dept_id = int(to_dept_id) if to_dept_id else None
+
+        if target_user_id == curr_user_id and target_dept_id == curr_dept_id and (not new_loc or new_loc == curr_loc):
+            return Response({
+                "code": 400,
+                "message": "Destination must be different from the current assignment.",
+                "errors": {"to_user": ["Destination must be different from the current assignment."]}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        now = timezone.now()
+
+        with transaction.atomic():
+            transfer = AssetTransfer.objects.create(
+                asset=asset,
+                from_user=from_user,
+                to_user_id=target_user_id,
+                from_department=from_department,
+                to_department_id=target_dept_id,
+                from_location=from_location,
+                to_location=new_loc or None,
+                remarks=remarks.strip() if remarks else None,
+            )
+
+            active_alloc.is_current = False
+            active_alloc.returned_date = now
+            active_alloc.save(update_fields=['is_current', 'returned_date'])
+
+            AssetAllocation.objects.create(
+                asset=asset,
+                assigned_to_id=target_user_id,
+                department_id=target_dept_id,
+                location=new_loc or from_location or None,
+                assigned_date=now,
+                is_current=True,
+                remarks=f"Transferred from previous allocation" + (f": {remarks}" if remarks else ""),
+            )
+
+            if new_loc:
+                asset.location = new_loc
+                asset.save(update_fields=['location', 'updated_at'])
+
+        serializer = self.get_serializer(transfer)
+        broadcast_custom_ws_event('asset_transferred', serializer.data)
+
+        return Response({
+            "code": 201,
+            "message": "Asset transferred successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='history/(?P<asset_id>\\d+)')
+    def asset_transfer_history(self, request, asset_id=None):
+        asset = Asset.objects.filter(pk=asset_id).first()
+        if not asset:
+            return Response({
+                "code": 404,
+                "message": "Asset not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        transfers = self.get_queryset().filter(asset_id=asset_id)
+        page = self.paginate_queryset(transfers)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            paginated_res = self.get_paginated_response(serializer.data)
+            return Response({
+                "code": 200,
+                "message": "Asset transfer history retrieved successfully.",
+                "data": paginated_res.data
+            }, status=status.HTTP_200_OK)
+
+        serializer = self.get_serializer(transfers, many=True)
+        return Response({
+            "code": 200,
+            "message": "Asset transfer history retrieved successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+

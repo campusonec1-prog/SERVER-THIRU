@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from users.models import User
 from institution.models import Department
-from .models import AssetCategory, Asset, AssetCondition, AssetStatus, AssetAllocation
+from .models import AssetCategory, Asset, AssetCondition, AssetStatus, AssetAllocation, AssetTransfer
 
 
 class AssetCategorySerializer(serializers.ModelSerializer):
@@ -261,6 +261,7 @@ class AssetAllocationSerializer(serializers.ModelSerializer):
             'does_not_exist': 'Department does not exist.',
         }
     )
+    location = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     remarks = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
@@ -272,6 +273,7 @@ class AssetAllocationSerializer(serializers.ModelSerializer):
             'asset_name',
             'serial_number',
             'category_name',
+            'location',
             'assigned_to',
             'assigned_to_name',
             'assigned_to_username',
@@ -286,8 +288,87 @@ class AssetAllocationSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'assigned_date', 'returned_date', 'is_current', 'created_at']
 
+    def validate_location(self, value):
+        if value is not None:
+            trimmed = str(value).strip()
+            if len(trimmed) > 200:
+                raise serializers.ValidationError("Location must not exceed 200 characters.")
+            return trimmed or None
+        return value
+
     def validate_remarks(self, value):
         if value is not None:
             trimmed = str(value).strip()
             return trimmed or None
         return value
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        if not ret.get('location') and getattr(instance, 'asset', None) and getattr(instance.asset, 'location', None):
+            ret['location'] = instance.asset.location
+        return ret
+
+
+class AssetTransferSerializer(serializers.ModelSerializer):
+    asset_code = serializers.CharField(source='asset.asset_code', read_only=True)
+    asset_name = serializers.CharField(source='asset.asset_name', read_only=True)
+    serial_number = serializers.CharField(source='asset.serial_number', read_only=True)
+    from_user_name = serializers.CharField(source='from_user.name', read_only=True, default=None)
+    from_user_username = serializers.CharField(source='from_user.username', read_only=True, default=None)
+    to_user_name = serializers.CharField(source='to_user.name', read_only=True, default=None)
+    to_user_username = serializers.CharField(source='to_user.username', read_only=True, default=None)
+    from_department_name = serializers.CharField(source='from_department.department_name', read_only=True, default=None)
+    from_department_code = serializers.CharField(source='from_department.department_code', read_only=True, default=None)
+    to_department_name = serializers.CharField(source='to_department.department_name', read_only=True, default=None)
+    to_department_code = serializers.CharField(source='to_department.department_code', read_only=True, default=None)
+
+    asset = serializers.PrimaryKeyRelatedField(
+        queryset=Asset.objects.all(),
+        required=True,
+        error_messages={
+            'required': 'Asset is required.',
+            'does_not_exist': 'Asset not found.',
+        }
+    )
+    from_user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False, allow_null=True)
+    to_user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False, allow_null=True)
+    from_department = serializers.PrimaryKeyRelatedField(queryset=Department.objects.all(), required=False, allow_null=True)
+    to_department = serializers.PrimaryKeyRelatedField(queryset=Department.objects.all(), required=False, allow_null=True)
+    from_location = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    to_location = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    remarks = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    class Meta:
+        model = AssetTransfer
+        fields = [
+            'id',
+            'asset',
+            'asset_code',
+            'asset_name',
+            'serial_number',
+            'from_user',
+            'from_user_name',
+            'from_user_username',
+            'to_user',
+            'to_user_name',
+            'to_user_username',
+            'from_department',
+            'from_department_name',
+            'from_department_code',
+            'to_department',
+            'to_department_name',
+            'to_department_code',
+            'from_location',
+            'to_location',
+            'transfer_date',
+            'remarks',
+            'created_at',
+        ]
+        read_only_fields = ['id', 'transfer_date', 'created_at']
+
+    def validate_remarks(self, value):
+        if value is not None:
+            trimmed = str(value).strip()
+            return trimmed or None
+        return value
+
