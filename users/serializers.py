@@ -97,12 +97,15 @@ class UserDetailsSerializer(serializers.ModelSerializer):
         }
     )
 
+    user_name = serializers.CharField(source='user.name', read_only=True, default='')
+    department_name = serializers.CharField(source='department.department_name', read_only=True, default='')
+
     class Meta:
         model = UserDetails
         fields = [
-            'id', 'user_id', 'faculty_code', 'qualification',
+            'id', 'user_id', 'user_name', 'faculty_code', 'qualification',
             'designation', 'date_of_joining', 'gender',
-            'dob', 'department_id', 'user_image', 'user_image_file',
+            'dob', 'department_id', 'department_name', 'user_image', 'user_image_file',
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by', 'user_image']
@@ -116,6 +119,22 @@ class UserDetailsSerializer(serializers.ModelSerializer):
             'date_of_joining': {'required': True},
             'gender': {'required': True},
         }
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.user:
+            data['user_name'] = instance.user.name
+            data['name'] = instance.user.name
+            data['mail'] = instance.user.mail
+            data['user'] = {
+                'id': instance.user.id,
+                'name': instance.user.name,
+                'username': instance.user.username,
+                'mail': instance.user.mail,
+            }
+        if instance.department:
+            data['department_name'] = instance.department.department_name
+        return data
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

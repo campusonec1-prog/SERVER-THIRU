@@ -556,15 +556,19 @@ class UserDetailsViewSet(viewsets.ModelViewSet):
         if not user or not user.is_authenticated:
             return UserDetails.objects.none()
 
+        qs = UserDetails.objects.select_related('user', 'department').all().order_by('id')
+
+        # For GET/list requests, allow authenticated users (Faculty, HOD, Admin, etc.) to list all faculty members
+        if self.action in ['list', 'retrieve'] or self.request.method in ['GET']:
+            return qs
+
         is_admin = False
         try:
             role_name = user.role.role_name.upper()
-            if role_name in ['ADMIN', 'ADMINISTRATOR']:
+            if role_name in ['ADMIN', 'ADMINISTRATOR', 'SUPER_ADMIN', 'SUPERADMIN']:
                 is_admin = True
         except AttributeError:
             pass
-
-        qs = UserDetails.objects.select_related('user', 'department').all().order_by('id')
 
         if is_admin:
             return qs
