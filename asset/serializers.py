@@ -3,7 +3,8 @@ from users.models import User
 from institution.models import Department
 from .models import (
     AssetCategory, Asset, AssetCondition, AssetStatus, AssetAllocation, AssetTransfer,
-    AssetMaintenance, MaintenanceType, MaintenanceStatus, PreviousAssetStatus
+    AssetMaintenance, MaintenanceType, MaintenanceStatus, PreviousAssetStatus,
+    AssetDisposal, DisposalType, DisposalStatus
 )
 
 
@@ -503,4 +504,121 @@ class AssetMaintenanceSerializer(serializers.ModelSerializer):
                 'completion_date': ['Completion date cannot be before maintenance date.']
             })
         return attrs
+
+
+class AssetDisposalSerializer(serializers.ModelSerializer):
+    asset_code = serializers.CharField(source='asset.asset_code', read_only=True)
+    asset_name = serializers.CharField(source='asset.asset_name', read_only=True)
+    category_name = serializers.CharField(source='asset.category.name', read_only=True)
+    serial_number = serializers.CharField(source='asset.serial_number', read_only=True)
+    current_asset_status = serializers.CharField(source='asset.status', read_only=True)
+    current_asset_status_display = serializers.CharField(source='asset.get_status_display', read_only=True)
+    disposal_type_display = serializers.CharField(source='get_disposal_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    approved_by_name = serializers.CharField(source='approved_by.name', read_only=True, default=None)
+
+    class Meta:
+        model = AssetDisposal
+        fields = [
+            'id',
+            'asset',
+            'asset_code',
+            'asset_name',
+            'category_name',
+            'serial_number',
+            'current_asset_status',
+            'current_asset_status_display',
+            'disposal_type',
+            'disposal_type_display',
+            'disposal_date',
+            'reason',
+            'disposal_value',
+            'approved_by',
+            'approved_by_name',
+            'approval_reference',
+            'remarks',
+            'status',
+            'status_display',
+            'completed_at',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'status', 'completed_at', 'created_at', 'updated_at']
+
+
+class AssetDisposalCreateSerializer(serializers.ModelSerializer):
+    asset = serializers.PrimaryKeyRelatedField(
+        queryset=Asset.objects.all(),
+        required=True,
+        error_messages={
+            'required': 'Asset is required.',
+            'does_not_exist': 'Asset not found.',
+        }
+    )
+    disposal_type = serializers.ChoiceField(
+        choices=DisposalType.choices,
+        required=True,
+        error_messages={'required': 'Disposal type is required.'}
+    )
+    disposal_date = serializers.DateField(
+        required=True,
+        error_messages={'required': 'Disposal date is required.'}
+    )
+    reason = serializers.CharField(
+        required=True,
+        error_messages={
+            'required': 'Reason is required.',
+            'blank': 'Reason cannot be blank.',
+        }
+    )
+    disposal_value = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        required=False,
+        allow_null=True
+    )
+
+    class Meta:
+        model = AssetDisposal
+        fields = [
+            'id',
+            'asset',
+            'disposal_type',
+            'disposal_date',
+            'reason',
+            'disposal_value',
+            'approval_reference',
+            'remarks',
+        ]
+
+    def validate_reason(self, value):
+        if value is None:
+            raise serializers.ValidationError('Reason is required.')
+        trimmed = str(value).strip()
+        if not trimmed:
+            raise serializers.ValidationError('Reason cannot be blank.')
+        return trimmed
+
+    def validate_disposal_value(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError('Disposal value cannot be negative.')
+        return value
+
+    def validate(self, attrs):
+        asset = attrs.get('asset')
+        if asset:
+            if asset.status == AssetStatus.DISPOSED:
+                raise serializers.ValidationError({'asset': ['Asset is already disposed.']})
+            if asset.status == AssetStatus.MAINTENANCE:
+                raise serializers.ValidationError({'asset': ['Asset is currently under maintenance.']})
+            active_disposal = AssetDisposal.objects.filter(
+                asset=asset,
+                status__in=[DisposalStatus.PENDING, DisposalStatus.APPROVED]
+            ).exists()
+            if active_disposal:
+                raise serializers.ValidationError({
+                    'asset': ['An active disposal request already exists for this asset.']
+                })
+        return attrs
+
 

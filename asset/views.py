@@ -12,15 +12,18 @@ from asgiref.sync import async_to_sync
 from common.pagination import CustomPageNumberPagination
 from .models import (
     AssetCategory, Asset, AssetAllocation, AssetStatus, AssetTransfer,
-    AssetMaintenance, MaintenanceStatus, PreviousAssetStatus
+    AssetMaintenance, MaintenanceStatus, PreviousAssetStatus,
+    AssetDisposal, DisposalStatus, DisposalType
 )
 from .serializers import (
     AssetCategorySerializer, AssetSerializer, AssetAllocationSerializer,
-    AssetTransferSerializer, AssetMaintenanceSerializer
+    AssetTransferSerializer, AssetMaintenanceSerializer,
+    AssetDisposalSerializer, AssetDisposalCreateSerializer
 )
 from .permissions import (
     AssetCategoryPermission, AssetPermission, AssetAllocationPermission,
-    AssetTransferPermission, AssetMaintenancePermission
+    AssetTransferPermission, AssetMaintenancePermission,
+    AssetDisposalPermission
 )
 from users.models import User
 from institution.models import Department
@@ -1104,3 +1107,361 @@ class AssetMaintenanceViewSet(viewsets.ModelViewSet):
             "data": serializer.data
         }, status=status.HTTP_200_OK)
 
+
+
+class AssetDisposalViewSet(viewsets.ModelViewSet):
+    queryset = AssetDisposal.objects.select_related(
+        'asset', 'asset__category', 'approved_by'
+    ).all().order_by('-created_at')
+    serializer_class = AssetDisposalSerializer
+    permission_classes = [AssetDisposalPermission]
+    pagination_class = CustomPageNumberPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    search_fields = [
+        'asset__asset_code', 'asset__asset_name', 'asset__serial_number',
+        'disposal_type', 'reason', 'approval_reference', 'approved_by__name'
+    ]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+
+        status_param = self.request.query_params.get('status', None)
+        if status_param:
+            qs = qs.filter(status=status_param)
+
+        disposal_type_param = self.request.query_params.get('disposal_type', None)
+        if disposal_type_param:
+            qs = qs.filter(disposal_type=disposal_type_param)
+
+        asset_param = self.request.query_params.get('asset', None)
+        if asset_param:
+            qs = qs.filter(asset_id=asset_param)
+
+        approved_by_param = self.request.query_params.get('approved_by', None)
+        if approved_by_param:
+            qs = qs.filter(approved_by_id=approved_by_param)
+
+        date_from = self.request.query_params.get('date_from', None)
+        if date_from:
+            qs = qs.filter(disposal_date__gte=date_from)
+
+        date_to = self.request.query_params.get('date_to', None)
+        if date_to:
+            qs = qs.filter(disposal_date__lte=date_to)
+
+        return qs
+
+    def handle_exception(self, exc):
+        if isinstance(exc, models.ProtectedError):
+            return Response({
+                "code": 400,
+                "message": "Cannot delete asset disposal record because related objects exist."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if isinstance(exc, (Http404, NotFound)):
+            return Response({
+                "code": 404,
+                "message": "Asset disposal record not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if isinstance(exc, NotAuthenticated):
+            return Response({
+                "code": 401,
+                "message": "You don't have access to this resource."
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        if isinstance(exc, PermissionDenied):
+            return Response({
+                "code": 403,
+                "message": "You are not authorized to manage asset disposal."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        if isinstance(exc, ValidationError):
+            err_dict = exc.detail if isinstance(exc.detail, dict) else {}
+            first_msg = "Validation error."
+            if isinstance(exc.detail, list) and exc.detail:
+                first_msg = str(exc.detail[0])
+            elif isinstance(exc.detail, dict) and exc.detail:
+                for k, v in exc.detail.items():
+                    if isinstance(v, list) and v:
+                        first_msg = str(v[0])
+                        break
+                    elif isinstance(v, str):
+                        first_msg = v
+                        break
+            return Response({
+                "code": 400,
+                "message": first_msg,
+                "errors": err_dict
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        return super().handle_exception(exc)
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Asset disposal records retrieved successfully.",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Asset disposal record retrieved successfully.",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        serializer = AssetDisposalCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            disposal = serializer.save()
+
+        detail_serializer = AssetDisposalSerializer(disposal)
+        broadcast_custom_ws_event('asset_disposal_created', {
+            'model': 'AssetDisposal',
+            'action': 'created',
+            'record': detail_serializer.data
+        })
+
+        return Response({
+            "code": 201,
+            "message": "Disposal request created successfully.",
+            "data": detail_serializer.data
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['patch', 'put'])
+    def update_request(self, request, pk=None):
+        try:
+            disposal = AssetDisposal.objects.select_related('asset').get(pk=pk)
+        except AssetDisposal.DoesNotExist:
+            return Response({
+                "code": 404,
+                "message": "Asset disposal record not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if disposal.status != DisposalStatus.PENDING:
+            return Response({
+                "code": 400,
+                "message": "Only pending disposal requests can be updated."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = AssetDisposalCreateSerializer(disposal, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            updated_disposal = serializer.save()
+
+        detail_serializer = AssetDisposalSerializer(updated_disposal)
+        broadcast_custom_ws_event('asset_disposal_updated', {
+            'model': 'AssetDisposal',
+            'action': 'updated',
+            'record': detail_serializer.data
+        })
+
+        return Response({
+            "code": 200,
+            "message": "Disposal request updated successfully.",
+            "data": detail_serializer.data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        try:
+            disposal = AssetDisposal.objects.select_related('asset').get(pk=pk)
+        except AssetDisposal.DoesNotExist:
+            return Response({
+                "code": 404,
+                "message": "Asset disposal record not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if disposal.status != DisposalStatus.PENDING:
+            return Response({
+                "code": 400,
+                "message": "This disposal request has already been processed."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        approval_ref = request.data.get('approval_reference', disposal.approval_reference)
+
+        with transaction.atomic():
+            disposal.status = DisposalStatus.APPROVED
+            if request.user and request.user.is_authenticated:
+                disposal.approved_by = request.user
+            if approval_ref:
+                disposal.approval_reference = str(approval_ref).strip()
+            disposal.save()
+
+        detail_serializer = AssetDisposalSerializer(disposal)
+        broadcast_custom_ws_event('asset_disposal_approved', {
+            'model': 'AssetDisposal',
+            'action': 'approved',
+            'record': detail_serializer.data
+        })
+
+        return Response({
+            "code": 200,
+            "message": "Disposal request approved successfully.",
+            "data": detail_serializer.data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        try:
+            disposal = AssetDisposal.objects.select_related('asset').get(pk=pk)
+        except AssetDisposal.DoesNotExist:
+            return Response({
+                "code": 404,
+                "message": "Asset disposal record not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if disposal.status != DisposalStatus.PENDING:
+            return Response({
+                "code": 400,
+                "message": "This disposal request has already been processed."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        remarks = request.data.get('remarks', None)
+
+        with transaction.atomic():
+            disposal.status = DisposalStatus.REJECTED
+            if remarks:
+                disposal.remarks = str(remarks).strip()
+            disposal.save()
+
+        detail_serializer = AssetDisposalSerializer(disposal)
+        broadcast_custom_ws_event('asset_disposal_rejected', {
+            'model': 'AssetDisposal',
+            'action': 'rejected',
+            'record': detail_serializer.data
+        })
+
+        return Response({
+            "code": 200,
+            "message": "Disposal request rejected successfully.",
+            "data": detail_serializer.data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        try:
+            disposal = AssetDisposal.objects.select_related('asset').get(pk=pk)
+        except AssetDisposal.DoesNotExist:
+            return Response({
+                "code": 404,
+                "message": "Asset disposal record not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if disposal.status != DisposalStatus.PENDING:
+            return Response({
+                "code": 400,
+                "message": "This disposal request has already been processed."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        remarks = request.data.get('remarks', None)
+
+        with transaction.atomic():
+            disposal.status = DisposalStatus.CANCELLED
+            if remarks:
+                disposal.remarks = str(remarks).strip()
+            disposal.save()
+
+        detail_serializer = AssetDisposalSerializer(disposal)
+        broadcast_custom_ws_event('asset_disposal_cancelled', {
+            'model': 'AssetDisposal',
+            'action': 'cancelled',
+            'record': detail_serializer.data
+        })
+
+        return Response({
+            "code": 200,
+            "message": "Disposal request cancelled successfully.",
+            "data": detail_serializer.data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        try:
+            disposal = AssetDisposal.objects.select_related('asset').get(pk=pk)
+        except AssetDisposal.DoesNotExist:
+            return Response({
+                "code": 404,
+                "message": "Asset disposal record not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if disposal.status != DisposalStatus.APPROVED:
+            return Response({
+                "code": 400,
+                "message": "Only approved disposal requests can be completed."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            asset = Asset.objects.select_for_update().get(pk=disposal.asset_id)
+
+            if asset.status == AssetStatus.DISPOSED:
+                return Response({
+                    "code": 400,
+                    "message": "Asset is already disposed."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            if asset.status == AssetStatus.MAINTENANCE:
+                return Response({
+                    "code": 400,
+                    "message": "Asset is currently under maintenance."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            if asset.status == AssetStatus.ASSIGNED or AssetAllocation.objects.filter(asset=asset, is_current=True).exists():
+                return Response({
+                    "code": 400,
+                    "message": "Asset is currently assigned and cannot be disposed."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            disposal.status = DisposalStatus.COMPLETED
+            disposal.completed_at = timezone.now()
+            disposal.save()
+
+            asset.status = AssetStatus.DISPOSED
+            asset.save()
+
+        detail_serializer = AssetDisposalSerializer(disposal)
+        broadcast_custom_ws_event('asset_disposal_completed', {
+            'model': 'AssetDisposal',
+            'action': 'completed',
+            'record': detail_serializer.data
+        })
+
+        return Response({
+            "code": 200,
+            "message": "Asset disposal completed successfully.",
+            "data": detail_serializer.data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='history/(?P<asset_id>[^/.]+)')
+    def history(self, request, asset_id=None):
+        try:
+            asset = Asset.objects.get(pk=asset_id)
+        except Asset.DoesNotExist:
+            return Response({
+                "code": 404,
+                "message": "Asset not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        records = self.get_queryset().filter(asset=asset)
+        page = self.paginate_queryset(records)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            paginated_res = self.get_paginated_response(serializer.data)
+            return Response({
+                "code": 200,
+                "message": "Asset disposal history retrieved successfully.",
+                "data": paginated_res.data
+            }, status=status.HTTP_200_OK)
+
+        serializer = self.get_serializer(records, many=True)
+        return Response({
+            "code": 200,
+            "message": "Asset disposal history retrieved successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)

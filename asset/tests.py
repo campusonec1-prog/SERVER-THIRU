@@ -4,7 +4,7 @@ from rest_framework.test import APIClient
 from rest_framework import status
 from role.models import Role
 from users.models import User
-from asset.models import AssetCategory, Asset, AssetCondition, AssetStatus, AssetAllocation, AssetTransfer, AssetMaintenance
+from asset.models import AssetCategory, Asset, AssetCondition, AssetStatus, AssetAllocation, AssetTransfer, AssetMaintenance, AssetDisposal, DisposalStatus, DisposalType
 from institution.models import Department, Program
 
 
@@ -1164,3 +1164,308 @@ class AssetMaintenanceTests(TestCase):
         self.asset.refresh_from_db()
         self.assertEqual(self.asset.status, AssetStatus.AVAILABLE)
 
+
+
+
+class AssetDisposalTests(TestCase):
+    """Tests for the AssetDisposal lifecycle and validation rules."""
+
+    def setUp(self):
+        self.client = APIClient()
+
+        self.admin_role, _ = Role.objects.get_or_create(role_name='Admin')
+        self.student_role, _ = Role.objects.get_or_create(role_name='Student')
+
+        self.admin_user = User.objects.create(
+            name='Admin User',
+            username='admin_disposal',
+            mail='admin_disposal@test.com',
+            mobile_number='9876543210',
+            password='Password123!',
+            role=self.admin_role
+        )
+
+        self.student_user = User.objects.create(
+            name='Student User',
+            username='student_disposal',
+            mail='student_disposal@test.com',
+            mobile_number='9876543211',
+            password='Password123!',
+            role=self.student_role
+        )
+
+        self.category = AssetCategory.objects.create(name='Hardware')
+        self.asset = Asset.objects.create(
+            asset_code='AST-DISP-001',
+            asset_name='Old Monitor',
+            category=self.category,
+            status=AssetStatus.AVAILABLE
+        )
+
+    def test_create_disposal_request_success(self):
+        self.client.force_authenticate(user=self.admin_user)
+        payload = {
+            'asset': self.asset.id,
+            'disposal_type': 'damaged_beyond_repair',
+            'disposal_date': str(date.today()),
+            'reason': 'Screen burned and cracked',
+            'disposal_value': '50.00',
+            'approval_reference': 'REF-101',
+            'remarks': 'Inspected by IT tech'
+        }
+        res = self.client.post('/api/asset-disposals/create', payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data['code'], 201)
+        self.assertEqual(res.data['message'], 'Disposal request created successfully.')
+        self.assertEqual(res.data['data']['status'], 'pending')
+        # Asset status remains unchanged when pending
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.status, AssetStatus.AVAILABLE)
+
+    def test_create_disposal_disposed_asset_fails(self):
+        self.asset.status = AssetStatus.DISPOSED
+        self.asset.save()
+        self.client.force_authenticate(user=self.admin_user)
+
+        payload = {
+            'asset': self.asset.id,
+            'disposal_type': 'obsolete',
+            'disposal_date': str(date.today()),
+            'reason': 'Too old'
+        }
+        res = self.client.post('/api/asset-disposals/create', payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_create_disposal_asset_under_maintenance_fails(self):
+        self.asset.status = AssetStatus.MAINTENANCE
+        self.asset.save()
+        self.client.force_authenticate(user=self.admin_user)
+
+        payload = {
+            'asset': self.asset.id,
+            'disposal_type': 'obsolete',
+            'disposal_date': str(date.today()),
+            'reason': 'Too old'
+        }
+        res = self.client.post('/api/asset-disposals/create', payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_create_duplicate_active_disposal_fails(self):
+        self.client.force_authenticate(user=self.admin_user)
+        AssetDisposal.objects.create(
+            asset=self.asset,
+            disposal_type=DisposalType.OBSOLETE,
+            disposal_date=date.today(),
+            reason='First request',
+            status=DisposalStatus.PENDING
+        )
+
+        payload = {
+            'asset': self.asset.id,
+            'disposal_type': 'sold',
+            'disposal_date': str(date.today()),
+            'reason': 'Second request'
+        }
+        res = self.client.post('/api/asset-disposals/create', payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_create_disposal_negative_value_fails(self):
+        self.client.force_authenticate(user=self.admin_user)
+        payload = {
+            'asset': self.asset.id,
+            'disposal_type': 'sold',
+            'disposal_date': str(date.today()),
+            'reason': 'Sold for parts',
+            'disposal_value': '-100.00'
+        }
+        res = self.client.post('/api/asset-disposals/create', payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_update_pending_disposal_success(self):
+        self.client.force_authenticate(user=self.admin_user)
+        disposal = AssetDisposal.objects.create(
+            asset=self.asset,
+            disposal_type=DisposalType.OBSOLETE,
+            disposal_date=date.today(),
+            reason='Original reason',
+            status=DisposalStatus.PENDING
+        )
+
+        res = self.client.patch(
+            f'/api/asset-disposals/update/{disposal.id}',
+            {'reason': 'Updated reason text'},
+            format='json'
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        disposal.refresh_from_db()
+        self.assertEqual(disposal.reason, 'Updated reason text')
+
+    def test_approve_disposal_success(self):
+        self.client.force_authenticate(user=self.admin_user)
+        disposal = AssetDisposal.objects.create(
+            asset=self.asset,
+            disposal_type=DisposalType.OBSOLETE,
+            disposal_date=date.today(),
+            reason='Obsolescence',
+            status=DisposalStatus.PENDING
+        )
+
+        res = self.client.post(f'/api/asset-disposals/approve/{disposal.id}', {'approval_reference': 'BOARD-REF-99'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['message'], 'Disposal request approved successfully.')
+        disposal.refresh_from_db()
+        self.assertEqual(disposal.status, DisposalStatus.APPROVED)
+        self.assertEqual(disposal.approved_by, self.admin_user)
+        self.assertEqual(disposal.approval_reference, 'BOARD-REF-99')
+
+    def test_reject_disposal_success(self):
+        self.client.force_authenticate(user=self.admin_user)
+        disposal = AssetDisposal.objects.create(
+            asset=self.asset,
+            disposal_type=DisposalType.OBSOLETE,
+            disposal_date=date.today(),
+            reason='Obsolescence',
+            status=DisposalStatus.PENDING
+        )
+
+        res = self.client.post(f'/api/asset-disposals/reject/{disposal.id}', {'remarks': 'Rejected by board'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['message'], 'Disposal request rejected successfully.')
+        disposal.refresh_from_db()
+        self.assertEqual(disposal.status, DisposalStatus.REJECTED)
+
+    def test_cancel_disposal_success(self):
+        self.client.force_authenticate(user=self.admin_user)
+        disposal = AssetDisposal.objects.create(
+            asset=self.asset,
+            disposal_type=DisposalType.OBSOLETE,
+            disposal_date=date.today(),
+            reason='Obsolescence',
+            status=DisposalStatus.PENDING
+        )
+
+        res = self.client.post(f'/api/asset-disposals/cancel/{disposal.id}', {'remarks': 'Cancelled by requestor'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['message'], 'Disposal request cancelled successfully.')
+        disposal.refresh_from_db()
+        self.assertEqual(disposal.status, DisposalStatus.CANCELLED)
+
+    def test_complete_disposal_success_sets_asset_disposed(self):
+        self.client.force_authenticate(user=self.admin_user)
+        disposal = AssetDisposal.objects.create(
+            asset=self.asset,
+            disposal_type=DisposalType.OBSOLETE,
+            disposal_date=date.today(),
+            reason='Obsolescence',
+            status=DisposalStatus.APPROVED,
+            approved_by=self.admin_user
+        )
+
+        res = self.client.post(f'/api/asset-disposals/complete/{disposal.id}')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['message'], 'Asset disposal completed successfully.')
+
+        disposal.refresh_from_db()
+        self.assertEqual(disposal.status, DisposalStatus.COMPLETED)
+        self.assertIsNotNone(disposal.completed_at)
+
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.status, AssetStatus.DISPOSED)
+
+    def test_complete_pending_disposal_fails(self):
+        self.client.force_authenticate(user=self.admin_user)
+        disposal = AssetDisposal.objects.create(
+            asset=self.asset,
+            disposal_type=DisposalType.OBSOLETE,
+            disposal_date=date.today(),
+            reason='Obsolescence',
+            status=DisposalStatus.PENDING
+        )
+
+        res = self.client.post(f'/api/asset-disposals/complete/{disposal.id}')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(res.data['message'], 'Only approved disposal requests can be completed.')
+
+    def test_complete_disposal_assigned_asset_fails(self):
+        self.client.force_authenticate(user=self.admin_user)
+        AssetAllocation.objects.create(
+            asset=self.asset,
+            assigned_to=self.admin_user,
+            is_current=True
+        )
+        self.asset.status = AssetStatus.ASSIGNED
+        self.asset.save()
+
+        disposal = AssetDisposal.objects.create(
+            asset=self.asset,
+            disposal_type=DisposalType.OBSOLETE,
+            disposal_date=date.today(),
+            reason='Obsolescence',
+            status=DisposalStatus.APPROVED,
+            approved_by=self.admin_user
+        )
+
+        res = self.client.post(f'/api/asset-disposals/complete/{disposal.id}')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_allocation_blocked_on_disposed_asset(self):
+        self.asset.status = AssetStatus.DISPOSED
+        self.asset.save()
+        self.client.force_authenticate(user=self.admin_user)
+
+        payload = {
+            'asset': self.asset.id,
+            'assigned_to': self.admin_user.id
+        }
+        res = self.client.post('/api/asset-allocations/assign', payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_transfer_blocked_on_disposed_asset(self):
+        self.asset.status = AssetStatus.DISPOSED
+        self.asset.save()
+        self.client.force_authenticate(user=self.admin_user)
+
+        payload = {
+            'asset': self.asset.id,
+            'to_user': self.admin_user.id
+        }
+        res = self.client.post('/api/asset-transfers/transfer', payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_maintenance_blocked_on_disposed_asset(self):
+        self.asset.status = AssetStatus.DISPOSED
+        self.asset.save()
+        self.client.force_authenticate(user=self.admin_user)
+
+        payload = {
+            'asset': self.asset.id,
+            'maintenance_type': 'repair',
+            'issue_description': 'Broken',
+            'maintenance_date': str(date.today())
+        }
+        res = self.client.post('/api/asset-maintenance/create', payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_disposal_history_retrieval(self):
+        self.client.force_authenticate(user=self.admin_user)
+        AssetDisposal.objects.create(
+            asset=self.asset,
+            disposal_type=DisposalType.OBSOLETE,
+            disposal_date=date.today(),
+            reason='Record 1',
+            status=DisposalStatus.CANCELLED
+        )
+        res = self.client.get(f'/api/asset-disposals/history/{self.asset.id}')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['code'], 200)
+
+    def test_student_cannot_create_or_approve_disposal(self):
+        self.client.force_authenticate(user=self.student_user)
+        payload = {
+            'asset': self.asset.id,
+            'disposal_type': 'damaged_beyond_repair',
+            'disposal_date': str(date.today()),
+            'reason': 'Student request'
+        }
+        res = self.client.post('/api/asset-disposals/create', payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)

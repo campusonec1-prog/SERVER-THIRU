@@ -220,3 +220,69 @@ class AssetMaintenance(models.Model):
 
     def __str__(self):
         return f"Maintenance of {self.asset.asset_code} ({self.get_status_display()})"
+
+
+class DisposalType(models.TextChoices):
+    DAMAGED_BEYOND_REPAIR = 'damaged_beyond_repair', 'Damaged Beyond Repair'
+    OBSOLETE = 'obsolete', 'Obsolete'
+    LOST = 'lost', 'Lost'
+    SOLD = 'sold', 'Sold'
+    DONATED = 'donated', 'Donated'
+    OTHER = 'other', 'Other'
+
+
+class DisposalStatus(models.TextChoices):
+    PENDING = 'pending', 'Pending'
+    APPROVED = 'approved', 'Approved'
+    REJECTED = 'rejected', 'Rejected'
+    COMPLETED = 'completed', 'Completed'
+    CANCELLED = 'cancelled', 'Cancelled'
+
+
+class AssetDisposal(models.Model):
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.PROTECT,
+        related_name='disposal_records'
+    )
+    disposal_type = models.CharField(
+        max_length=100,
+        choices=DisposalType.choices
+    )
+    disposal_date = models.DateField()
+    reason = models.TextField()
+    disposal_value = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True
+    )
+    approved_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='disposals_approved'
+    )
+    approval_reference = models.CharField(
+        max_length=150,
+        null=True,
+        blank=True
+    )
+    remarks = models.TextField(null=True, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=DisposalStatus.choices,
+        default=DisposalStatus.PENDING
+    )
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'asset_disposals'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Disposal of {self.asset.asset_code} ({self.get_status_display()})"
+

@@ -5771,3 +5771,315 @@
   }
 }
 
+{
+  "path": "/api/asset-allocations/assign",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be assigned because it is currently disposed."
+  }
+}
+
+{
+  "path": "/api/asset-disposals/complete/3",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is currently assigned and cannot be disposed."
+  }
+}
+
+{
+  "path": "/api/asset-disposals/complete/5",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Only approved disposal requests can be completed."
+  }
+}
+
+{
+  "path": "/api/asset-disposals/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is currently under maintenance.",
+    "errors": {
+      "asset": [
+        "Asset is currently under maintenance."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-disposals/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is already disposed.",
+    "errors": {
+      "asset": [
+        "Asset is already disposed."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-disposals/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Disposal value cannot be negative.",
+    "errors": {
+      "disposal_value": [
+        "Disposal value cannot be negative."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-disposals/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "An active disposal request already exists for this asset.",
+    "errors": {
+      "asset": [
+        "An active disposal request already exists for this asset."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be sent for maintenance because it has been disposed."
+  }
+}
+
+{
+  "path": "/api/asset-allocations/assign",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be assigned because it is currently disposed."
+  }
+}
+
+{
+  "path": "/api/asset-disposals/complete/3",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is currently assigned and cannot be disposed."
+  }
+}
+
+{
+  "path": "/api/asset-disposals/complete/5",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Only approved disposal requests can be completed."
+  }
+}
+
+{
+  "path": "/api/asset-disposals/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is currently under maintenance.",
+    "errors": {
+      "asset": [
+        "Asset is currently under maintenance."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-disposals/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is already disposed.",
+    "errors": {
+      "asset": [
+        "Asset is already disposed."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-disposals/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Disposal value cannot be negative.",
+    "errors": {
+      "disposal_value": [
+        "Disposal value cannot be negative."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-disposals/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "An active disposal request already exists for this asset.",
+    "errors": {
+      "asset": [
+        "An active disposal request already exists for this asset."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be sent for maintenance because it has been disposed."
+  }
+}
+
+{
+  "path": "/api/asset-transfers/transfer",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be transferred because it has been disposed."
+  }
+}
+
+{
+  "path": "/api/asset-allocations/assign",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be assigned because it is currently disposed."
+  }
+}
+
+{
+  "path": "/api/asset-disposals/complete/3",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is currently assigned and cannot be disposed."
+  }
+}
+
+{
+  "path": "/api/asset-disposals/complete/5",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Only approved disposal requests can be completed."
+  }
+}
+
+{
+  "path": "/api/asset-disposals/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is currently under maintenance.",
+    "errors": {
+      "asset": [
+        "Asset is currently under maintenance."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-disposals/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is already disposed.",
+    "errors": {
+      "asset": [
+        "Asset is already disposed."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-disposals/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Disposal value cannot be negative.",
+    "errors": {
+      "disposal_value": [
+        "Disposal value cannot be negative."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-disposals/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "An active disposal request already exists for this asset.",
+    "errors": {
+      "asset": [
+        "An active disposal request already exists for this asset."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be sent for maintenance because it has been disposed."
+  }
+}
+
+{
+  "path": "/api/asset-transfers/transfer",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be transferred because it has been disposed."
+  }
+}
+
+{
+  "path": "/api/asset-disposals/complete/1",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is currently assigned and cannot be disposed."
+  }
+}
+
+{
+  "path": "/api/asset-disposals/complete/1",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is currently assigned and cannot be disposed."
+  }
+}
+

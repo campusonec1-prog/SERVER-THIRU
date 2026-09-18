@@ -44,3 +44,13 @@ class AssetMaintenancePermission(BaseRolePermission):
     """
     read_roles = ['authenticated']
     write_roles = ['admin', 'administrator', 'hod']
+
+
+class AssetDisposalPermission(BaseRolePermission):
+    """
+    Permission class for Asset Disposal operations.
+    Allows authenticated users to read, and admin/administrator/hod users to create/approve/manage disposal.
+    """
+    read_roles = ['authenticated']
+    write_roles = ['admin', 'administrator', 'hod']
+
