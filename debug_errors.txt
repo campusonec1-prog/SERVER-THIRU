@@ -6335,3 +6335,12 @@
   }
 }
 
+{
+  "path": "/api/announcements/notices/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Notice Type: Invalid notice type. Choose from: general, academic, exam, holiday, event, fees."
+  }
+}
+

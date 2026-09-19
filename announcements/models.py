@@ -8,7 +8,9 @@ class NoticeBoard(TrackingModel):
         ('academic', 'Academic'),
         ('exam', 'Exam'),
         ('holiday', 'Holiday'),
+        ('holidays', 'Holidays'),
         ('event', 'Event'),
+        ('events', 'Events'),
         ('fees', 'Fees'),
     ]
 
@@ -16,6 +18,11 @@ class NoticeBoard(TrackingModel):
         ('low', 'Low'),
         ('medium', 'Medium'),
         ('high', 'High'),
+    ]
+
+    TARGET_AUDIENCE_CHOICES = [
+        ('global', 'Global (All Departments)'),
+        ('targeted', 'Targeted'),
     ]
 
     notice_title = models.CharField(max_length=255)
@@ -32,8 +39,31 @@ class NoticeBoard(TrackingModel):
         related_name='notices'
     )
 
+    # Event details
+    organizer = models.CharField(max_length=255, null=True, blank=True)
+    coordinator = models.CharField(max_length=255, null=True, blank=True)
+    sub_coordinators = models.JSONField(default=list, blank=True, null=True)
+    poster_url = models.TextField(null=True, blank=True)
+
+    # Target audience fields
+    target_audience_type = models.CharField(
+        max_length=20,
+        choices=TARGET_AUDIENCE_CHOICES,
+        default='global'
+    )
+    department = models.ForeignKey(
+        'institution.Department',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='notices'
+    )
+    batch = models.CharField(max_length=50, null=True, blank=True)
+    section = models.CharField(max_length=50, null=True, blank=True)
+
     class Meta:
         db_table = 'notice_board'
 
     def __str__(self):
         return f"{self.notice_title} ({self.notice_type})"
+
