@@ -335,3 +335,47 @@ class FacultyResearchProjectTests(TestCase):
         self.assertEqual(res_admin.status_code, status.HTTP_200_OK)
         results_admin = res_admin.data['data'].get('results', res_admin.data['data'])
         self.assertEqual(len(results_admin), 2)
+
+    def test_hod_only_sees_own_projects(self):
+        hod_role = Role.objects.create(role_name='HOD')
+        hod_user = User.objects.create(
+            name='Dr. HOD',
+            username='dr_hod',
+            password='password123',
+            mobile_number='9876543299',
+            mail='hod@college.edu',
+            role=hod_role
+        )
+        hod_details = UserDetails.objects.create(
+            user=hod_user,
+            faculty_code='HOD001',
+            qualification='Ph.D.',
+            designation='HOD',
+            date_of_joining=date(2015, 1, 1),
+            gender='Male',
+            department=self.department
+        )
+
+        # Project owned by HOD
+        p_hod = FacultyResearchProject.objects.create(
+            project_title='HOD Research Project',
+            principal_investigator=hod_details,
+            research_area='Management',
+            project_type='Non-Funded',
+            project_start_date=date.today()
+        )
+        # Project owned by Faculty in same department
+        p_fac = FacultyResearchProject.objects.create(
+            project_title='Faculty Research Project in same Dept',
+            principal_investigator=self.faculty_details1,
+            research_area='AI',
+            project_type='Non-Funded',
+            project_start_date=date.today()
+        )
+
+        self.client.force_authenticate(user=hod_user)
+        res = self.client.get('/api/research/projects')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        results = res.data['data'].get('results', res.data['data'])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['id'], p_hod.id)

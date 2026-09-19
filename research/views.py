@@ -77,22 +77,11 @@ class FacultyResearchProjectViewSet(viewsets.ModelViewSet):
 
         role_name = getattr(user.role, 'role_name', '').upper() if hasattr(user, 'role') and user.role else ''
 
-        # Admin / Superuser / Staff / Principal / Vice Principal view all
-        if user.is_superuser or user.is_staff or role_name in ['ADMIN', 'ADMINISTRATOR', 'SUPERADMIN', 'PRINCIPAL', 'VICE_PRINCIPAL']:
+        # Admin / Superuser / Principal / Vice Principal view all
+        if user.is_superuser or role_name in ['ADMIN', 'ADMINISTRATOR', 'SUPERADMIN', 'PRINCIPAL', 'VICE_PRINCIPAL']:
             return qs
 
-        # HOD views projects within their department or projects where they are PI/co-investigator/creator
-        if role_name == 'HOD':
-            user_details = UserDetails.objects.filter(user=user).first()
-            if user_details and user_details.department_id:
-                return qs.filter(
-                    Q(principal_investigator__department_id=user_details.department_id) |
-                    Q(principal_investigator__user=user) |
-                    Q(co_investigators__user=user) |
-                    Q(created_by=user)
-                ).distinct()
-
-        # Regular Faculty: ONLY see research projects where they are PI, Co-Investigator, or Creator
+        # Faculty & HOD: ONLY see research projects where they are PI, Co-Investigator, or Creator
         user_details = UserDetails.objects.filter(user=user).first()
         if user_details:
             return qs.filter(
@@ -235,7 +224,8 @@ class FacultyResearchProjectViewSet(viewsets.ModelViewSet):
 
         user = request.user
         role_name = getattr(user.role, 'role_name', '').upper() if hasattr(user, 'role') and user.role else ''
-        if role_name == 'FACULTY':
+        is_admin_user = user.is_superuser or role_name in ['ADMIN', 'ADMINISTRATOR', 'SUPERADMIN', 'PRINCIPAL', 'VICE_PRINCIPAL']
+        if not is_admin_user:
             my_details = UserDetails.objects.filter(user=user).first()
             if my_details and my_details.id != faculty.id:
                 return Response({

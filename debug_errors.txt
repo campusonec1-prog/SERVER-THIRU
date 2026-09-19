@@ -6299,3 +6299,39 @@
   }
 }
 
+{
+  "path": "/api/research/projects",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Co Investigators: Principal investigator cannot also be a co-investigator."
+  }
+}
+
+{
+  "path": "/api/research/projects",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Funding Agency: Funding agency is required for funded projects."
+  }
+}
+
+{
+  "path": "/api/research/projects",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Project End Date: Project end date cannot be before the start date."
+  }
+}
+
+{
+  "path": "/api/research/projects",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Sanctioned Amount: Sanctioned amount cannot be negative."
+  }
+}
+
