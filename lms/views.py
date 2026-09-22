@@ -5,8 +5,11 @@ from rest_framework.pagination import PageNumberPagination
 from django.db.models import Q
 from django.utils import timezone
 from django.http import HttpResponse, Http404
-from .models import LMSAssignment, LMSSubmission
-from .serializers import LMSAssignmentSerializer, LMSSubmissionSerializer
+from .models import LMSAssignment, LMSSubmission, AssessmentQuestion, AssessmentOption
+from .serializers import LMSAssignmentSerializer, LMSSubmissionSerializer, AssessmentQuestionSerializer, AssessmentOptionSerializer
+from .permissions import LMSPermission, AssessmentQuestionPermission
+from common.caching import get_option_cache_version, invalidate_option_cache
+from common.r2 import upload_file_to_r2, delete_file_from_r2
 from student.models import Student
 import urllib.request
 import urllib.error
@@ -386,3 +389,276 @@ class LMSSubmissionViewSet(viewsets.ModelViewSet):
             raise Http404("This submission has no file uploaded.")
         filename = os.path.basename(submission.submission_file.split('?')[0]) or f"submission_{pk}"
         return _proxy_download(request, submission.submission_file, filename)
+
+
+class AssessmentQuestionViewSet(viewsets.ModelViewSet):
+    queryset = AssessmentQuestion.objects.select_related(
+        'subject', 'subject__department', 'subject__regulation', 'subject__semester',
+        'exam', 'exam__exam_type'
+    ).prefetch_related('options').all().order_by('-id')
+    serializer_class = AssessmentQuestionSerializer
+    permission_classes = [AssessmentQuestionPermission]
+
+    def _broadcast_change(self, instance, event_name):
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'realtime_updates',
+                    {
+                        'type': 'broadcast_update',
+                        'data': {
+                            'event': event_name,
+                            'payload': AssessmentQuestionSerializer(instance).data
+                        }
+                    }
+                )
+        except Exception:
+            pass
+
+    def _broadcast_delete(self, question_id):
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'realtime_updates',
+                    {
+                        'type': 'broadcast_update',
+                        'data': {
+                            'event': 'question_deleted',
+                            'payload': {'id': question_id}
+                        }
+                    }
+                )
+        except Exception:
+            pass
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+
+        department_id = request.query_params.get('department_id')
+        regulation_id = request.query_params.get('regulation_id')
+        semester_ids = request.query_params.get('semester_ids') or request.query_params.get('semester_id')
+        subject_id = request.query_params.get('subject_id')
+        question_type = request.query_params.get('question_type')
+        exam_id = request.query_params.get('exam_id')
+        exam_type_id = request.query_params.get('exam_type_id')
+        is_active = request.query_params.get('is_active')
+        search = request.query_params.get('search')
+
+        if department_id:
+            queryset = queryset.filter(subject__department_id=department_id)
+        if regulation_id:
+            queryset = queryset.filter(subject__regulation_id=regulation_id)
+        
+        # Support array / multi-semester filtering
+        if semester_ids:
+            if isinstance(semester_ids, str):
+                sem_list = [s.strip() for s in semester_ids.split(',') if s.strip().isdigit()]
+                if sem_list:
+                    queryset = queryset.filter(subject__semester_id__in=sem_list)
+            elif isinstance(semester_ids, (list, tuple)):
+                queryset = queryset.filter(subject__semester_id__in=semester_ids)
+
+        if subject_id:
+            queryset = queryset.filter(subject_id=subject_id)
+        if question_type:
+            queryset = queryset.filter(question_type__iexact=question_type.strip())
+        if exam_id:
+            queryset = queryset.filter(exam_id=exam_id)
+        if exam_type_id:
+            queryset = queryset.filter(exam__exam_type_id=exam_type_id)
+        if is_active:
+            queryset = queryset.filter(is_active=is_active.lower() in ['true', '1', 'yes'])
+
+        if search:
+            queryset = queryset.filter(
+                Q(question_text__icontains=search) |
+                Q(question_type__icontains=search) |
+                Q(subject__subject_code__icontains=search) |
+                Q(subject__subject_name__icontains=search)
+            )
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            paginated_response = self.get_paginated_response(serializer.data)
+            return Response({
+                "code": 200,
+                "message": "Assessment questions fetched successfully.",
+                "data": paginated_response.data
+            }, status=status.HTTP_200_OK)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            "code": 200,
+            "message": "Assessment questions fetched successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return Response({
+            "code": 200,
+            "message": "Assessment question retrieved successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def perform_create(self, serializer):
+        user = self.request.user if self.request.user and self.request.user.is_authenticated else None
+        from users.models import User as StandardUser
+        tracking_user = user if isinstance(user, StandardUser) else None
+
+        # Check for uploaded diagram file
+        image_file = self.request.FILES.get('question_image')
+        question_image_url = None
+        if image_file:
+            try:
+                question_image_url = upload_file_to_r2(image_file, folder_name="assessment_diagrams")
+            except Exception as e:
+                question_image_url = None
+
+        save_kwargs = {'created_by': tracking_user, 'updated_by': tracking_user}
+        if question_image_url:
+            save_kwargs['question_image'] = question_image_url
+
+        instance = serializer.save(**save_kwargs)
+        self._broadcast_change(instance, 'question_created')
+
+    def create(self, request, *args, **kwargs):
+        # Support JSON string parsed options if sent via FormData
+        import json
+        data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+        if isinstance(data.get('options'), str):
+            try:
+                data['options'] = json.loads(data['options'])
+            except Exception:
+                pass
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return Response({
+            "code": 201,
+            "message": "Question created successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_201_CREATED)
+
+    def perform_update(self, serializer):
+        user = self.request.user if self.request.user and self.request.user.is_authenticated else None
+        from users.models import User as StandardUser
+        tracking_user = user if isinstance(user, StandardUser) else None
+
+        instance = serializer.instance
+        image_file = self.request.FILES.get('question_image')
+        remove_image = str(self.request.data.get('remove_question_image', '')).lower() in ['true', '1']
+
+        save_kwargs = {'updated_by': tracking_user}
+
+        if image_file:
+            if instance and instance.question_image:
+                try:
+                    delete_file_from_r2(instance.question_image)
+                except Exception:
+                    pass
+            try:
+                question_image_url = upload_file_to_r2(image_file, folder_name="assessment_diagrams")
+                save_kwargs['question_image'] = question_image_url
+            except Exception:
+                pass
+        elif remove_image:
+            if instance and instance.question_image:
+                try:
+                    delete_file_from_r2(instance.question_image)
+                except Exception:
+                    pass
+            save_kwargs['question_image'] = None
+
+        instance = serializer.save(**save_kwargs)
+        self._broadcast_change(instance, 'question_updated')
+
+    def update(self, request, *args, **kwargs):
+        import json
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+        if isinstance(data.get('options'), str):
+            try:
+                data['options'] = json.loads(data['options'])
+            except Exception:
+                pass
+
+        serializer = self.get_serializer(instance, data=data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response({
+            "code": 200,
+            "message": "Question updated successfully.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        question_id = instance.id
+        self.perform_destroy(instance)
+        self._broadcast_delete(question_id)
+        return Response({
+            "code": 200,
+            "message": "Question deleted successfully."
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='bulk-create')
+    def bulk_create(self, request):
+        """
+        Endpoint for creating multiple questions at once from the Question Bank Builder.
+        Payload format:
+        {
+          "questions": [
+             { "subject": 1, "exam": 8, "question_text": "...", "marks": 1, "options": [...], "answer": "..." },
+             ...
+          ]
+        }
+        """
+        questions_data = request.data.get('questions', [])
+        if not questions_data or not isinstance(questions_data, list):
+            return Response({
+                "code": 400,
+                "message": "A valid 'questions' array is required for bulk creation."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        created_instances = []
+        errors = []
+
+        user = request.user if request.user and request.user.is_authenticated else None
+        from users.models import User as StandardUser
+        tracking_user = user if isinstance(user, StandardUser) else None
+
+        for idx, q_item in enumerate(questions_data):
+            serializer = self.get_serializer(data=q_item)
+            if serializer.is_valid():
+                instance = serializer.save(created_by=tracking_user, updated_by=tracking_user)
+                created_instances.append(instance)
+                self._broadcast_change(instance, 'question_created')
+            else:
+                errors.append({"item": idx + 1, "errors": serializer.errors})
+
+        if errors and not created_instances:
+            return Response({
+                "code": 400,
+                "message": "Failed to create questions due to validation errors.",
+                "errors": errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        result_serializer = self.get_serializer(created_instances, many=True)
+        return Response({
+            "code": 201,
+            "message": f"Successfully created {len(created_instances)} question(s).",
+            "data": result_serializer.data,
+            "errors": errors if errors else None
+        }, status=status.HTTP_201_CREATED)
+

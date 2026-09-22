@@ -114,3 +114,69 @@ class LMSSubmission(TrackingModel):
 
     def __str__(self):
         return f"Submission by {self.student} for {self.assignment.title}"
+
+
+class AssessmentQuestion(TrackingModel):
+    QUESTION_TYPE_CHOICES = [
+        ('Single Choice', 'Single Choice'),
+        ('Multiple Choice', 'Multiple Choice'),
+        ('True OR False', 'True OR False'),
+        ('File Ups', 'File Ups'),
+        ('Short Answers', 'Short Answers'),
+    ]
+
+    subject = models.ForeignKey(
+        'subject.Subject',
+        on_delete=models.CASCADE,
+        db_column='subject_id',
+        related_name='assessment_questions'
+    )
+    question_type = models.CharField(
+        max_length=50,
+        choices=QUESTION_TYPE_CHOICES,
+        default='Single Choice'
+    )
+    exam = models.ForeignKey(
+        'institution.Exam',
+        on_delete=models.SET_NULL,
+        db_column='exam_id',
+        related_name='assessment_questions',
+        null=True,
+        blank=True
+    )
+    question_text = models.TextField()
+    question_image = models.TextField(blank=True, null=True)  # URL or Cloudflare R2 file path
+    marks = models.DecimalField(max_digits=5, decimal_places=2, default=1.00)
+    answer = models.TextField(blank=True, null=True)  # Model answer / solution / explanation
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'assessment_questions'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['subject', 'question_type']),
+            models.Index(fields=['is_active']),
+        ]
+
+    def __str__(self):
+        return f"Q#{self.id} - {self.subject.subject_code} - {self.question_type}"
+
+
+class AssessmentOption(TrackingModel):
+    question = models.ForeignKey(
+        AssessmentQuestion,
+        on_delete=models.CASCADE,
+        db_column='question_id',
+        related_name='options'
+    )
+    option_code = models.CharField(max_length=10, blank=True, null=True)  # e.g., 'A', 'B', 'C', 'D'
+    option_text = models.TextField()
+    is_correct = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'assessment_options'
+        ordering = ['id']
+
+    def __str__(self):
+        return f"Option {self.option_code or self.id} for Q#{self.question_id}"
+

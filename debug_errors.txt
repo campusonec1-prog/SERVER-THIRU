@@ -6344,3 +6344,30 @@
   }
 }
 
+{
+  "path": "/api/lms/assessment-questions/",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Options: {'option_text': [ErrorDetail(string='This field may not be blank.', code='blank')]}"
+  }
+}
+
+{
+  "path": "/api/lms/assessment-questions/5/",
+  "method": "PATCH",
+  "response_content": {
+    "code": 400,
+    "message": "Options: {'option_text': [ErrorDetail(string='This field may not be blank.', code='blank')]}"
+  }
+}
+
+{
+  "path": "/api/lms/assessment-questions/5/",
+  "method": "PATCH",
+  "response_content": {
+    "code": 400,
+    "message": "Options: {'option_text': [ErrorDetail(string='This field may not be blank.', code='blank')]}"
+  }
+}
+

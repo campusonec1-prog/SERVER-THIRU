@@ -1,8 +1,8 @@
 from rest_framework import serializers
 from django.utils import timezone
-from .models import LMSAssignment, LMSSubmission
+from .models import LMSAssignment, LMSSubmission, AssessmentQuestion, AssessmentOption
 from student.models import Student
-from institution.models import Department, Batch, Section
+from institution.models import Department, Batch, Section, Exam
 from subject.models import Subject
 from users.models import User
 
@@ -158,3 +158,98 @@ class LMSSubmissionSerializer(serializers.ModelSerializer):
                 if ext not in allowed:
                     raise serializers.ValidationError(f"File extension '.{ext}' is not supported. Allowed formats: {', '.join(allowed)}")
         return value
+
+
+class AssessmentOptionSerializer(serializers.ModelSerializer):
+    option_text = serializers.CharField(required=False, allow_blank=True, default='')
+
+    class Meta:
+        model = AssessmentOption
+        fields = ['id', 'option_code', 'option_text', 'is_correct', 'created_at', 'updated_at', 'created_by', 'updated_by']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by']
+
+
+class AssessmentQuestionSerializer(serializers.ModelSerializer):
+    subject_code = serializers.CharField(source='subject.subject_code', read_only=True)
+    subject_name = serializers.CharField(source='subject.subject_name', read_only=True)
+    department_id = serializers.IntegerField(source='subject.department.id', read_only=True)
+    department_name = serializers.CharField(source='subject.department.department_name', read_only=True)
+    regulation_id = serializers.IntegerField(source='subject.regulation.id', read_only=True)
+    regulation_code = serializers.CharField(source='subject.regulation.regulation_code', read_only=True)
+    semester_id = serializers.IntegerField(source='subject.semester.id', read_only=True)
+    exam = serializers.PrimaryKeyRelatedField(queryset=Exam.objects.all(), required=False, allow_null=True)
+    exam_name = serializers.CharField(source='exam.exam_name', read_only=True)
+    exam_type_id = serializers.IntegerField(source='exam.exam_type.id', read_only=True)
+    exam_type_name = serializers.CharField(source='exam.exam_type.exam_type_name', read_only=True)
+
+    options = AssessmentOptionSerializer(many=True, required=False)
+    question_image = AttachmentField(required=False, allow_null=True)
+
+    class Meta:
+        model = AssessmentQuestion
+        fields = [
+            'id', 'subject', 'subject_code', 'subject_name',
+            'department_id', 'department_name', 'regulation_id', 'regulation_code', 'semester_id',
+            'question_type', 'exam', 'exam_name', 'exam_type_id', 'exam_type_name',
+            'question_text', 'question_image', 'marks', 'answer', 'is_active',
+            'options', 'created_at', 'updated_at', 'created_by', 'updated_by'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by']
+
+    def validate_question_text(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError("Question text cannot be empty.")
+        return value.strip()
+
+    def validate_marks(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Marks must be a positive number.")
+        return value
+
+    def validate(self, attrs):
+        q_type = (attrs.get('question_type') or (self.instance.question_type if self.instance else '') or '').strip().lower()
+        
+        # If question_type is non-choice (Short Answers or File Ups), clear options
+        if 'short' in q_type or 'file' in q_type:
+            attrs['options'] = []
+        return attrs
+
+    def create(self, validated_data):
+        options_data = validated_data.pop('options', [])
+        question = AssessmentQuestion.objects.create(**validated_data)
+        
+        user = question.created_by
+        for index, opt in enumerate(options_data):
+            code = opt.get('option_code') or chr(65 + index)  # Default 'A', 'B', 'C'...
+            AssessmentOption.objects.create(
+                question=question,
+                option_code=code,
+                option_text=opt.get('option_text', ''),
+                is_correct=opt.get('is_correct', False),
+                created_by=user,
+                updated_by=user
+            )
+        return question
+
+    def update(self, instance, validated_data):
+        options_data = validated_data.pop('options', None)
+        
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if options_data is not None:
+            user = instance.updated_by or instance.created_by
+            instance.options.all().delete()
+            for index, opt in enumerate(options_data):
+                code = opt.get('option_code') or chr(65 + index)
+                AssessmentOption.objects.create(
+                    question=instance,
+                    option_code=code,
+                    option_text=opt.get('option_text', ''),
+                    is_correct=opt.get('is_correct', False),
+                    created_by=instance.created_by or user,
+                    updated_by=user
+                )
+        return instance
+

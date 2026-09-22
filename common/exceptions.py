@@ -28,14 +28,17 @@ def custom_exception_handler(exc, context):
                 message = str(data['detail'])
             else:
                 try:
-                    # Get the first field that caused the validation failure
-                    first_field = next(iter(data))
-                    first_err = data[first_field]
-                    if isinstance(first_err, list) and len(first_err) > 0:
-                        err_msg = str(first_err[0])
-                    else:
-                        err_msg = str(first_err)
+                    def extract_first_error(err_obj, parent_key=""):
+                        if isinstance(err_obj, dict) and err_obj:
+                            key = next(iter(err_obj))
+                            label = key.replace('_', ' ').title()
+                            return extract_first_error(err_obj[key], label)
+                        elif isinstance(err_obj, list) and len(err_obj) > 0:
+                            return extract_first_error(err_obj[0], parent_key)
+                        else:
+                            return parent_key, str(err_obj)
 
+                    field_name, err_msg = extract_first_error(data)
                     err_msg_lower = err_msg.lower()
                     
                     # 1. Handle unique constraints (e.g. "role with this role name already exists.")
@@ -43,44 +46,49 @@ def custom_exception_handler(exc, context):
                         if 'with this' in err_msg_lower:
                             parts = err_msg_lower.split(' with this ')
                             model_name = parts[0].strip().title()
-                            message = f"{model_name} is already exist"
+                            message = f"{model_name} already exists"
                         else:
-                            field_name = first_field.replace('_', ' ').title()
-                            message = f"{field_name} already exists."
+                            message = f"{field_name or 'Record'} already exists."
                             
                     # 2. Handle missing required fields
                     elif err_msg_lower == "this field is required.":
-                        field_name = first_field.replace('_', ' ').title()
-                        message = f"{field_name} is required."
+                        message = f"{field_name or 'Field'} is required."
                         
                     # 3. Handle null fields
                     elif err_msg_lower == "this field may not be null.":
-                        field_name = first_field.replace('_', ' ').title()
-                        message = f"{field_name} cannot be null."
+                        message = f"{field_name or 'Field'} cannot be null."
                         
                     # 4. Handle blank fields
                     elif err_msg_lower == "this field may not be blank.":
-                        field_name = first_field.replace('_', ' ').title()
-                        message = f"{field_name} cannot be blank."
+                        message = f"{field_name or 'Field'} cannot be blank."
                         
                     # 5. Handle invalid formats
                     elif err_msg_lower == "this field is invalid.":
-                        field_name = first_field.replace('_', ' ').title()
-                        message = f"Invalid {field_name.lower()}."
+                        message = f"Invalid {(field_name or 'Field').lower()}."
                         
                     # 6. Fallback for other errors
                     else:
-                        if first_field in ['non_field_errors', 'detail']:
+                        if field_name in ['Non Field Errors', 'Detail', ''] or not field_name:
                             message = err_msg
                         else:
-                            field_name = first_field.replace('_', ' ').title()
                             message = f"{field_name}: {err_msg}"
                 except Exception as e:
                     logger.error(f"Error parsing validation exception: {e}")
                     message = str(data)
         elif isinstance(data, list):
             if len(data) > 0:
-                message = str(data[0])
+                item = data[0]
+                if isinstance(item, (dict, list)):
+                    def extract_first(obj):
+                        if isinstance(obj, dict) and obj:
+                            k = next(iter(obj))
+                            return extract_first(obj[k])
+                        elif isinstance(obj, list) and obj:
+                            return extract_first(obj[0])
+                        return str(obj)
+                    message = extract_first(item)
+                else:
+                    message = str(item)
             else:
                 message = "An error occurred."
         else:
