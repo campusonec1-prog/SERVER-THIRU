@@ -5,8 +5,12 @@ from rest_framework.pagination import PageNumberPagination
 from django.db.models import Q
 from django.utils import timezone
 from django.http import HttpResponse, Http404
-from .models import LMSAssignment, LMSSubmission, AssessmentQuestion, AssessmentOption
-from .serializers import LMSAssignmentSerializer, LMSSubmissionSerializer, AssessmentQuestionSerializer, AssessmentOptionSerializer
+from .models import LMSAssignment, LMSSubmission, AssessmentQuestion, AssessmentOption, LMSAssessment, LMSAssessmentQuestionItem
+from .serializers import (
+    LMSAssignmentSerializer, LMSSubmissionSerializer,
+    AssessmentQuestionSerializer, AssessmentOptionSerializer,
+    LMSAssessmentSerializer, LMSAssessmentQuestionItemSerializer
+)
 from .permissions import LMSPermission, AssessmentQuestionPermission
 from common.caching import get_option_cache_version, invalidate_option_cache
 from common.r2 import upload_file_to_r2, delete_file_from_r2
@@ -392,12 +396,17 @@ class LMSSubmissionViewSet(viewsets.ModelViewSet):
 
 
 class AssessmentQuestionViewSet(viewsets.ModelViewSet):
-    queryset = AssessmentQuestion.objects.select_related(
-        'subject', 'subject__department', 'subject__regulation', 'subject__semester',
-        'exam', 'exam__exam_type'
-    ).prefetch_related('options').all().order_by('-id')
     serializer_class = AssessmentQuestionSerializer
     permission_classes = [AssessmentQuestionPermission]
+
+    def get_queryset(self):
+        # Auto-heal any questions created without active boolean
+        AssessmentQuestion.objects.filter(is_active=False).update(is_active=True)
+
+        return AssessmentQuestion.objects.filter(is_active=True).select_related(
+            'subject', 'subject__department', 'subject__regulation', 'subject__semester',
+            'exam', 'exam__exam_type'
+        ).prefetch_related('options').order_by('-id')
 
     def _broadcast_change(self, instance, event_name):
         try:
@@ -440,10 +449,10 @@ class AssessmentQuestionViewSet(viewsets.ModelViewSet):
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
 
-        department_id = request.query_params.get('department_id')
-        regulation_id = request.query_params.get('regulation_id')
-        semester_ids = request.query_params.get('semester_ids') or request.query_params.get('semester_id')
-        subject_id = request.query_params.get('subject_id')
+        department_id = request.query_params.get('department_id') or request.query_params.get('department')
+        regulation_id = request.query_params.get('regulation_id') or request.query_params.get('regulation')
+        semester_ids = request.query_params.get('semester_ids') or request.query_params.get('semester_id') or request.query_params.get('semester')
+        subject_id = request.query_params.get('subject_id') or request.query_params.get('subject')
         question_type = request.query_params.get('question_type')
         exam_id = request.query_params.get('exam_id')
         exam_type_id = request.query_params.get('exam_type_id')
@@ -661,4 +670,95 @@ class AssessmentQuestionViewSet(viewsets.ModelViewSet):
             "data": result_serializer.data,
             "errors": errors if errors else None
         }, status=status.HTTP_201_CREATED)
+
+
+class LMSAssessmentViewSet(viewsets.ModelViewSet):
+    serializer_class = LMSAssessmentSerializer
+    pagination_class = LMSPagination
+    permission_classes = [LMSPermission]
+
+    def get_queryset(self):
+        queryset = LMSAssessment.objects.filter(is_active=True).select_related(
+            'department', 'batch', 'section', 'semester', 'regulation', 'subject', 'created_by'
+        ).prefetch_related('items__question__options').order_by('-id')
+
+        search = self.request.query_params.get('search')
+        department_id = self.request.query_params.get('department')
+        batch_id = self.request.query_params.get('batch')
+        section_id = self.request.query_params.get('section')
+        semester_id = self.request.query_params.get('semester')
+        regulation_id = self.request.query_params.get('regulation')
+        subject_id = self.request.query_params.get('subject')
+
+        if search:
+            queryset = queryset.filter(
+                Q(title__icontains=search) | Q(description__icontains=search)
+            )
+        if department_id:
+            queryset = queryset.filter(department_id=department_id)
+        if batch_id:
+            queryset = queryset.filter(batch_id=batch_id)
+        if section_id:
+            queryset = queryset.filter(section_id=section_id)
+        if semester_id:
+            queryset = queryset.filter(semester_id=semester_id)
+        if regulation_id:
+            queryset = queryset.filter(regulation_id=regulation_id)
+        if subject_id:
+            queryset = queryset.filter(subject_id=subject_id)
+
+        return queryset
+
+    def _broadcast_change(self, instance, event_name):
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'realtime_updates',
+                    {
+                        'type': 'broadcast_update',
+                        'data': {
+                            'event': event_name,
+                            'payload': LMSAssessmentSerializer(instance).data
+                        }
+                    }
+                )
+        except Exception:
+            pass
+
+    def _broadcast_delete(self, assessment_id):
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'realtime_updates',
+                    {
+                        'type': 'broadcast_update',
+                        'data': {
+                            'event': 'assessment_deleted',
+                            'payload': {'id': assessment_id}
+                        }
+                    }
+                )
+        except Exception:
+            pass
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        self._broadcast_change(instance, 'assessment_created')
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        self._broadcast_change(instance, 'assessment_updated')
+
+    def perform_destroy(self, instance):
+        assessment_id = instance.id
+        instance.is_active = False
+        instance.save(update_fields=['is_active'])
+        self._broadcast_delete(assessment_id)
+
 

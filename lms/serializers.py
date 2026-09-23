@@ -1,8 +1,8 @@
 from rest_framework import serializers
 from django.utils import timezone
-from .models import LMSAssignment, LMSSubmission, AssessmentQuestion, AssessmentOption
+from .models import LMSAssignment, LMSSubmission, AssessmentQuestion, AssessmentOption, LMSAssessment, LMSAssessmentQuestionItem
 from student.models import Student
-from institution.models import Department, Batch, Section, Exam
+from institution.models import Department, Batch, Section, Semester, Regulation, Exam
 from subject.models import Subject
 from users.models import User
 
@@ -252,4 +252,160 @@ class AssessmentQuestionSerializer(serializers.ModelSerializer):
                     updated_by=user
                 )
         return instance
+
+
+class LMSAssessmentQuestionItemSerializer(serializers.ModelSerializer):
+    question_details = AssessmentQuestionSerializer(source='question', read_only=True)
+
+    class Meta:
+        model = LMSAssessmentQuestionItem
+        fields = ['id', 'assessment', 'question', 'question_details', 'order', 'marks']
+        read_only_fields = ['id', 'assessment']
+
+
+class LMSAssessmentSerializer(serializers.ModelSerializer):
+    department_name = serializers.CharField(source='department.department_name', read_only=True)
+    batch_name = serializers.CharField(source='batch.batch', read_only=True)
+    section_name = serializers.CharField(source='section.sections', read_only=True)
+    semester_name = serializers.SerializerMethodField()
+    regulation_code = serializers.CharField(source='regulation.regulation_code', read_only=True)
+    subject_code = serializers.CharField(source='subject.subject_code', read_only=True)
+    subject_name = serializers.CharField(source='subject.subject_name', read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+
+    items = LMSAssessmentQuestionItemSerializer(many=True, read_only=True)
+    question_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False
+    )
+
+    class Meta:
+        model = LMSAssessment
+        fields = [
+            'id', 'title', 'description',
+            'department', 'department_name',
+            'batch', 'batch_name',
+            'section', 'section_name',
+            'semester', 'semester_name',
+            'regulation', 'regulation_code',
+            'subject', 'subject_code', 'subject_name',
+            'shuffle_questions', 'shuffle_options',
+            'start_time', 'end_time', 'duration_minutes',
+            'total_questions', 'total_marks',
+            'items', 'question_ids',
+            'created_at', 'updated_at', 'created_by', 'created_by_name',
+            'is_active'
+        ]
+        read_only_fields = [
+            'id', 'duration_minutes', 'total_questions', 'total_marks',
+            'created_at', 'updated_at', 'created_by'
+        ]
+
+    def get_semester_name(self, obj):
+        if obj.semester:
+            return f"Semester {obj.semester.id}"
+        return None
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.name or obj.created_by.username
+        return 'System'
+
+    def validate(self, attrs):
+        start_time = attrs.get('start_time') or (self.instance.start_time if self.instance else None)
+        end_time = attrs.get('end_time') or (self.instance.end_time if self.instance else None)
+
+        if start_time and end_time:
+            if start_time >= end_time:
+                raise serializers.ValidationError({
+                    "end_time": "End time must be after the start time."
+                })
+            # Calculate duration in minutes
+            diff_seconds = (end_time - start_time).total_seconds()
+            attrs['duration_minutes'] = max(1, int(diff_seconds // 60))
+
+        question_ids = attrs.get('question_ids')
+        if not self.instance and not question_ids:
+            raise serializers.ValidationError({
+                "question_ids": "At least one question must be selected for the assessment."
+            })
+
+        return attrs
+
+    def create(self, validated_data):
+        question_ids = validated_data.pop('question_ids', [])
+        user = self.context.get('request').user if self.context.get('request') else None
+        if user and user.is_authenticated:
+            validated_data['created_by'] = user
+
+        assessment = LMSAssessment.objects.create(**validated_data)
+
+        # Process question allocations
+        if question_ids:
+            # Auto-heal any questions
+            AssessmentQuestion.objects.filter(id__in=question_ids, is_active=False).update(is_active=True)
+            questions = AssessmentQuestion.objects.filter(id__in=question_ids)
+            total_marks = 0
+            items_to_create = []
+
+            for index, q in enumerate(questions, start=1):
+                total_marks += float(q.marks)
+                items_to_create.append(
+                    LMSAssessmentQuestionItem(
+                        assessment=assessment,
+                        question=q,
+                        order=index,
+                        marks=q.marks,
+                        created_by=user,
+                        updated_by=user
+                    )
+                )
+
+            LMSAssessmentQuestionItem.objects.bulk_create(items_to_create)
+            assessment.total_questions = len(items_to_create)
+            assessment.total_marks = total_marks
+            assessment.save(update_fields=['total_questions', 'total_marks'])
+
+        return assessment
+
+    def update(self, instance, validated_data):
+        question_ids = validated_data.pop('question_ids', None)
+        user = self.context.get('request').user if self.context.get('request') else None
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        if user and user.is_authenticated:
+            instance.updated_by = user
+
+        instance.save()
+
+        if question_ids is not None:
+            instance.items.all().delete()
+            AssessmentQuestion.objects.filter(id__in=question_ids, is_active=False).update(is_active=True)
+            questions = AssessmentQuestion.objects.filter(id__in=question_ids)
+            total_marks = 0
+            items_to_create = []
+
+            for index, q in enumerate(questions, start=1):
+                total_marks += float(q.marks)
+                items_to_create.append(
+                    LMSAssessmentQuestionItem(
+                        assessment=instance,
+                        question=q,
+                        order=index,
+                        marks=q.marks,
+                        created_by=user,
+                        updated_by=user
+                    )
+                )
+
+            LMSAssessmentQuestionItem.objects.bulk_create(items_to_create)
+            instance.total_questions = len(items_to_create)
+            instance.total_marks = total_marks
+            instance.save(update_fields=['total_questions', 'total_marks'])
+
+        return instance
+
 

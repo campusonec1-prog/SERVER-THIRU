@@ -1,11 +1,12 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import LMSAssignmentViewSet, LMSSubmissionViewSet, AssessmentQuestionViewSet
+from .views import LMSAssignmentViewSet, LMSSubmissionViewSet, AssessmentQuestionViewSet, LMSAssessmentViewSet
 
 router = DefaultRouter()
 router.register(r'assignments', LMSAssignmentViewSet, basename='lms-assignments')
 router.register(r'submissions', LMSSubmissionViewSet, basename='lms-submissions')
 router.register(r'assessment-questions', AssessmentQuestionViewSet, basename='lms-assessment-questions')
+router.register(r'assessments', LMSAssessmentViewSet, basename='lms-assessments')
 
 urlpatterns = [
     # Router endpoints
@@ -37,5 +38,13 @@ urlpatterns = [
     path('assessment-questions/detail/<int:pk>', AssessmentQuestionViewSet.as_view({'get': 'retrieve'}), name='lms-question-detail'),
     path('assessment-questions/update/<int:pk>', AssessmentQuestionViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='lms-question-update'),
     path('assessment-questions/delete/<int:pk>', AssessmentQuestionViewSet.as_view({'delete': 'destroy'}), name='lms-question-delete'),
+
+    # Assessment Allocation Aliases
+    path('assessments/list', LMSAssessmentViewSet.as_view({'get': 'list'}), name='lms-assessment-list'),
+    path('assessments/create', LMSAssessmentViewSet.as_view({'post': 'create'}), name='lms-assessment-create'),
+    path('assessments/detail/<int:pk>', LMSAssessmentViewSet.as_view({'get': 'retrieve'}), name='lms-assessment-detail'),
+    path('assessments/update/<int:pk>', LMSAssessmentViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='lms-assessment-update'),
+    path('assessments/delete/<int:pk>', LMSAssessmentViewSet.as_view({'delete': 'destroy'}), name='lms-assessment-delete'),
 ]
+
 

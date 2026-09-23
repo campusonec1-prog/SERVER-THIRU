@@ -5,16 +5,22 @@ from rest_framework import status
 
 
 def get_option_cache_version(model_name):
-    ver = cache.get(f"opt_ver_{model_name}")
-    if ver is None:
-        ver = int(time.time() * 1000)
-        cache.set(f"opt_ver_{model_name}", ver, timeout=None)
-    return ver
+    try:
+        ver = cache.get(f"opt_ver_{model_name}")
+        if ver is None:
+            ver = int(time.time() * 1000)
+            cache.set(f"opt_ver_{model_name}", ver, timeout=None)
+        return ver
+    except Exception:
+        return int(time.time() * 1000)
 
 
 def invalidate_option_cache(model_name):
-    ver = int(time.time() * 1000)
-    cache.set(f"opt_ver_{model_name}", ver, timeout=None)
+    try:
+        ver = int(time.time() * 1000)
+        cache.set(f"opt_ver_{model_name}", ver, timeout=None)
+    except Exception:
+        pass
 
 
 class CachedOptionViewSetMixin:
@@ -39,18 +45,24 @@ class CachedOptionViewSetMixin:
         if request.query_params.get('no_cache') == 'true':
             return super().list(request, *args, **kwargs)
 
-        model_name = self.get_cache_model_name()
-        version = get_option_cache_version(model_name)
-        full_path = request.get_full_path()
-        cache_key = f"opt_cache:{model_name}:v{version}:{full_path}"
+        try:
+            model_name = self.get_cache_model_name()
+            version = get_option_cache_version(model_name)
+            full_path = request.get_full_path()
+            cache_key = f"opt_cache:{model_name}:v{version}:{full_path}"
 
-        cached_data = cache.get(cache_key)
-        if cached_data is not None:
-            return Response(cached_data, status=status.HTTP_200_OK)
+            cached_data = cache.get(cache_key)
+            if cached_data is not None:
+                return Response(cached_data, status=status.HTTP_200_OK)
+        except Exception:
+            cache_key = None
 
         response = super().list(request, *args, **kwargs)
-        if response.status_code == 200:
-            cache.set(cache_key, response.data, timeout=self.cache_timeout)
+        if response.status_code == 200 and cache_key:
+            try:
+                cache.set(cache_key, response.data, timeout=self.cache_timeout)
+            except Exception:
+                pass
         return response
 
     def perform_create(self, serializer):

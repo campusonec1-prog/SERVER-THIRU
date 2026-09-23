@@ -180,3 +180,93 @@ class AssessmentOption(TrackingModel):
     def __str__(self):
         return f"Option {self.option_code or self.id} for Q#{self.question_id}"
 
+
+class LMSAssessment(TrackingModel):
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    
+    department = models.ForeignKey(
+        'institution.Department',
+        on_delete=models.CASCADE,
+        related_name='lms_assessments'
+    )
+    batch = models.ForeignKey(
+        'institution.Batch',
+        on_delete=models.CASCADE,
+        related_name='lms_assessments'
+    )
+    section = models.ForeignKey(
+        'institution.Section',
+        on_delete=models.CASCADE,
+        related_name='lms_assessments'
+    )
+    semester = models.ForeignKey(
+        'institution.Semester',
+        on_delete=models.CASCADE,
+        related_name='lms_assessments'
+    )
+    regulation = models.ForeignKey(
+        'institution.Regulation',
+        on_delete=models.CASCADE,
+        related_name='lms_assessments'
+    )
+    subject = models.ForeignKey(
+        'subject.Subject',
+        on_delete=models.CASCADE,
+        related_name='lms_assessments'
+    )
+
+    shuffle_questions = models.BooleanField(default=False)
+    shuffle_options = models.BooleanField(default=False)
+
+    start_time = models.DateTimeField()
+    end_time = models.DateTimeField()
+    duration_minutes = models.PositiveIntegerField(default=0)
+
+    total_questions = models.PositiveIntegerField(default=0)
+    total_marks = models.DecimalField(max_digits=6, decimal_places=2, default=0.00)
+
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_lms_assessments'
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'lms_assessment'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['department', 'batch', 'section', 'subject']),
+            models.Index(fields=['is_active']),
+        ]
+
+    def __str__(self):
+        return f"{self.title} - {self.subject.subject_code} ({self.total_questions} Questions)"
+
+
+class LMSAssessmentQuestionItem(TrackingModel):
+    assessment = models.ForeignKey(
+        LMSAssessment,
+        on_delete=models.CASCADE,
+        related_name='items'
+    )
+    question = models.ForeignKey(
+        AssessmentQuestion,
+        on_delete=models.CASCADE,
+        related_name='assessment_allocations'
+    )
+    order = models.PositiveIntegerField(default=1)
+    marks = models.DecimalField(max_digits=5, decimal_places=2, default=1.00)
+
+    class Meta:
+        db_table = 'lms_assessment_question_item'
+        ordering = ['order', 'id']
+        unique_together = ('assessment', 'question')
+
+    def __str__(self):
+        return f"Q#{self.question_id} in Assessment #{self.assessment_id}"
+
+
