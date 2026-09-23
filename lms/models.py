@@ -68,6 +68,10 @@ class LMSAssignment(TrackingModel):
     class Meta:
         db_table = 'lms_assignment'
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['department', 'batch', 'section', 'is_active']),
+            models.Index(fields=['is_active', 'due_date']),
+        ]
 
     def __str__(self):
         return f"{self.title} ({self.work_type}) - Due: {self.due_date}"
@@ -111,6 +115,10 @@ class LMSSubmission(TrackingModel):
         db_table = 'lms_submission'
         unique_together = ('assignment', 'student')
         ordering = ['-submitted_at']
+        indexes = [
+            models.Index(fields=['assignment', 'student']),
+            models.Index(fields=['status']),
+        ]
 
     def __str__(self):
         return f"Submission by {self.student} for {self.assignment.title}"

@@ -80,7 +80,8 @@ class ApplicationUser(TrackingModel):
     email = models.EmailField(unique=True)
     phone_number = models.CharField(
         max_length=20,
-        validators=[RegexValidator(r'^\d{10}$', message='Phone number must be exactly 10 digits.')]
+        validators=[RegexValidator(r'^\d{10}$', message='Phone number must be exactly 10 digits.')],
+        db_index=True
     )
     password = models.CharField(max_length=255)
 

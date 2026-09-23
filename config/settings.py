@@ -121,6 +121,8 @@ ASGI_APPLICATION = 'config.asgi.application'
 DATABASES = {
     'default': dj_database_url.config(
         default=os.getenv('DATABASE_URL'),
+        conn_max_age=int(os.getenv('DB_CONN_MAX_AGE', 60)),
+        conn_health_checks=True,
     )
 }
 

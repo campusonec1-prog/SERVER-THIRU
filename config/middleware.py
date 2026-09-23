@@ -14,28 +14,21 @@ class CorsBlockMiddleware:
         return self.get_response(request)
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 class ErrorLoggingMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
         response = self.get_response(request)
-        if response.status_code == 400:
+        if response.status_code >= 400 and response.status_code < 500:
             try:
-                import json
-                import os
-                
-                log_data = {
-                    "path": request.path,
-                    "method": request.method,
-                    "response_content": json.loads(response.content.decode('utf-8')) if hasattr(response, 'content') else None
-                }
-                
-                # Write to a debug file in the project folder
-                log_file_path = os.path.join(settings.BASE_DIR, "debug_errors.txt")
-                with open(log_file_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(log_data, indent=2) + "\n\n")
-            except Exception as e:
+                # Log 4xx errors safely without blocking I/O or logging credentials
+                logger.warning(f"Client error {response.status_code} on {request.method} {request.path}")
+            except Exception:
                 pass
         return response
 

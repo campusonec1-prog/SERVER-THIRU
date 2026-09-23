@@ -1,7 +1,42 @@
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
+from django.db import transaction
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+
+# High-frequency or bulk transactional models that manage their own summary broadcasts
+# or do not require row-by-row WebSocket broadcasting
+EXCLUDED_SIGNAL_MODELS = {
+    'StudentAttendance',
+    'Marks',
+    'StudentAdmissionSlip',
+    'StudentFees',
+    'AssessmentOption',
+    'AssessmentQuestion',
+    'LMSAssessmentQuestionItem',
+    'LMSSubmission',
+    'TransportExpense',
+    'LibraryTransaction',
+    'Application',
+    'ApplicationUser',
+    'User',
+    'UserDetails',
+}
+
+def _send_realtime_broadcast(data):
+    try:
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                'realtime_updates',
+                {
+                    'type': 'broadcast_update',
+                    'data': data
+                }
+            )
+    except Exception:
+        pass
+
 
 @receiver(post_save)
 def broadcast_post_save(sender, instance, created, **kwargs):
@@ -9,50 +44,33 @@ def broadcast_post_save(sender, instance, created, **kwargs):
     if sender.__module__.startswith('django.'):
         return
 
-    channel_layer = get_channel_layer()
-    if channel_layer:
-        model_name = sender.__name__
-        event_type = 'create' if created else 'update'
-        
-        data = {
-            'id': instance.pk,
-            'model': model_name,
-            'event': event_type
-        }
-        
-        try:
-            async_to_sync(channel_layer.group_send)(
-                'realtime_updates',
-                {
-                    'type': 'broadcast_update',
-                    'data': data
-                }
-            )
-        except Exception:
-            pass
+    model_name = sender.__name__
+    if model_name in EXCLUDED_SIGNAL_MODELS:
+        return
+
+    data = {
+        'id': instance.pk,
+        'model': model_name,
+        'event': 'create' if created else 'update'
+    }
+
+    transaction.on_commit(lambda: _send_realtime_broadcast(data))
+
 
 @receiver(post_delete)
 def broadcast_post_delete(sender, instance, **kwargs):
     if sender.__module__.startswith('django.'):
         return
 
-    channel_layer = get_channel_layer()
-    if channel_layer:
-        model_name = sender.__name__
-        
-        data = {
-            'id': instance.pk,
-            'model': model_name,
-            'event': 'delete'
-        }
-        
-        try:
-            async_to_sync(channel_layer.group_send)(
-                'realtime_updates',
-                {
-                    'type': 'broadcast_update',
-                    'data': data
-                }
-            )
-        except Exception:
-            pass
+    model_name = sender.__name__
+    if model_name in EXCLUDED_SIGNAL_MODELS:
+        return
+
+    data = {
+        'id': instance.pk,
+        'model': model_name,
+        'event': 'delete'
+    }
+
+    transaction.on_commit(lambda: _send_realtime_broadcast(data))
+

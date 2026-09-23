@@ -6371,3 +6371,537 @@
   }
 }
 
+{
+  "path": "/api/asset-allocations/assign",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be assigned because it is currently assigned."
+  }
+}
+
+{
+  "path": "/api/asset-allocations/return/5",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is not currently assigned."
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset Category already exists"
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Category name cannot be blank."
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Ensure this field has no more than 100 characters."
+  }
+}
+
+{
+  "path": "/api/asset-categories/edit/32",
+  "method": "PUT",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset Category already exists"
+  }
+}
+
+{
+  "path": "/api/asset-categories/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Name: Category name cannot be blank."
+  }
+}
+
+{
+  "path": "/api/asset-allocations/assign",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be assigned because it is currently disposed."
+  }
+}
+
+{
+  "path": "/api/asset-disposals/complete/3",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is currently assigned and cannot be disposed."
+  }
+}
+
+{
+  "path": "/api/asset-disposals/complete/5",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Only approved disposal requests can be completed."
+  }
+}
+
+{
+  "path": "/api/asset-disposals/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is currently under maintenance.",
+    "errors": {
+      "asset": [
+        "Asset is currently under maintenance."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-disposals/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is already disposed.",
+    "errors": {
+      "asset": [
+        "Asset is already disposed."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-disposals/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Disposal value cannot be negative.",
+    "errors": {
+      "disposal_value": [
+        "Disposal value cannot be negative."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-disposals/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "An active disposal request already exists for this asset.",
+    "errors": {
+      "asset": [
+        "An active disposal request already exists for this asset."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be sent for maintenance because it has been disposed."
+  }
+}
+
+{
+  "path": "/api/asset-transfers/transfer",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be transferred because it has been disposed."
+  }
+}
+
+{
+  "path": "/api/asset-allocations/assign",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be assigned because it is currently under maintenance."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/cancel/4",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Maintenance record is already cancelled."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/cancel/5",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Maintenance record is already completed."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/complete/8",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Maintenance record is already completed."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/complete/9",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Completion date cannot be before maintenance date.",
+    "errors": {
+      "completion_date": [
+        "Completion date cannot be before maintenance date."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/complete/10",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Cost cannot be negative.",
+    "errors": {
+      "cost": [
+        "Cost cannot be negative."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/complete/13",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Please correct the highlighted fields.",
+    "errors": {
+      "completion_date": [
+        "Completion date is required."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is already under maintenance."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be sent for maintenance because it has been disposed."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be sent for maintenance because it is lost."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Please correct the highlighted fields.",
+    "errors": {
+      "issue_description": [
+        "Issue description cannot be blank."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Please correct the highlighted fields.",
+    "errors": {
+      "cost": [
+        "Cost cannot be negative."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset is already under maintenance."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Please correct the highlighted fields.",
+    "errors": {
+      "maintenance_date": [
+        "Date has wrong format. Use one of these formats instead: YYYY-MM-DD."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/start/24",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Maintenance record is already cancelled."
+  }
+}
+
+{
+  "path": "/api/asset-maintenance/start/25",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Maintenance record is already completed."
+  }
+}
+
+{
+  "path": "/api/asset-transfers/transfer",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be transferred because it is under maintenance."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "An Asset already exists"
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset already exists"
+  }
+}
+
+{
+  "path": "/api/asset-categories/remove/96",
+  "method": "DELETE",
+  "response_content": {
+    "code": 400,
+    "message": "Cannot delete asset category because assets are associated with it."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Category: Cannot assign an inactive category to a new asset."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Warranty Expiry: Warranty expiry date cannot be earlier than purchase date."
+  }
+}
+
+{
+  "path": "/api/assets/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Purchase Price: Purchase price cannot be negative."
+  }
+}
+
+{
+  "path": "/api/asset-transfers/transfer",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be transferred because it is damaged."
+  }
+}
+
+{
+  "path": "/api/asset-transfers/transfer",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be transferred because it has been disposed."
+  }
+}
+
+{
+  "path": "/api/asset-transfers/transfer",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be transferred because it is lost."
+  }
+}
+
+{
+  "path": "/api/asset-transfers/transfer",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be transferred because it is under maintenance."
+  }
+}
+
+{
+  "path": "/api/asset-transfers/transfer",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Destination must be different from the current assignment.",
+    "errors": {
+      "to_user": [
+        "Destination must be different from the current assignment."
+      ]
+    }
+  }
+}
+
+{
+  "path": "/api/asset-transfers/transfer",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Asset cannot be transferred because it is currently available."
+  }
+}
+
+{
+  "path": "/api/research/projects",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Co Investigators: Principal investigator cannot also be a co-investigator."
+  }
+}
+
+{
+  "path": "/api/research/projects",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Funding Agency: Funding agency is required for funded projects."
+  }
+}
+
+{
+  "path": "/api/research/projects",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Project End Date: Project end date cannot be before the start date."
+  }
+}
+
+{
+  "path": "/api/research/projects",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Sanctioned Amount: Sanctioned amount cannot be negative."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Duplicate student entry with ID 5 found in the payload."
+  }
+}
+
+{
+  "path": "/api/student/marks/create",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Marks record already exists for student ID 6, exam ID 2, subject ID 4, and category THEORY."
+  }
+}
+
+{
+  "path": "/api/student/bulk-import",
+  "method": "POST",
+  "response_content": {
+    "code": 400,
+    "message": "Validation errors found in the import data.",
+    "errors": [
+      {
+        "row": 1,
+        "roll_number": "1002",
+        "name": "Jane Doe",
+        "errors": [
+          "Invalid email address format.",
+          "Phone number must be exactly 10 digits."
+        ]
+      }
+    ]
+  }
+}
+

@@ -52,7 +52,7 @@ def _get_bus_to(student):
 
 
 class StudentViewSet(viewsets.ModelViewSet):
-    queryset = Student.objects.select_related('department', 'batch', 'section', 'status', 'quota', 'bus', 'route', 'stop', 'user').prefetch_related('user__applications').all().order_by('id')
+    queryset = Student.objects.select_related('department', 'department__program', 'batch', 'section', 'status', 'quota', 'bus', 'route', 'stop', 'user').prefetch_related('user__applications').all().order_by('id')
     serializer_class = StudentSerializer
     permission_classes = [StudentPermission]
 
@@ -671,13 +671,19 @@ class StudentViewSet(viewsets.ModelViewSet):
         search_query = request.query_params.get('search', '').strip()
         student_id = request.query_params.get('student_id', '').strip()
 
+        base_qs = Student.objects.select_related(
+            'department', 'department__program', 'batch', 'section', 'status', 'quota', 'bus', 'route', 'stop', 'user', 'admission_slip', 'fees_payment'
+        ).prefetch_related('user__applications')
+
         if student_id and student_id.isdigit():
-            students = Student.objects.filter(pk=int(student_id))
+            students = base_qs.filter(pk=int(student_id))
         elif search_query:
-            students = Student.objects.filter(
+            students = base_qs.filter(
+                Q(roll_number=search_query) |
+                Q(register_number=search_query) |
                 Q(roll_number__iexact=search_query) |
                 Q(register_number__iexact=search_query) |
-                Q(user__phone_number__icontains=search_query) |
+                Q(user__phone_number=search_query) |
                 Q(user__name__icontains=search_query) |
                 Q(roll_number__icontains=search_query) |
                 Q(register_number__icontains=search_query)
@@ -695,13 +701,13 @@ class StudentViewSet(viewsets.ModelViewSet):
 
                 q_filter = Q()
                 if username_val:
-                    q_filter |= Q(roll_number__iexact=username_val) | Q(register_number__iexact=username_val)
+                    q_filter |= Q(roll_number=username_val) | Q(register_number=username_val) | Q(roll_number__iexact=username_val) | Q(register_number__iexact=username_val)
                 if phone_val:
                     q_filter |= Q(user__phone_number=phone_val)
                 if email_val:
                     q_filter |= Q(user__email=email_val)
 
-                students = Student.objects.filter(q_filter) if q_filter else Student.objects.none()
+                students = base_qs.filter(q_filter) if q_filter else Student.objects.none()
 
                 if not students.exists() and user_role != 'STUDENT':
                     return Response({
@@ -717,7 +723,7 @@ class StudentViewSet(viewsets.ModelViewSet):
         if students.count() > 1 and not student_id:
             results = []
             for s in students[:20]:
-                app = s.user.applications.first() if s.user else None
+                app = s.user.applications.all()[0] if (s.user and hasattr(s.user, 'applications') and s.user.applications.all()) else None
                 fd = app.form_data if (app and app.form_data and isinstance(app.form_data, dict)) else {}
                 candidate_name = s.user.name if s.user else ''
                 photo_url = fd.get('photo', '')
@@ -992,15 +998,21 @@ class StudentViewSet(viewsets.ModelViewSet):
             'faculty_activity__timetable__subject__semester'
         )
 
-        overall_total = att_qs.count()
-        overall_present = att_qs.filter(status='P').count()
-        overall_absent = att_qs.filter(status='AB').count()
-        overall_od = att_qs.filter(status='OD').count()
-        overall_attended = overall_present + overall_od
-        overall_percentage = round((overall_attended / overall_total * 100), 2) if overall_total > 0 else 0.0
+        overall_total = 0
+        overall_present = 0
+        overall_absent = 0
+        overall_od = 0
 
         subj_map = {}
         for a in att_qs:
+            overall_total += 1
+            if a.status == 'P':
+                overall_present += 1
+            elif a.status == 'AB':
+                overall_absent += 1
+            elif a.status == 'OD':
+                overall_od += 1
+
             activity = a.faculty_activity
             tt = activity.timetable if activity else None
             subj = tt.subject if tt else None
@@ -2062,8 +2074,6 @@ class StudentViewSet(viewsets.ModelViewSet):
                         is_hostler=item["is_hostler"],
                         is_day_scholar=item["is_day_scholar"],
                         is_bus=item["is_bus"],
-                        bus_from=item["bus_from"],
-                        bus_to=item["bus_to"],
                         status=active_status,
                         created_by=tracking_user,
                         updated_by=tracking_user

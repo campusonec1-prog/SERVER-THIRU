@@ -43,6 +43,10 @@ class LibraryBook(TrackingModel):
     class Meta:
         db_table = 'library_books'
         ordering = ['title', 'author']
+        indexes = [
+            models.Index(fields=['status', 'is_active']),
+            models.Index(fields=['department']),
+        ]
 
     def __str__(self):
         return f'{self.title} - {self.author}'
@@ -87,6 +91,10 @@ class LibraryTransaction(TrackingModel):
     class Meta:
         db_table = 'library_transactions'
         ordering = ['-issued_on', '-id']
+        indexes = [
+            models.Index(fields=['status', 'due_on']),
+            models.Index(fields=['member', 'status']),
+        ]
 
     def save(self, *args, **kwargs):
         if not self.due_on:

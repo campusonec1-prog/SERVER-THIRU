@@ -86,11 +86,15 @@ class UserViewSet(viewsets.ModelViewSet):
         from role.models import Role
         from rest_framework_simplejwt.tokens import RefreshToken
 
-        # 1. First try matching standard User model by username or mobile_number
-        user = User.objects.filter(
-            Q(username__iexact=username_str) | Q(mobile_number=username_str)
-        ).first()
-        
+        # 1. Fast indexed lookup on User model (eagerly loading role in a single query)
+        user = User.objects.select_related('role').filter(username=username_str).first()
+        if not user:
+            # Try mobile number if username is numeric or lookup by iexact
+            if username_str.isdigit() and len(username_str) == 10:
+                user = User.objects.select_related('role').filter(mobile_number=username_str).first()
+            if not user:
+                user = User.objects.select_related('role').filter(username__iexact=username_str).first()
+
         if user:
             if bcrypt.checkpw(password_str.encode('utf-8'), user.password.encode('utf-8')):
                 user_role_name = (user.role.role_name if user.role else '').upper()
@@ -101,7 +105,7 @@ class UserViewSet(viewsets.ModelViewSet):
                         "code": 403,
                         "message": "Student accounts are not allowed to log in via Institution Login. Please use Student Login."
                     }, status=status.HTTP_403_FORBIDDEN)
-                
+
                 if login_type == 'student' and user_role_name and user_role_name != 'STUDENT':
                     return Response({
                         "code": 403,
@@ -111,13 +115,16 @@ class UserViewSet(viewsets.ModelViewSet):
                 refresh = RefreshToken.for_user(user)
                 user_data = UserSerializer(user).data
 
-                # Attach student_id if user belongs to a student
-                student = Student.objects.filter(
-                    Q(roll_number__iexact=username_str) | Q(register_number__iexact=username_str) | Q(user__phone_number=user.mobile_number) | Q(user__name=user.name)
-                ).first()
-                if student:
-                    user_data['student_id'] = student.id
-                    user_data['student_roll'] = student.roll_number
+                # Attach student_id ONLY if user is a student
+                if user_role_name == 'STUDENT':
+                    student = Student.objects.filter(
+                        Q(roll_number=username_str) |
+                        Q(register_number=username_str) |
+                        Q(user__phone_number=user.mobile_number)
+                    ).only('id', 'roll_number').first()
+                    if student:
+                        user_data['student_id'] = student.id
+                        user_data['student_roll'] = student.roll_number
 
                 return Response({
                     "code": 200,
@@ -135,13 +142,16 @@ class UserViewSet(viewsets.ModelViewSet):
                     "message": "Invalid password."
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-        # 2. Try Student lookup by Roll Number, Register Number, or Phone Number if User record does NOT exist
+        # 2. Student fallback lookup by Roll Number, Register Number, or Phone Number if User record does NOT exist
         import re
 
-        student = Student.objects.filter(
+        student_qs = Student.objects.select_related('user').prefetch_related('user__applications')
+        student = student_qs.filter(
+            Q(roll_number=username_str) |
+            Q(register_number=username_str) |
             Q(roll_number__iexact=username_str) |
             Q(register_number__iexact=username_str) |
-            Q(user__phone_number__icontains=username_str)
+            Q(user__phone_number=username_str)
         ).first()
 
         if student:
@@ -152,7 +162,7 @@ class UserViewSet(viewsets.ModelViewSet):
                 }, status=status.HTTP_403_FORBIDDEN)
 
             # Extract DOB from application form_data or user details
-            app = student.user.applications.first() if (student.user and hasattr(student.user, 'applications')) else None
+            app = student.user.applications.all()[0] if (student.user and hasattr(student.user, 'applications') and student.user.applications.all()) else None
             fd = app.form_data if (app and app.form_data and isinstance(app.form_data, dict)) else {}
             personal = fd.get('personal_information', {}) if isinstance(fd, dict) else {}
 
@@ -187,14 +197,16 @@ class UserViewSet(viewsets.ModelViewSet):
                     is_valid_dob = True
 
             if is_valid_dob:
-                student_role, _ = Role.objects.get_or_create(role_name='STUDENT')
+                student_role = Role.objects.filter(role_name='STUDENT').first()
+                if not student_role:
+                    student_role = Role.objects.create(role_name='STUDENT')
                 candidate_name = student.user.name if student.user else f"Student {student.roll_number}"
                 email = student.user.email if student.user else f"student_{student.id}@tec.edu"
                 mobile = student.user.phone_number if (student.user and student.user.phone_number) else "9999999999"
 
                 username_key = student.roll_number or student.register_number or f"student_{student.id}"
 
-                user_obj = User.objects.filter(username=username_key).first()
+                user_obj = User.objects.select_related('role').filter(username=username_key).first()
                 if not user_obj:
                     hashed_pass = bcrypt.hashpw(password_str.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
                     valid_mobile = mobile if (len(mobile) == 10 and mobile.isdigit()) else "9999999999"

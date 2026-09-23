@@ -27,7 +27,7 @@ class CustomJWTAuthentication(JWTAuthentication):
             if validated_token.get('user_type') == 'candidate':
                 from dynamic_forms.models import ApplicationUser
                 return ApplicationUser.objects.get(id=user_id)
-            return User.objects.get(id=user_id)
+            return User.objects.select_related('role').get(id=user_id)
         except User.DoesNotExist:
             raise AuthenticationFailed('User not found', code='user_not_found')
         except Exception:

@@ -247,70 +247,98 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
         from users.models import User as StandardUser
         tracking_user = user if isinstance(user, StandardUser) else None
 
-        saved_entries = []
-        from django.db import transaction
+        # 1. Validation & Pre-fetching
+        student_ids = []
+        parsed_entries = []
+        for entry in attendance_entries:
+            student_id = entry.get('student_id')
+            status_val = str(entry.get('status', 'P')).strip().upper()
 
-        try:
-            with transaction.atomic():
-                for entry in attendance_entries:
-                    student_id = entry.get('student_id')
-                    status_val = entry.get('status', 'P').strip().upper()
+            if status_val not in ['P', 'AB', 'OD']:
+                return Response({
+                    "code": 400,
+                    "message": f"Invalid status '{status_val}'. Allowed values are P, AB, OD."
+                }, status=status.HTTP_400_BAD_REQUEST)
 
-                    if status_val not in ['P', 'AB', 'OD']:
-                        raise ValidationError(f"Invalid status '{status_val}'. Allowed values are P, AB, OD.")
+            student_ids.append(student_id)
+            parsed_entries.append((student_id, status_val))
 
-                    try:
-                        student = Student.objects.get(pk=student_id)
-                    except Student.DoesNotExist:
-                        raise ValidationError(f"Student with ID {student_id} does not exist.")
+        # Bulk fetch students
+        students_dict = {s.id: s for s in Student.objects.filter(pk__in=student_ids)}
+        for s_id, _ in parsed_entries:
+            if s_id not in students_dict:
+                return Response({
+                    "code": 400,
+                    "message": f"Student with ID {s_id} does not exist."
+                }, status=status.HTTP_400_BAD_REQUEST)
 
-                    attendance_instance, created = StudentAttendance.objects.get_or_create(
+        # Bulk fetch existing attendance records
+        existing_attendances = {
+            att.student_id: att
+            for att in StudentAttendance.objects.filter(faculty_activity=activity, student_id__in=student_ids)
+        }
+
+        to_create = []
+        to_update = []
+
+        for s_id, status_val in parsed_entries:
+            student = students_dict[s_id]
+            if s_id in existing_attendances:
+                att_instance = existing_attendances[s_id]
+                att_instance.status = status_val
+                att_instance.updated_by = tracking_user
+                to_update.append(att_instance)
+            else:
+                to_create.append(
+                    StudentAttendance(
                         faculty_activity=activity,
                         student=student,
-                        defaults={
-                            'status': status_val,
-                            'created_by': tracking_user,
-                            'updated_by': tracking_user
-                        }
+                        status=status_val,
+                        created_by=tracking_user,
+                        updated_by=tracking_user
                     )
-
-                    if not created:
-                        attendance_instance.status = status_val
-                        attendance_instance.updated_by = tracking_user
-                        attendance_instance.save()
-
-                    saved_entries.append(attendance_instance)
-        except ValidationError as e:
-            return Response({
-                "code": 400,
-                "message": str(e.detail[0] if isinstance(e.detail, list) else e.detail)
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Websocket Broadcast
-        try:
-            from asgiref.sync import async_to_sync
-            from channels.layers import get_channel_layer
-            channel_layer = get_channel_layer()
-            if channel_layer:
-                async_to_sync(channel_layer.group_send)(
-                    'realtime_updates',
-                    {
-                        'type': 'broadcast_update',
-                        'data': {
-                            'event': 'attendance_submitted',
-                            'payload': {
-                                'faculty_activity_id': activity.id,
-                                'count': len(saved_entries)
-                            }
-                        }
-                    }
                 )
-        except Exception:
-            pass
+
+        from django.db import transaction
+        with transaction.atomic():
+            if to_create:
+                StudentAttendance.objects.bulk_create(to_create)
+            if to_update:
+                StudentAttendance.objects.bulk_update(to_update, ['status', 'updated_by', 'updated_at'])
+
+            # Summary Websocket Broadcast deferred to post-commit
+            def broadcast_summary():
+                try:
+                    from asgiref.sync import async_to_sync
+                    from channels.layers import get_channel_layer
+                    channel_layer = get_channel_layer()
+                    if channel_layer:
+                        async_to_sync(channel_layer.group_send)(
+                            'realtime_updates',
+                            {
+                                'type': 'broadcast_update',
+                                'data': {
+                                    'event': 'attendance_submitted',
+                                    'payload': {
+                                        'faculty_activity_id': activity.id,
+                                        'count': len(parsed_entries)
+                                    }
+                                }
+                            }
+                        )
+                except Exception:
+                    pass
+
+            transaction.on_commit(broadcast_summary)
+
+        saved_entries = StudentAttendance.objects.filter(
+            faculty_activity=activity,
+            student_id__in=student_ids
+        ).select_related('student', 'student__user', 'faculty_activity', 'created_by').order_by('id')
 
         return Response({
             "code": 200,
-            "message": f"Successfully registered attendance for {len(saved_entries)} students.",
+            "message": f"Successfully registered attendance for {len(parsed_entries)} students.",
             "data": StudentAttendanceSerializer(saved_entries, many=True).data
         }, status=status.HTTP_200_OK)
 

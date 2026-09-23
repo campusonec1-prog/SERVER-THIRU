@@ -222,14 +222,26 @@ class MarksViewSet(viewsets.ViewSet):
 
         # Check for duplicate student_id in the payload
         seen_students = set()
+        parsed_entries = []
+        student_ids = []
         for entry in marks_entries:
             student_id = entry.get('student_id')
+            marks_obtained = str(entry.get('marks_obtained', '')).strip()
+
+            if not student_id or marks_obtained == '':
+                return Response({
+                    "code": 400,
+                    "message": "student_id and marks_obtained are required for each entry."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             if student_id in seen_students:
                 return Response({
                     "code": 400,
                     "message": f"Duplicate student entry with ID {student_id} found in the payload."
                 }, status=status.HTTP_400_BAD_REQUEST)
             seen_students.add(student_id)
+            student_ids.append(student_id)
+            parsed_entries.append((student_id, marks_obtained))
 
         # Validate exam and subject exist
         try:
@@ -250,96 +262,129 @@ class MarksViewSet(viewsets.ViewSet):
         from users.models import User as StandardUser
         tracking_user = user if isinstance(user, StandardUser) else None
 
-        saved_marks = []
+        # Bulk fetch students
+        students_dict = {
+            s.id: s
+            for s in Student.objects.filter(pk__in=student_ids).select_related('user')
+        }
+        for s_id, _ in parsed_entries:
+            if s_id not in students_dict:
+                return Response({
+                    "code": 400,
+                    "message": f"Student with ID {s_id} does not exist."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Bulk fetch existing marks records
+        existing_marks = {
+            m.student_id: m
+            for m in Marks.objects.filter(
+                exam=exam,
+                subject=subject,
+                subject_category=subject_category,
+                student_id__in=student_ids
+            ).select_related('created_by')
+        }
+
+        is_admin = getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)
+        if not is_admin:
+            try:
+                role = getattr(user, 'role', None)
+                if role:
+                    user_role = role.role_name.upper().replace(' ', '_')
+                    if user_role in ['ADMIN', 'ADMINISTRATOR']:
+                        is_admin = True
+            except AttributeError:
+                pass
+
+        to_create = []
+        to_update = []
         broadcast_payload_entries = []
 
-        try:
-            with transaction.atomic():
-                for entry in marks_entries:
-                    student_id = entry.get('student_id')
-                    marks_obtained = str(entry.get('marks_obtained', '')).strip()
+        for s_id, marks_obtained in parsed_entries:
+            student = students_dict[s_id]
 
-                    if not student_id or marks_obtained == '':
-                        raise ValidationError("student_id and marks_obtained are required for each entry.")
+            if is_create and s_id in existing_marks:
+                return Response({
+                    "code": 400,
+                    "message": f"Marks record already exists for student ID {s_id}, exam ID {exam_id}, subject ID {subject_id}, and category {subject_category}."
+                }, status=status.HTTP_400_BAD_REQUEST)
 
-                    try:
-                        student = Student.objects.get(pk=student_id)
-                    except Student.DoesNotExist:
-                        raise ValidationError(f"Student with ID {student_id} does not exist.")
+            if s_id in existing_marks:
+                marks_instance = existing_marks[s_id]
+                if marks_instance.created_by and marks_instance.created_by != tracking_user and not is_admin:
+                    return Response({
+                        "code": 400,
+                        "message": f"You do not have permission to edit the marks for student ID {s_id} since they were entered by {marks_instance.created_by.name or marks_instance.created_by.username}."
+                    }, status=status.HTTP_400_BAD_REQUEST)
 
-                    if is_create:
-                        if Marks.objects.filter(student=student, exam=exam, subject=subject, subject_category=subject_category).exists():
-                            raise ValidationError(f"Marks record already exists for student ID {student_id}, exam ID {exam_id}, subject ID {subject_id}, and category {subject_category}.")
-
-                    # Create or update marks record
-                    marks_instance, created = Marks.objects.get_or_create(
+                marks_instance.marks_obtained = marks_obtained
+                marks_instance.updated_by = tracking_user
+                to_update.append(marks_instance)
+            else:
+                to_create.append(
+                    Marks(
                         student=student,
                         exam=exam,
                         subject=subject,
                         subject_category=subject_category,
-                        defaults={
-                            'marks_obtained': marks_obtained,
-                            'created_by': tracking_user,
-                            'updated_by': tracking_user
-                        }
+                        marks_obtained=marks_obtained,
+                        created_by=tracking_user,
+                        updated_by=tracking_user
                     )
-
-                    if not created:
-                        is_admin = getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False)
-                        if not is_admin:
-                            try:
-                                role = getattr(user, 'role', None)
-                                if role:
-                                    user_role = role.role_name.upper().replace(' ', '_')
-                                    if user_role in ['ADMIN', 'ADMINISTRATOR']:
-                                        is_admin = True
-                            except AttributeError:
-                                pass
-                        
-                        if marks_instance.created_by and marks_instance.created_by != tracking_user and not is_admin:
-                            raise ValidationError(f"You do not have permission to edit the marks for student ID {student_id} since they were entered by {marks_instance.created_by.name or marks_instance.created_by.username}.")
-
-                        marks_instance.marks_obtained = marks_obtained
-                        marks_instance.updated_by = tracking_user
-                        marks_instance.save()
-
-                    saved_marks.append(marks_instance)
-                    broadcast_payload_entries.append({
-                        'student_id': student.id,
-                        'roll_number': student.roll_number,
-                        'student_name': student.user.name if hasattr(student, 'user') else "",
-                        'marks_obtained': marks_obtained
-                    })
-        except ValidationError as e:
-            return Response({
-                "code": 400,
-                "message": str(e.detail[0] if isinstance(e.detail, list) else e.detail)
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Websocket Broadcast
-        try:
-            from asgiref.sync import async_to_sync
-            from channels.layers import get_channel_layer
-            channel_layer = get_channel_layer()
-            if channel_layer:
-                async_to_sync(channel_layer.group_send)(
-                    'realtime_updates',
-                    {
-                        'type': 'broadcast_update',
-                        'data': {
-                            'event': 'marks_created' if is_create else 'marks_updated',
-                            'payload': {
-                                'exam_id': exam.id,
-                                'exam_name': exam.exam_name,
-                                'subject_id': subject.id,
-                                'subject_code': subject.subject_code,
-                                'entries': broadcast_payload_entries
-                            }
-                        }
-                    }
                 )
-        except Exception:
-            pass
+
+            broadcast_payload_entries.append({
+                'student_id': student.id,
+                'roll_number': student.roll_number,
+                'student_name': student.user.name if hasattr(student, 'user') and student.user else "",
+                'marks_obtained': marks_obtained
+            })
+
+        from django.db import transaction
+        with transaction.atomic():
+            if to_create:
+                Marks.objects.bulk_create(to_create)
+            if to_update:
+                Marks.objects.bulk_update(to_update, ['marks_obtained', 'updated_by', 'updated_at'])
+
+            # Summary Websocket Broadcast deferred to post-commit
+            def broadcast_summary():
+                try:
+                    from asgiref.sync import async_to_sync
+                    from channels.layers import get_channel_layer
+                    channel_layer = get_channel_layer()
+                    if channel_layer:
+                        async_to_sync(channel_layer.group_send)(
+                            'realtime_updates',
+                            {
+                                'type': 'broadcast_update',
+                                'data': {
+                                    'event': 'marks_created' if is_create else 'marks_updated',
+                                    'payload': {
+                                        'exam_id': exam.id,
+                                        'exam_name': exam.exam_name,
+                                        'subject_id': subject.id,
+                                        'subject_code': subject.subject_code,
+                                        'entries': broadcast_payload_entries
+                                    }
+                                }
+                            }
+                        )
+                except Exception:
+                    pass
+
+            transaction.on_commit(broadcast_summary)
+
+        saved_marks = Marks.objects.filter(
+            exam=exam,
+            subject=subject,
+            subject_category=subject_category,
+            student_id__in=student_ids
+        ).select_related(
+            'student', 'student__user', 'student__department', 'student__batch',
+            'student__section', 'subject', 'subject__semester', 'exam',
+            'exam__exam_type', 'created_by'
+        ).order_by('id')
 
         serializer = MarksSerializer(saved_marks, many=True)
         return Response({

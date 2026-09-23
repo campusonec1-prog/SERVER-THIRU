@@ -167,6 +167,9 @@ class ClassSubstitution(TrackingModel):
     class Meta:
         db_table = 'class_substitutions'
         ordering = ['date', 'period_id']
+        indexes = [
+            models.Index(fields=['substitute_faculty', 'status', 'date']),
+        ]
 
     def __str__(self):
         return f"{self.date} P{self.period_id}: {self.original_faculty.username} -> {self.substitute_faculty.username} ({self.status})"
@@ -227,6 +230,10 @@ class Notification(TrackingModel):
     class Meta:
         db_table = 'notifications'
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'is_read']),
+            models.Index(fields=['user', '-created_at']),
+        ]
 
     def __str__(self):
         return f"Notification for {self.user.username}: {self.title} (Read: {self.is_read})"

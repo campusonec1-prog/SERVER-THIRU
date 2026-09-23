@@ -63,6 +63,11 @@ class NoticeBoard(TrackingModel):
 
     class Meta:
         db_table = 'notice_board'
+        indexes = [
+            models.Index(fields=['is_active', 'expire_date']),
+            models.Index(fields=['department', 'is_active']),
+            models.Index(fields=['notice_type']),
+        ]
 
     def __str__(self):
         return f"{self.notice_title} ({self.notice_type})"

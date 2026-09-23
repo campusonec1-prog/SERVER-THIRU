@@ -21,47 +21,25 @@ import os
 import mimetypes
 
 
+from django.http import HttpResponse, HttpResponseRedirect, Http404
+
 def _proxy_download(request, file_url, filename=None):
     """
-    Fetch a remote file (e.g. from Cloudflare R2) server-side and stream it
-    back to the browser with Content-Disposition: attachment so it always
-    downloads with its correct original file extension (pdf, docx, png, etc.).
+    Directly redirect client to Cloudflare R2 / public URL so large files
+    download at high speed without blocking Django Gunicorn web workers.
     """
     if not file_url:
         raise Http404("No file URL provided.")
 
-    # Extract original filename and extension from the URL
-    orig_filename = os.path.basename(file_url.split("?")[0]) or "download"
-    _, ext = os.path.splitext(orig_filename)
+    file_url_str = str(file_url).strip()
+    if file_url_str.startswith("http://") or file_url_str.startswith("https://"):
+        return HttpResponseRedirect(file_url_str)
 
-    try:
-        req = urllib.request.Request(file_url, headers={"User-Agent": "IMS-Proxy/1.0"})
-        with urllib.request.urlopen(req, timeout=30) as remote:
-            content = remote.read()
-            content_type = remote.headers.get("Content-Type", "application/octet-stream").split(";")[0]
-            if not ext:
-                guessed_ext = mimetypes.guess_extension(content_type)
-                if guessed_ext:
-                    ext = guessed_ext
-    except urllib.error.HTTPError as e:
-        raise Http404(f"Remote file returned {e.code}.")
-    except Exception:
-        raise Http404("Failed to fetch the remote file.")
+    if os.path.exists(file_url_str):
+        from django.http import FileResponse
+        return FileResponse(open(file_url_str, 'rb'), as_attachment=True, filename=filename or os.path.basename(file_url_str))
 
-    # If a custom filename was provided, ensure it keeps the true file extension
-    if filename:
-        if ext and not filename.lower().endswith(ext.lower()):
-            filename = f"{filename}{ext}"
-    else:
-        filename = orig_filename
-
-    # Sanitise filename for the Content-Disposition header
-    safe_name = filename.encode("ascii", "ignore").decode("ascii") or "download"
-    response = HttpResponse(content, content_type=content_type)
-    response["Content-Disposition"] = f'attachment; filename="{safe_name}"'
-    response["Access-Control-Expose-Headers"] = "Content-Disposition"
-    response["Content-Length"] = len(content)
-    return response
+    raise Http404("File not found.")
 
 
 
@@ -79,9 +57,6 @@ class LMSAssignmentViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         role_name = (user.role.role_name if hasattr(user, 'role') and user.role else '').upper()
-
-        # Auto-heal any existing records created with default HTML boolean parsing (is_active=False)
-        LMSAssignment.objects.filter(is_active=False).update(is_active=True)
 
         queryset = LMSAssignment.objects.filter(is_active=True).select_related(
             'department', 'batch', 'section', 'subject', 'target_student', 'created_by'
@@ -400,9 +375,6 @@ class AssessmentQuestionViewSet(viewsets.ModelViewSet):
     permission_classes = [AssessmentQuestionPermission]
 
     def get_queryset(self):
-        # Auto-heal any questions created without active boolean
-        AssessmentQuestion.objects.filter(is_active=False).update(is_active=True)
-
         return AssessmentQuestion.objects.filter(is_active=True).select_related(
             'subject', 'subject__department', 'subject__regulation', 'subject__semester',
             'exam', 'exam__exam_type'

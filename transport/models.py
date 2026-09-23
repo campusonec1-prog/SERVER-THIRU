@@ -160,6 +160,9 @@ class TransportExpense(TrackingModel):
     class Meta:
         db_table = 'transport_expense'
         ordering = ['-expense_date_time']
+        indexes = [
+            models.Index(fields=['bus', 'expense_date_time']),
+        ]
 
     def __str__(self):
         return f"{self.bus.bus_number} - {self.expense_type} ({self.amount})"
