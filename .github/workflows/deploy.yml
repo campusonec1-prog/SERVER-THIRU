@@ -1,0 +1,62 @@
+name: Deploy SERVER-THIRU
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: server-thiru-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy Backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          script_stop: true
+          script: |
+            set -e
+
+            echo "=== SERVER-THIRU DEPLOYMENT START ==="
+
+            cd /var/www/SERVER-THIRU
+
+            echo "=== Fetch latest code ==="
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "=== Activate virtual environment ==="
+            source venv/bin/activate
+
+            echo "=== Install Python dependencies ==="
+            pip install -r requirements.txt
+
+            echo "=== Django checks ==="
+            python manage.py check
+
+            echo "=== Run migrations ==="
+            python manage.py migrate --noinput
+
+            echo "=== Collect static files ==="
+            python manage.py collectstatic --noinput
+
+            echo "=== Restart Gunicorn ==="
+            systemctl restart tecserver-gunicorn
+
+            echo "=== Restart Daphne ==="
+            systemctl restart tecserver-daphne
+
+            echo "=== Verify services ==="
+            systemctl is-active --quiet tecserver-gunicorn
+            systemctl is-active --quiet tecserver-daphne
+
+            echo "=== SERVER-THIRU DEPLOYMENT SUCCESS ==="
