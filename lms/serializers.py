@@ -1,6 +1,9 @@
 from rest_framework import serializers
 from django.utils import timezone
-from .models import LMSAssignment, LMSSubmission, AssessmentQuestion, AssessmentOption, LMSAssessment, LMSAssessmentQuestionItem
+from .models import (
+    LMSAssignment, LMSSubmission, AssessmentQuestion, AssessmentOption,
+    LMSAssessment, LMSAssessmentQuestionItem, LMSAssessmentAttempt, LMSAssessmentStudentAnswer
+)
 from student.models import Student
 from institution.models import Department, Batch, Section, Semester, Regulation, Exam
 from subject.models import Subject
@@ -407,5 +410,133 @@ class LMSAssessmentSerializer(serializers.ModelSerializer):
             instance.save(update_fields=['total_questions', 'total_marks'])
 
         return instance
+
+
+# ─── Student Assessment & Quiz Serializers ───────────────────────────────────
+
+class StudentAssessmentOptionTakeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AssessmentOption
+        fields = ['id', 'option_code', 'option_text']
+
+
+class StudentAssessmentQuestionTakeSerializer(serializers.ModelSerializer):
+    options = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AssessmentQuestion
+        fields = ['id', 'question_text', 'question_image', 'question_type', 'marks', 'options']
+
+    def get_options(self, obj):
+        options = list(obj.options.all())
+        shuffle = self.context.get('shuffle_options', False)
+        if shuffle:
+            import random
+            random.shuffle(options)
+        return StudentAssessmentOptionTakeSerializer(options, many=True).data
+
+
+class StudentAssessmentItemTakeSerializer(serializers.ModelSerializer):
+    question = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LMSAssessmentQuestionItem
+        fields = ['id', 'order', 'marks', 'question']
+
+    def get_question(self, obj):
+        return StudentAssessmentQuestionTakeSerializer(
+            obj.question,
+            context=self.context
+        ).data
+
+
+class LMSAssessmentStudentAnswerSerializer(serializers.ModelSerializer):
+    question_text = serializers.CharField(source='question.question_text', read_only=True)
+    question_type = serializers.CharField(source='question.question_type', read_only=True)
+    question_image = serializers.CharField(source='question.question_image', read_only=True)
+    answer_explanation = serializers.CharField(source='question.answer', read_only=True)
+    options = AssessmentOptionSerializer(source='question.options', many=True, read_only=True)
+
+    class Meta:
+        model = LMSAssessmentStudentAnswer
+        fields = [
+            'id', 'question', 'question_text', 'question_type', 'question_image',
+            'answer_explanation', 'options', 'selected_option_ids', 'text_answer',
+            'is_correct', 'marks_awarded'
+        ]
+
+
+class LMSAssessmentAttemptSerializer(serializers.ModelSerializer):
+    student_answers = LMSAssessmentStudentAnswerSerializer(many=True, read_only=True)
+    student_name = serializers.CharField(source='student.first_name', read_only=True)
+    register_number = serializers.CharField(source='student.register_number', read_only=True)
+    assessment_title = serializers.CharField(source='assessment.title', read_only=True)
+    subject_code = serializers.CharField(source='assessment.subject.subject_code', read_only=True)
+    subject_name = serializers.CharField(source='assessment.subject.subject_name', read_only=True)
+
+    class Meta:
+        model = LMSAssessmentAttempt
+        fields = [
+            'id', 'assessment', 'assessment_title', 'subject_code', 'subject_name',
+            'student', 'student_name', 'register_number',
+            'started_at', 'submitted_at', 'status', 'total_questions',
+            'attempted_count', 'correct_count', 'wrong_count', 'skipped_count',
+            'total_marks', 'obtained_marks', 'percentage', 'time_taken_seconds',
+            'student_answers'
+        ]
+
+
+class StudentAssessmentListSerializer(serializers.ModelSerializer):
+    subject_name = serializers.CharField(source='subject.subject_name', read_only=True)
+    subject_code = serializers.CharField(source='subject.subject_code', read_only=True)
+    department_name = serializers.CharField(source='department.department_name', read_only=True)
+    batch_name = serializers.CharField(source='batch.batch', read_only=True)
+    section_name = serializers.CharField(source='section.section_name', read_only=True)
+    status = serializers.SerializerMethodField()
+    attempt = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LMSAssessment
+        fields = [
+            'id', 'title', 'description', 'department', 'department_name',
+            'batch', 'batch_name', 'section', 'section_name', 'semester', 'regulation', 'subject',
+            'subject_code', 'subject_name', 'shuffle_questions', 'shuffle_options',
+            'start_time', 'end_time', 'duration_minutes', 'total_questions',
+            'total_marks', 'status', 'attempt', 'created_at'
+        ]
+
+    def get_attempt(self, obj):
+        attempt = getattr(obj, 'user_attempt', None)
+        if attempt:
+            return {
+                'id': attempt.id,
+                'status': attempt.status,
+                'started_at': attempt.started_at,
+                'submitted_at': attempt.submitted_at,
+                'obtained_marks': float(attempt.obtained_marks),
+                'total_marks': float(attempt.total_marks),
+                'percentage': float(attempt.percentage),
+                'correct_count': attempt.correct_count,
+                'wrong_count': attempt.wrong_count,
+                'skipped_count': attempt.skipped_count,
+                'attempted_count': attempt.attempted_count,
+                'total_questions': attempt.total_questions,
+                'time_taken_seconds': attempt.time_taken_seconds
+            }
+        return None
+
+    def get_status(self, obj):
+        attempt = getattr(obj, 'user_attempt', None)
+        if attempt and attempt.status in ['SUBMITTED', 'AUTO_SUBMITTED', 'EVALUATED']:
+            return 'COMPLETED'
+        
+        now = timezone.now()
+        if now < obj.start_time:
+            return 'UPCOMING'
+        elif obj.start_time <= now <= obj.end_time:
+            return 'ONGOING'
+        else:
+            return 'MISSED'
+
 
 

@@ -278,3 +278,74 @@ class LMSAssessmentQuestionItem(TrackingModel):
         return f"Q#{self.question_id} in Assessment #{self.assessment_id}"
 
 
+class LMSAssessmentAttempt(TrackingModel):
+    STATUS_CHOICES = [
+        ('IN_PROGRESS', 'In Progress'),
+        ('SUBMITTED', 'Submitted'),
+        ('AUTO_SUBMITTED', 'Auto Submitted'),
+        ('EVALUATED', 'Evaluated'),
+    ]
+
+    assessment = models.ForeignKey(
+        LMSAssessment,
+        on_delete=models.CASCADE,
+        related_name='attempts'
+    )
+    student = models.ForeignKey(
+        'student.Student',
+        on_delete=models.CASCADE,
+        related_name='lms_assessment_attempts'
+    )
+    started_at = models.DateTimeField(auto_now_add=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='IN_PROGRESS')
+
+    total_questions = models.PositiveIntegerField(default=0)
+    attempted_count = models.PositiveIntegerField(default=0)
+    correct_count = models.PositiveIntegerField(default=0)
+    wrong_count = models.PositiveIntegerField(default=0)
+    skipped_count = models.PositiveIntegerField(default=0)
+
+    total_marks = models.DecimalField(max_digits=6, decimal_places=2, default=0.00)
+    obtained_marks = models.DecimalField(max_digits=6, decimal_places=2, default=0.00)
+    percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
+    time_taken_seconds = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = 'lms_assessment_attempt'
+        unique_together = ('assessment', 'student')
+        ordering = ['-started_at']
+        indexes = [
+            models.Index(fields=['assessment', 'student']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        return f"Attempt by {self.student} on {self.assessment.title} - {self.obtained_marks}/{self.total_marks}"
+
+
+class LMSAssessmentStudentAnswer(TrackingModel):
+    attempt = models.ForeignKey(
+        LMSAssessmentAttempt,
+        on_delete=models.CASCADE,
+        related_name='student_answers'
+    )
+    question = models.ForeignKey(
+        AssessmentQuestion,
+        on_delete=models.CASCADE,
+        related_name='student_attempt_answers'
+    )
+    selected_option_ids = models.JSONField(default=list, blank=True)
+    text_answer = models.TextField(blank=True, null=True)
+    is_correct = models.BooleanField(default=False)
+    marks_awarded = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
+
+    class Meta:
+        db_table = 'lms_assessment_student_answer'
+        unique_together = ('attempt', 'question')
+        ordering = ['id']
+
+    def __str__(self):
+        return f"Answer for Q#{self.question_id} in Attempt #{self.attempt_id} (Correct: {self.is_correct})"
+
+

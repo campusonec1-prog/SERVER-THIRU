@@ -1053,6 +1053,9 @@ class StudentViewSet(viewsets.ModelViewSet):
 
         subject_wise_attendance.sort(key=lambda x: x['subject_code'])
 
+        overall_attended = overall_present + overall_od
+        overall_percentage = round((overall_attended / overall_total * 100), 2) if overall_total > 0 else 0.0
+
         # ── 4. Counselling Reports ─────────────────────────────────────
         from ..models import CounsellingReport
         counselling_qs = CounsellingReport.objects.filter(student=student).select_related('semester', 'created_by').order_by('-report_date')

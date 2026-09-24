@@ -1,6 +1,9 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import LMSAssignmentViewSet, LMSSubmissionViewSet, AssessmentQuestionViewSet, LMSAssessmentViewSet
+from .views import (
+    LMSAssignmentViewSet, LMSSubmissionViewSet, AssessmentQuestionViewSet,
+    LMSAssessmentViewSet, StudentAssessmentViewSet
+)
 
 router = DefaultRouter()
 router.register(r'assignments', LMSAssignmentViewSet, basename='lms-assignments')
@@ -11,6 +14,12 @@ router.register(r'assessments', LMSAssessmentViewSet, basename='lms-assessments'
 urlpatterns = [
     # Router endpoints
     path('', include(router.urls)),
+
+    # ── Student Assessment Endpoints ─────────────────────────────────────────
+    path('student/assessments/', StudentAssessmentViewSet.as_view({'get': 'list_student_assessments'}), name='student-assessments-list'),
+    path('student/assessments/<int:pk>/start/', StudentAssessmentViewSet.as_view({'post': 'start_assessment'}), name='student-assessment-start'),
+    path('student/assessments/<int:pk>/submit/', StudentAssessmentViewSet.as_view({'post': 'submit_assessment'}), name='student-assessment-submit'),
+    path('student/assessments/<int:pk>/result/', StudentAssessmentViewSet.as_view({'get': 'result'}), name='student-assessment-result'),
 
     # ── Explicit API Aliases for LMS CRUD Endpoints ─────────────────────────
     # 1. List Assignments
