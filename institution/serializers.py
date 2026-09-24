@@ -129,9 +129,6 @@ class AcademicYearSerializer(serializers.ModelSerializer):
         model = AcademicYear
         fields = [
             'id', 'academic_year', 
-            'start_date', 'end_date',
-            'odd_sem_start_date', 'odd_sem_end_date',
-            'even_sem_start_date', 'even_sem_end_date',
             'is_active', 'is_display', 
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
@@ -141,12 +138,6 @@ class AcademicYearSerializer(serializers.ModelSerializer):
                 'required': True,
                 'error_messages': {'unique': 'This academic year already exists.'}
             },
-            'start_date': {'required': False, 'allow_null': True},
-            'end_date': {'required': False, 'allow_null': True},
-            'odd_sem_start_date': {'required': False, 'allow_null': True},
-            'odd_sem_end_date': {'required': False, 'allow_null': True},
-            'even_sem_start_date': {'required': False, 'allow_null': True},
-            'even_sem_end_date': {'required': False, 'allow_null': True},
             'is_active': {'required': False, 'default': True},
             'is_display': {'required': False, 'default': False},
         }
@@ -161,22 +152,6 @@ class AcademicYearSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, data):
-        start_date = data.get('start_date', self.instance.start_date if self.instance else None)
-        end_date = data.get('end_date', self.instance.end_date if self.instance else None)
-        odd_start = data.get('odd_sem_start_date', self.instance.odd_sem_start_date if self.instance else None)
-        odd_end = data.get('odd_sem_end_date', self.instance.odd_sem_end_date if self.instance else None)
-        even_start = data.get('even_sem_start_date', self.instance.even_sem_start_date if self.instance else None)
-        even_end = data.get('even_sem_end_date', self.instance.even_sem_end_date if self.instance else None)
-
-        if odd_start and odd_end and odd_end <= odd_start:
-            raise serializers.ValidationError({"odd_sem_end_date": "Odd semester end date must be after odd semester start date."})
-
-        if even_start and even_end and even_end <= even_start:
-            raise serializers.ValidationError({"even_sem_end_date": "Even semester end date must be after even semester start date."})
-
-        if start_date and end_date and end_date <= start_date:
-            raise serializers.ValidationError({"end_date": "End date must be after the start date."})
-
         is_display = data.get('is_display', self.instance.is_display if self.instance else False)
         if is_display:
             qs = AcademicYear.objects.filter(is_display=True)
