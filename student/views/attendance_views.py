@@ -185,7 +185,7 @@ class FacultyActivityViewSet(viewsets.ModelViewSet):
 
 
 class StudentAttendanceViewSet(viewsets.ModelViewSet):
-    queryset = StudentAttendance.objects.select_related('student', 'student__user', 'faculty_activity', 'created_by').all().order_by('id')
+    queryset = StudentAttendance.objects.select_related('student', 'student__application', 'student__application__candidate', 'faculty_activity', 'created_by').all().order_by('id')
     serializer_class = StudentAttendanceSerializer
     permission_classes = [AttendancePermission]
 
@@ -334,7 +334,7 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
         saved_entries = StudentAttendance.objects.filter(
             faculty_activity=activity,
             student_id__in=student_ids
-        ).select_related('student', 'student__user', 'faculty_activity', 'created_by').order_by('id')
+        ).select_related('student', 'student__application', 'student__application__candidate', 'faculty_activity', 'created_by').order_by('id')
 
         return Response({
             "code": 200,

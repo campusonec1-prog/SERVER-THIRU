@@ -1,6 +1,6 @@
 from rest_framework import serializers
-from .models import FormModule, FormField, Application, ApplicationStatus, ApplicationUser
-from institution.models import Program
+from .models import FormModule, FormField, Application, ApplicationStatus, ApplicationUser, ApplicationFee, PaymentTransaction, PaymentStatus
+from institution.models import Program, AcademicYear
 
 
 STATE_NAME_TO_CODE = {
@@ -364,18 +364,58 @@ class ApplicationSerializer(serializers.ModelSerializer):
     program_name = serializers.CharField(source='program.program_name', read_only=True)
     status_name = serializers.CharField(source='status.status_name', read_only=True)
     readable_form_data = serializers.SerializerMethodField()
+    payment_details = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Application
         fields = [
             'id', 'candidate_id', 'candidate_name', 'program_id', 'program_name', 
             'application_no', 'form_data', 'readable_form_data', 'status_id', 'status_name', 
+            'payment_status', 'paid_amount', 'paid_at', 'payment_details',
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by', 'application_no']
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by', 'application_no', 'payment_status', 'paid_amount', 'paid_at']
         extra_kwargs = {
             'form_data': {'required': False, 'default': dict},
         }
+
+    def get_payment_details(self, obj):
+        tx = obj.payment_transactions.filter(status=PaymentStatus.SUCCESS).first()
+        if not tx:
+            tx = obj.payment_transactions.order_by('-id').first()
+        if not tx and obj.candidate_id:
+            tx = PaymentTransaction.objects.filter(user_id=obj.candidate_id, status=PaymentStatus.SUCCESS).order_by('-id').first()
+        
+        if tx:
+            return {
+                'id': tx.id,
+                'razorpay_order_id': tx.razorpay_order_id,
+                'razorpay_payment_id': tx.razorpay_payment_id,
+                'razorpay_signature': tx.razorpay_signature,
+                'amount': float(tx.amount) if tx.amount is not None else (float(obj.paid_amount) if obj.paid_amount else 0.0),
+                'application_fee': float(tx.application_fee) if tx.application_fee is not None else 0.0,
+                'platform_fee': float(tx.platform_fee) if tx.platform_fee is not None else 0.0,
+                'currency': tx.currency or 'INR',
+                'status': tx.status,
+                'payment_method': tx.payment_method or 'Razorpay Online',
+                'paid_at': tx.paid_at.isoformat() if tx.paid_at else (obj.paid_at.isoformat() if obj.paid_at else None),
+                'error_code': tx.error_code,
+                'error_description': tx.error_description,
+                'created_at': tx.created_at.isoformat() if tx.created_at else None,
+            }
+        
+        if obj.payment_status == 'PAID' or obj.paid_amount:
+            return {
+                'id': None,
+                'razorpay_order_id': None,
+                'razorpay_payment_id': None,
+                'amount': float(obj.paid_amount) if obj.paid_amount else 0.0,
+                'status': 'SUCCESS',
+                'payment_method': 'Online',
+                'paid_at': obj.paid_at.isoformat() if obj.paid_at else None,
+            }
+            
+        return None
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -677,3 +717,128 @@ class ApplicationSerializer(serializers.ModelSerializer):
         return data
 
 
+class ApplicationFeeSerializer(serializers.ModelSerializer):
+    program_id = serializers.PrimaryKeyRelatedField(
+        queryset=Program.objects.all(),
+        source='program',
+        allow_null=True,
+        required=False
+    )
+    program_name = serializers.SerializerMethodField(read_only=True)
+    academic_year_id = serializers.PrimaryKeyRelatedField(
+        queryset=AcademicYear.objects.all(),
+        source='academic_year',
+        allow_null=True,
+        required=False
+    )
+    academic_year_name = serializers.SerializerMethodField(read_only=True)
+    total_fee = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = ApplicationFee
+        fields = [
+            'id',
+            'program',
+            'program_id',
+            'program_name',
+            'academic_year',
+            'academic_year_id',
+            'academic_year_name',
+            'application_fee',
+            'platform_fee',
+            'total_fee',
+            'is_active',
+            'description',
+            'created_at',
+            'updated_at',
+            'created_by',
+            'updated_by'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'total_fee']
+        extra_kwargs = {
+            'program': {'write_only': True, 'required': False},
+            'academic_year': {'write_only': True, 'required': False},
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+    def get_program_name(self, obj):
+        return obj.program.program_name if obj.program else 'All Programs (Global)'
+
+    def get_academic_year_name(self, obj):
+        return obj.academic_year.academic_year if obj.academic_year else 'All Academic Years (Global)'
+
+    def validate_application_fee(self, value):
+        if value is None:
+            raise serializers.ValidationError("Application fee is required.")
+        if value < 0:
+            raise serializers.ValidationError("Application fee cannot be negative.")
+        return value
+
+    def validate_platform_fee(self, value):
+        if value is None:
+            raise serializers.ValidationError("Platform fee is required.")
+        if value < 0:
+            raise serializers.ValidationError("Platform fee cannot be negative.")
+        return value
+
+    def validate(self, data):
+        program = data.get('program', getattr(self.instance, 'program', None) if self.instance else None)
+        academic_year = data.get('academic_year', getattr(self.instance, 'academic_year', None) if self.instance else None)
+
+        qs = ApplicationFee.objects.filter(program=program, academic_year=academic_year)
+        if self.instance and self.instance.pk:
+            qs = qs.exclude(pk=self.instance.pk)
+
+        if qs.exists():
+            prog_label = program.program_name if program else "All Programs (Global)"
+            ay_label = academic_year.academic_year if academic_year else "All Academic Years (Global)"
+            raise serializers.ValidationError(
+                f"A fee configuration already exists for Program: '{prog_label}' and Academic Year: '{ay_label}'. Please edit or update the existing entry instead."
+            )
+
+        return data
+
+
+class PaymentTransactionSerializer(serializers.ModelSerializer):
+    candidate_name = serializers.CharField(source='user.name', read_only=True)
+    candidate_email = serializers.CharField(source='user.email', read_only=True)
+    candidate_phone = serializers.CharField(source='user.phone_number', read_only=True)
+    application_no = serializers.CharField(source='application.application_no', read_only=True)
+    program_name = serializers.CharField(source='application.program.program_name', read_only=True)
+
+    class Meta:
+        model = PaymentTransaction
+        fields = [
+            'id',
+            'application',
+            'application_no',
+            'user',
+            'candidate_name',
+            'candidate_email',
+            'candidate_phone',
+            'program_name',
+            'razorpay_order_id',
+            'razorpay_payment_id',
+            'razorpay_signature',
+            'amount',
+            'application_fee',
+            'platform_fee',
+            'currency',
+            'status',
+            'payment_method',
+            'razorpay_order_response',
+            'razorpay_payment_response',
+            'razorpay_signature_verification_response',
+            'paid_at',
+            'error_code',
+            'error_description',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'created_at', 'updated_at', 'application_no', 'candidate_name', 
+            'candidate_email', 'candidate_phone', 'program_name'
+        ]

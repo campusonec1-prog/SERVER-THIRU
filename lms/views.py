@@ -192,7 +192,7 @@ class LMSAssignmentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def submissions(self, request, pk=None):
         assignment = self.get_object()
-        submissions = assignment.submissions.all().select_related('student', 'student__user', 'evaluated_by')
+        submissions = assignment.submissions.all().select_related('student', 'student__application', 'student__application__candidate', 'evaluated_by')
 
         status_param = request.query_params.get('status')
         if status_param:
@@ -221,7 +221,7 @@ class LMSSubmissionViewSet(viewsets.ModelViewSet):
         role_name = (user.role.role_name if hasattr(user, 'role') and user.role else '').upper()
         
         queryset = LMSSubmission.objects.all().select_related(
-            'assignment', 'student', 'student__user', 'evaluated_by'
+            'assignment', 'student', 'student__application', 'student__application__candidate', 'evaluated_by'
         )
 
         assignment_id = self.request.query_params.get('assignment')
@@ -764,8 +764,8 @@ class StudentAssessmentViewSet(viewsets.ViewSet):
         if hasattr(request.user, 'student_profile') and request.user.student_profile:
             return request.user.student_profile
         
-        # Try finding student where user_id or email matches
-        student = Student.objects.filter(user__email=request.user.email).select_related('department', 'batch', 'section').first()
+        # Try finding student where candidate email matches
+        student = Student.objects.filter(application__candidate__email=request.user.email).select_related('department', 'batch', 'section').first()
         return student
 
     @action(detail=False, methods=['get'])

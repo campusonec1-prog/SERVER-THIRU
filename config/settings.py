@@ -238,3 +238,8 @@ else:
             'LOCATION': 'ims-thirumalai-cache',
         }
     }
+
+# Razorpay Configuration
+RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '').strip()
+RAZORPAY_SECRET_KEY = os.getenv('RAZORPAY_SECRET_KEY', '').strip()
+RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', '').strip()

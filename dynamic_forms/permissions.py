@@ -59,3 +59,8 @@ class ApplicationUserPermission(BaseRolePermission):
 
         return True
 
+
+class ApplicationFeePermission(BaseRolePermission):
+    read_roles = ['authenticated']
+    write_roles = ['admin', 'administrator']
+

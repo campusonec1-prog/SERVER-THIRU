@@ -52,7 +52,7 @@ def _get_bus_to(student):
 
 
 class StudentViewSet(viewsets.ModelViewSet):
-    queryset = Student.objects.select_related('department', 'department__program', 'batch', 'section', 'status', 'quota', 'bus', 'route', 'stop', 'user').prefetch_related('user__applications').all().order_by('id')
+    queryset = Student.objects.select_related('department', 'department__program', 'batch', 'section', 'status', 'quota', 'bus', 'route', 'stop', 'application', 'application__candidate').all().order_by('id')
     serializer_class = StudentSerializer
     permission_classes = [StudentPermission]
 
@@ -153,11 +153,12 @@ class StudentViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(route_id=route_id)
         if search:
             queryset = queryset.filter(
-                Q(user__name__icontains=search) |
+                Q(application__candidate__name__icontains=search) |
+                Q(application__application_no__icontains=search) |
                 Q(roll_number__icontains=search) |
                 Q(register_number__icontains=search) |
-                Q(user__email__icontains=search) |
-                Q(user__phone_number__icontains=search) |
+                Q(application__candidate__email__icontains=search) |
+                Q(application__candidate__phone_number__icontains=search) |
                 Q(bus__bus_number__icontains=search) |
                 Q(route__route_name__icontains=search) |
                 Q(stop__stop_name__icontains=search)
@@ -271,10 +272,11 @@ class StudentViewSet(viewsets.ModelViewSet):
         from users.models import User
 
         student = get_object_or_404(
-            Student.objects.select_related('department', 'department__program', 'batch', 'quota', 'status', 'bus', 'route', 'stop', 'user', 'admission_slip', 'fees_payment').prefetch_related('user__applications'),
+            Student.objects.select_related('department', 'department__program', 'batch', 'quota', 'status', 'bus', 'route', 'stop', 'application', 'application__candidate', 'admission_slip', 'fees_payment'),
             pk=pk
         )
-        app = student.user.applications.first() if student.user else None
+        app = student.application
+        cand = app.candidate if app else None
         fd = app.form_data if (app and app.form_data and isinstance(app.form_data, dict)) else {}
 
         def get_fd(module_key, field_key=None):
@@ -288,10 +290,10 @@ class StudentViewSet(viewsets.ModelViewSet):
 
         # ── Personal Info ──────────────────────────────────────────────
         personal = get_fd('personal_information')
-        candidate_name = personal.get('applicant_name', '') or (student.user.name if student.user else '')
+        candidate_name = personal.get('applicant_name', '') or (cand.name if cand else '')
         aadhaar_number = str(personal.get('aadhaar_number', '') or '')
         community = str(personal.get('community', '') or '')
-        phone = str(personal.get('student_mobile', '') or (student.user.phone_number if student.user else ''))
+        phone = str(personal.get('student_mobile', '') or (cand.phone_number if cand else ''))
 
         # ── Parent Info ────────────────────────────────────────────────
         parent = get_fd('parent_information')
@@ -573,8 +575,9 @@ class StudentViewSet(viewsets.ModelViewSet):
                     'bus_id': student.bus_id,
                     'route_id': student.route_id,
                     'stop_id': student.stop_id,
+                    'application_id': student.application_id,
                     'application_no': app.application_no if app else '',
-                    'user_id': student.user.id if student.user else None,
+                    'user_id': student.user_id,
                     'student_photo': photo_url,
                 },
                 'application': {
@@ -672,8 +675,8 @@ class StudentViewSet(viewsets.ModelViewSet):
         student_id = request.query_params.get('student_id', '').strip()
 
         base_qs = Student.objects.select_related(
-            'department', 'department__program', 'batch', 'section', 'status', 'quota', 'bus', 'route', 'stop', 'user', 'admission_slip', 'fees_payment'
-        ).prefetch_related('user__applications')
+            'department', 'department__program', 'batch', 'section', 'status', 'quota', 'bus', 'route', 'stop', 'application', 'application__candidate', 'admission_slip', 'fees_payment'
+        )
 
         if student_id and student_id.isdigit():
             students = base_qs.filter(pk=int(student_id))
@@ -683,8 +686,9 @@ class StudentViewSet(viewsets.ModelViewSet):
                 Q(register_number=search_query) |
                 Q(roll_number__iexact=search_query) |
                 Q(register_number__iexact=search_query) |
-                Q(user__phone_number=search_query) |
-                Q(user__name__icontains=search_query) |
+                Q(application__application_no=search_query) |
+                Q(application__candidate__phone_number=search_query) |
+                Q(application__candidate__name__icontains=search_query) |
                 Q(roll_number__icontains=search_query) |
                 Q(register_number__icontains=search_query)
             )
@@ -703,9 +707,9 @@ class StudentViewSet(viewsets.ModelViewSet):
                 if username_val:
                     q_filter |= Q(roll_number=username_val) | Q(register_number=username_val) | Q(roll_number__iexact=username_val) | Q(register_number__iexact=username_val)
                 if phone_val:
-                    q_filter |= Q(user__phone_number=phone_val)
+                    q_filter |= Q(application__candidate__phone_number=phone_val)
                 if email_val:
-                    q_filter |= Q(user__email=email_val)
+                    q_filter |= Q(application__candidate__email=email_val)
 
                 students = base_qs.filter(q_filter) if q_filter else Student.objects.none()
 
@@ -723,16 +727,17 @@ class StudentViewSet(viewsets.ModelViewSet):
         if students.count() > 1 and not student_id:
             results = []
             for s in students[:20]:
-                app = s.user.applications.all()[0] if (s.user and hasattr(s.user, 'applications') and s.user.applications.all()) else None
+                app = s.application
+                cand = app.candidate if app else None
                 fd = app.form_data if (app and app.form_data and isinstance(app.form_data, dict)) else {}
-                candidate_name = s.user.name if s.user else ''
+                candidate_name = cand.name if cand else ''
                 photo_url = fd.get('photo', '')
                 results.append({
                     'id': s.id,
                     'name': candidate_name,
                     'roll_number': s.roll_number,
                     'register_number': s.register_number,
-                    'phone': s.user.phone_number if s.user else '',
+                    'phone': cand.phone_number if cand else '',
                     'department': s.department.department_name if s.department else '',
                     'batch': s.batch.batch if s.batch else '',
                     'section': s.section.sections if s.section else '',
@@ -753,7 +758,7 @@ class StudentViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_404_NOT_FOUND)
 
         # ── 1. Profile & Application Data ──────────────────────────────────────
-        app = student.user.applications.first() if student.user else None
+        app = student.application
         fd = app.form_data if (app and app.form_data and isinstance(app.form_data, dict)) else {}
 
         def get_fd(module_key, field_key=None):

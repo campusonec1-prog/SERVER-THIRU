@@ -2,7 +2,7 @@ from rest_framework import serializers
 from .models import StudentStatus, Student, FacultyActivity, StudentAttendance
 from institution.models import Department, Section, Batch, Quota
 from users.models import User
-from dynamic_forms.models import ApplicationUser
+from dynamic_forms.models import Application, ApplicationUser
 from transport.models import Bus, TransportRoute, RouteStop
 
 
@@ -61,10 +61,10 @@ class StudentSerializer(serializers.ModelSerializer):
         queryset=Batch.objects.all(),
         error_messages={'does_not_exist': 'Batch does not exist.'}
     )
-    user_id = serializers.PrimaryKeyRelatedField(
-        source='user',
-        queryset=ApplicationUser.objects.all(),
-        error_messages={'does_not_exist': 'Application user does not exist.'}
+    application_id = serializers.PrimaryKeyRelatedField(
+        source='application',
+        queryset=Application.objects.all(),
+        error_messages={'does_not_exist': 'Application does not exist.'}
     )
     status_id = serializers.PrimaryKeyRelatedField(
         source='status',
@@ -104,7 +104,7 @@ class StudentSerializer(serializers.ModelSerializer):
         model = Student
         fields = [
             'id', 'roll_number', 'register_number', 'department_id',
-            'section_id', 'batch_id', 'user_id', 'lab_batch', 'status_id',
+            'section_id', 'batch_id', 'application_id', 'lab_batch', 'status_id',
             'quota_id', 'is_hostler', 'hostel_building_type', 'hostel_room_number',
             'is_day_scholar', 'is_bus',
             'bus_id', 'route_id', 'stop_id',
@@ -126,9 +126,9 @@ class StudentSerializer(serializers.ModelSerializer):
             },
             'department_id': {'required': True},
             'batch_id': {'required': True},
-            'user_id': {
+            'application_id': {
                 'required': True,
-                'error_messages': {'unique': 'This user is already assigned to a student.'}
+                'error_messages': {'unique': 'This application is already assigned to a student.'}
             },
             'status_id': {'required': True},
             'lab_batch': {'required': False, 'allow_null': True, 'allow_blank': True},
@@ -143,14 +143,14 @@ class StudentSerializer(serializers.ModelSerializer):
         super().__init__(*args, **kwargs)
         apply_default_error_messages(self.fields)
 
-    def validate_user_id(self, value):
+    def validate_application_id(self, value):
         if not value:
-            raise serializers.ValidationError("Application user is required.")
-        qs = Student.objects.filter(user=value)
+            raise serializers.ValidationError("Application is required.")
+        qs = Student.objects.filter(application=value)
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
-            raise serializers.ValidationError("This user is already assigned to a student.")
+            raise serializers.ValidationError("This application is already assigned to a student.")
         return value
 
     def validate_roll_number(self, value):
@@ -178,70 +178,62 @@ class StudentSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         
-        # Resolve student name with fallback to application and form_data
-        name_val = instance.user.name if instance.user else None
-        app_no = ""
-        photo_url = ""
+        # Resolve student / candidate name and details from application
+        app = instance.application
+        candidate = app.candidate if app else None
         
-        if instance.user:
-            app = instance.user.applications.first()
-            if app:
-                app_no = app.application_no
+        name_val = candidate.name if candidate else None
+        app_no = app.application_no if app else ""
+        photo_url = ""
+        phone_val = candidate.phone_number if (candidate and getattr(candidate, 'phone_number', None)) else None
+        
+        if app and app.form_data and isinstance(app.form_data, dict):
+            fd = app.form_data
+            pd = fd.get('personal_details', {})
+            if isinstance(pd, dict):
                 if not name_val:
-                    name_val = app.candidate_name
-                if app.form_data and isinstance(app.form_data, dict):
-                    fd = app.form_data
-                    if not name_val:
-                        pd = fd.get('personal_details', {})
-                        if isinstance(pd, dict):
-                            name_val = pd.get('candidate_name') or pd.get('name')
-                        if not name_val:
-                            name_val = fd.get('candidate_name') or fd.get('name')
-                    fd = app.form_data
-                    photo_url = fd.get('photo', '')
-                    if not photo_url:
-                        # Check inside certificates list
-                        certs = fd.get('certificates') or []
-                        if isinstance(certs, dict) and 'certificates' in certs:
-                            certs = certs['certificates']
-                        if isinstance(certs, list):
-                            for c in certs:
-                                if c and isinstance(c, dict) and c.get('certificate_type') == 'Passport Size Photo':
-                                    doc_val = c.get('document')
-                                    if isinstance(doc_val, str) and doc_val.startswith('http'):
-                                        photo_url = doc_val
-                                    elif isinstance(doc_val, dict) and isinstance(doc_val.get('url'), str):
-                                        photo_url = doc_val.get('url')
-                                    break
-                    if not photo_url:
-                        for key, val in fd.items():
-                            if isinstance(val, dict) and val.get('photo'):
-                                photo_url = val.get('photo')
-                                break
-        # Resolve student phone number with fallbacks
-        phone_val = instance.user.phone_number if (instance.user and getattr(instance.user, 'phone_number', None)) else None
-        if not phone_val and instance.user:
-            app = instance.user.applications.first()
-            if app:
-                phone_val = getattr(app, 'phone', None)
-                if not phone_val and app.form_data and isinstance(app.form_data, dict):
-                    fd = app.form_data
-                    pd = fd.get('personal_details', {})
-                    if isinstance(pd, dict):
-                        phone_val = pd.get('phone') or pd.get('mobile') or pd.get('phone_number')
-                    if not phone_val:
-                        phone_val = fd.get('phone') or fd.get('mobile') or fd.get('phone_number')
+                    name_val = pd.get('candidate_name') or pd.get('name')
+                if not phone_val:
+                    phone_val = pd.get('phone') or pd.get('mobile') or pd.get('phone_number')
+            if not name_val:
+                name_val = fd.get('candidate_name') or fd.get('name')
+            if not phone_val:
+                phone_val = fd.get('phone') or fd.get('mobile') or fd.get('phone_number')
+
+            if not photo_url:
+                photo_url = fd.get('photo', '')
+            if not photo_url:
+                certs = fd.get('certificates') or []
+                if isinstance(certs, dict) and 'certificates' in certs:
+                    certs = certs['certificates']
+                if isinstance(certs, list):
+                    for c in certs:
+                        if c and isinstance(c, dict) and c.get('certificate_type') == 'Passport Size Photo':
+                            doc_val = c.get('document')
+                            if isinstance(doc_val, str) and doc_val.startswith('http'):
+                                photo_url = doc_val
+                            elif isinstance(doc_val, dict) and isinstance(doc_val.get('url'), str):
+                                photo_url = doc_val.get('url')
+                            break
+            if not photo_url:
+                for key, val in fd.items():
+                    if isinstance(val, dict) and val.get('photo'):
+                        photo_url = val.get('photo')
+                        break
 
         ret['student_name'] = name_val or "Unknown"
-        ret['student_email'] = instance.user.email if instance.user else None
+        ret['student_email'] = candidate.email if candidate else None
         ret['student_phone'] = phone_val
         ret['phone_number'] = phone_val
         ret['student_photo'] = photo_url
+        ret['application_id'] = instance.application_id
         ret['application_no'] = app_no
+        ret['user_id'] = candidate.id if candidate else None
 
         ret['department_name'] = instance.department.department_name if instance.department else None
         ret['program_name'] = instance.department.program.program_name if (instance.department and instance.department.program) else None
         ret['batch_name'] = instance.batch.batch if instance.batch else None
+
         
         sec_str = ""
         if instance.section:

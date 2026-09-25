@@ -95,11 +95,11 @@ class LMSAssignmentSerializer(serializers.ModelSerializer):
         # Check if user is a student
         student = getattr(request.user, 'student', None)
         if not student:
-            # Fallback lookup student profile by user mobile/username
+            # Fallback lookup student profile by user mobile/name
             student = Student.objects.filter(
-                user__phone_number=request.user.mobile_number
+                application__candidate__phone_number=getattr(request.user, 'mobile_number', None)
             ).first() or Student.objects.filter(
-                user__name=request.user.name
+                application__candidate__name=request.user.name
             ).first()
 
         if student:

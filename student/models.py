@@ -36,10 +36,10 @@ class Student(TrackingModel):
         db_column='batch_id',
         related_name='students'
     )
-    user = models.OneToOneField(
-        'dynamic_forms.ApplicationUser',
+    application = models.OneToOneField(
+        'dynamic_forms.Application',
         on_delete=models.CASCADE,
-        db_column='user_id',
+        db_column='application_id',
         related_name='student'
     )
     lab_batch = models.CharField(max_length=50, null=True, blank=True)
@@ -109,13 +109,23 @@ class Student(TrackingModel):
             models.Index(fields=['is_hostler']),
             models.Index(fields=['status']),
             models.Index(fields=['quota']),
-            models.Index(fields=['user']),
+            models.Index(fields=['application']),
             models.Index(fields=['roll_number']),
             models.Index(fields=['register_number']),
         ]
 
+    @property
+    def user(self):
+        return self.application.candidate if self.application else None
+
+    @property
+    def user_id(self):
+        return self.application.candidate_id if self.application else None
+
     def __str__(self):
-        return f"{self.roll_number} - {self.user.name}"
+        cand_name = self.application.candidate.name if (self.application and self.application.candidate) else (self.roll_number or "Student")
+        return f"{self.roll_number or self.register_number or 'Student'} - {cand_name}"
+
 
 
 class Marks(TrackingModel):

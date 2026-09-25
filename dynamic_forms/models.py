@@ -108,15 +108,6 @@ class ApplicationUser(TrackingModel):
         """
         Explicitly call app.delete() for every linked application before removing
         the user record.
-
-        Django's CASCADE uses a bulk SQL DELETE that bypasses overridden delete()
-        methods on child objects, so without this loop:
-          - Uploaded R2 documents (photos, certificates, etc.) would be orphaned.
-          - Student admission slip, fees, marks and counselling records would not
-            be wiped (the Application.delete() logic added in Step 2 never fires).
-
-        By calling app.delete() here we guarantee the Application-level cleanup
-        runs for every application before Django removes the user row.
         """
         import logging
         logger = logging.getLogger(__name__)
@@ -133,6 +124,42 @@ class ApplicationUser(TrackingModel):
         super().delete(*args, **kwargs)
 
 
+class ApplicationFee(TrackingModel):
+    program = models.ForeignKey(
+        'institution.Program',
+        on_delete=models.CASCADE,
+        db_column='program_id',
+        related_name='application_fees',
+        null=True,
+        blank=True
+    )
+    academic_year = models.ForeignKey(
+        'institution.AcademicYear',
+        on_delete=models.CASCADE,
+        db_column='academic_year_id',
+        related_name='application_fees',
+        null=True,
+        blank=True
+    )
+    application_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    platform_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    is_active = models.BooleanField(default=True)
+    description = models.TextField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'application_fees'
+        ordering = ['-id']
+
+    def __str__(self):
+        program_str = self.program.program_name if self.program else "All Programs"
+        ay_str = self.academic_year.academic_year if self.academic_year else "All Academic Years"
+        return f"{program_str} ({ay_str}) - App Fee: {self.application_fee}, Platform Fee: {self.platform_fee}"
+
+    @property
+    def total_fee(self):
+        app_fee = self.application_fee or 0
+        plat_fee = self.platform_fee or 0
+        return app_fee + plat_fee
 
 
 class Application(TrackingModel):
@@ -156,12 +183,25 @@ class Application(TrackingModel):
         db_column='status_id',
         related_name='applications'
     )
+    payment_status = models.CharField(
+        max_length=20,
+        choices=[
+            ('UNPAID', 'Unpaid'),
+            ('PENDING', 'Pending'),
+            ('PAID', 'Paid'),
+            ('FAILED', 'Failed'),
+        ],
+        default='UNPAID',
+        db_index=True
+    )
+    paid_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'applications'
 
     def __str__(self):
-        return f"{self.application_no} - {self.candidate.name} ({self.status.status_name})"
+        return f"{self.application_no} - {self.candidate.name} ({self.status.status_name}) - Payment: {self.payment_status}"
 
     def delete(self, *args, **kwargs):
         # ── 1. Clean up files in Cloudflare R2 before deleting the application record ──
@@ -188,7 +228,6 @@ class Application(TrackingModel):
             for url in urls:
                 delete_file_from_r2(url)
         except Exception as e:
-            # Silent fallback to prevent database delete blocks on R2 connectivity issues
             import logging
             logger = logging.getLogger(__name__)
             logger.error(f"[R2 Delete Error] Failed to delete files for application {self.application_no}: {e}")
@@ -207,8 +246,60 @@ class Application(TrackingModel):
             logger = logging.getLogger(__name__)
             logger.error(f"[Student Delete Error] Failed to delete student for application {self.application_no}: {e}")
 
-
         super().delete(*args, **kwargs)
 
 
+class PaymentStatus(models.TextChoices):
+    CREATED = 'CREATED', 'Created'
+    PENDING = 'PENDING', 'Pending'
+    SUCCESS = 'SUCCESS', 'Success'
+    FAILED = 'FAILED', 'Failed'
+    CANCELLED = 'CANCELLED', 'Cancelled'
 
+
+class PaymentTransaction(TrackingModel):
+    application = models.ForeignKey(
+        Application,
+        on_delete=models.CASCADE,
+        db_column='application_id',
+        related_name='payment_transactions',
+        null=True,
+        blank=True
+    )
+    user = models.ForeignKey(
+        ApplicationUser,
+        on_delete=models.CASCADE,
+        db_column='user_id',
+        related_name='payment_transactions'
+    )
+    razorpay_order_id = models.CharField(max_length=100, unique=True, db_index=True)
+    razorpay_payment_id = models.CharField(max_length=100, null=True, blank=True, unique=True, db_index=True)
+    razorpay_signature = models.CharField(max_length=255, null=True, blank=True)
+
+    amount = models.DecimalField(max_digits=10, decimal_places=2)  # Total amount in INR
+    application_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    platform_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    currency = models.CharField(max_length=10, default='INR')
+
+    status = models.CharField(
+        max_length=20,
+        choices=PaymentStatus.choices,
+        default=PaymentStatus.CREATED,
+        db_index=True
+    )
+    payment_method = models.CharField(max_length=50, null=True, blank=True)
+
+    razorpay_order_response = models.JSONField(null=True, blank=True)
+    razorpay_payment_response = models.JSONField(null=True, blank=True)
+    razorpay_signature_verification_response = models.JSONField(null=True, blank=True)
+
+    paid_at = models.DateTimeField(null=True, blank=True)
+    error_code = models.CharField(max_length=100, null=True, blank=True)
+    error_description = models.TextField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'payment_transactions'
+        ordering = ['-id']
+
+    def __str__(self):
+        return f"Payment {self.razorpay_order_id} - App {self.application.application_no} - ₹{self.amount} ({self.status})"

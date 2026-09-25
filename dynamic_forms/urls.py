@@ -2,7 +2,11 @@ from django.urls import path
 from .views import (
     FormModuleViewSet, FormFieldViewSet, ApplicationViewSet, 
     ApplicationStatusViewSet, ApplicationUserViewSet, ApplicationUserLoginView,
-    ApplicationPDFDownloadView
+    ApplicationPDFDownloadView, ApplicationFeeViewSet
+)
+from .payment_views import (
+    PaymentSummaryView, CreateRazorpayOrderView,
+    VerifyRazorpayPaymentView, RazorpayWebhookView
 )
 
 urlpatterns = [
@@ -42,4 +46,18 @@ urlpatterns = [
     path('users/get/<int:pk>', ApplicationUserViewSet.as_view({'get': 'retrieve'}), name='app-user-detail'),
     path('users/edit/<int:pk>', ApplicationUserViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='app-user-edit'),
     path('users/remove/<int:pk>', ApplicationUserViewSet.as_view({'delete': 'destroy'}), name='app-user-remove'),
+
+    # Application Fee endpoints
+    path('application-fees/list', ApplicationFeeViewSet.as_view({'get': 'list'}), name='application-fee-list'),
+    path('application-fees/create', ApplicationFeeViewSet.as_view({'post': 'create'}), name='application-fee-create'),
+    path('application-fees/get/<int:pk>', ApplicationFeeViewSet.as_view({'get': 'retrieve'}), name='application-fee-detail'),
+    path('application-fees/edit/<int:pk>', ApplicationFeeViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='application-fee-edit'),
+    path('application-fees/remove/<int:pk>', ApplicationFeeViewSet.as_view({'delete': 'destroy'}), name='application-fee-remove'),
+
+    # Razorpay Payment endpoints
+    path('payments/summary/<int:application_id>', PaymentSummaryView.as_view(), name='payment-summary'),
+    path('payments/create-order', CreateRazorpayOrderView.as_view(), name='payment-create-order'),
+    path('payments/verify', VerifyRazorpayPaymentView.as_view(), name='payment-verify'),
+    path('payments/webhook', RazorpayWebhookView.as_view(), name='payment-webhook'),
 ]
+

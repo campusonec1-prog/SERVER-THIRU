@@ -105,7 +105,7 @@ class MarksViewSet(viewsets.ViewSet):
         return super().handle_exception(exc)
 
     def list(self, request):
-        queryset = Marks.objects.select_related('student', 'student__user', 'student__department', 'student__batch', 'student__section', 'subject', 'subject__semester', 'exam', 'exam__exam_type', 'created_by').all().order_by('id')
+        queryset = Marks.objects.select_related('student', 'student__application', 'student__application__candidate', 'student__department', 'student__batch', 'student__section', 'subject', 'subject__semester', 'exam', 'exam__exam_type', 'created_by').all().order_by('id')
         
         user = request.user
         role_name = ""
@@ -139,7 +139,7 @@ class MarksViewSet(viewsets.ViewSet):
         raw_data = list(queryset.values(
             'id', 'student_id', 'exam_id', 'subject_id', 'subject_category', 'marks_obtained',
             'created_at', 'updated_at', 'created_by_id', 'updated_by_id',
-            'student__roll_number', 'student__register_number', 'student__user__name',
+            'student__roll_number', 'student__register_number', 'student__application__candidate__name',
             'student__department_id', 'student__department__department_name',
             'student__batch_id', 'student__batch__batch',
             'student__section_id', 'student__section__sections',
@@ -164,7 +164,7 @@ class MarksViewSet(viewsets.ViewSet):
                 'updated_by': m['updated_by_id'],
                 'student_roll': m['student__roll_number'],
                 'student_register': m['student__register_number'],
-                'student_name': m['student__user__name'] or "Unknown",
+                'student_name': m.get('student__application__candidate__name') or "Unknown",
                 'department_id': m['student__department_id'],
                 'department_name': m['student__department__department_name'] or "",
                 'batch_id': m['student__batch_id'],
@@ -192,7 +192,7 @@ class MarksViewSet(viewsets.ViewSet):
         except Student.DoesNotExist:
             raise Http404()
         
-        queryset = Marks.objects.select_related('student', 'student__user', 'student__department', 'student__batch', 'student__section', 'subject', 'subject__semester', 'exam', 'exam__exam_type', 'created_by').filter(student_id=student_id).order_by('id')
+        queryset = Marks.objects.select_related('student', 'student__application', 'student__application__candidate', 'student__department', 'student__batch', 'student__section', 'subject', 'subject__semester', 'exam', 'exam__exam_type', 'created_by').filter(student_id=student_id).order_by('id')
         serializer = MarksSerializer(queryset, many=True)
         return Response({
             "code": 200,
@@ -381,7 +381,7 @@ class MarksViewSet(viewsets.ViewSet):
             subject_category=subject_category,
             student_id__in=student_ids
         ).select_related(
-            'student', 'student__user', 'student__department', 'student__batch',
+            'student', 'student__application', 'student__application__candidate', 'student__department', 'student__batch',
             'student__section', 'subject', 'subject__semester', 'exam',
             'exam__exam_type', 'created_by'
         ).order_by('id')

@@ -228,7 +228,7 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
 
 
 class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
-    queryset = LibraryMember.objects.select_related('student__user')
+    queryset = LibraryMember.objects.select_related('student__application', 'student__application__candidate')
     serializer_class = LibraryMemberSerializer
 
     def get_queryset(self):
@@ -239,7 +239,7 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
                 Q(membership_number__icontains=query)
                 | Q(student__roll_number__icontains=query)
                 | Q(student__register_number__icontains=query)
-                | Q(student__user__name__icontains=query)
+                | Q(student__application__candidate__name__icontains=query)
             )
         return queryset.order_by('membership_number')
 
@@ -269,7 +269,7 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
 
 
 class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
-    queryset = LibraryTransaction.objects.select_related('book', 'member__student__user')
+    queryset = LibraryTransaction.objects.select_related('book', 'member__student__application', 'member__student__application__candidate')
     serializer_class = LibraryTransactionSerializer
 
     def get_queryset(self):
@@ -387,7 +387,7 @@ class LibraryDashboardViewSet(LibraryViewSetMixin, viewsets.ViewSet):
         today = timezone.localdate()
         active_loans = LibraryTransaction.objects.filter(returned_on__isnull=True)
         overdue = active_loans.filter(due_on__lt=today)
-        recent = LibraryTransaction.objects.select_related('book', 'member__student__user').order_by('-id')[:8]
+        recent = LibraryTransaction.objects.select_related('book', 'member__student__application', 'member__student__application__candidate').order_by('-id')[:8]
         
         from django.db.models import Sum
         books_qs = LibraryBook.objects.filter(is_active=True)

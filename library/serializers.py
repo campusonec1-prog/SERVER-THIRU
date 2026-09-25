@@ -54,7 +54,7 @@ class LibraryBookSerializer(serializers.ModelSerializer):
 
 
 class LibraryMemberSerializer(serializers.ModelSerializer):
-    student_name = serializers.CharField(source='student.user.name', read_only=True)
+    student_name = serializers.CharField(source='student.application.candidate.name', read_only=True, default='')
     roll_number = serializers.CharField(source='student.roll_number', read_only=True)
     register_number = serializers.CharField(source='student.register_number', read_only=True)
     department_name = serializers.CharField(source='student.department.department_name', read_only=True)
@@ -97,7 +97,7 @@ class LibraryMemberSerializer(serializers.ModelSerializer):
 class LibraryTransactionSerializer(serializers.ModelSerializer):
     book_title = serializers.CharField(source='book.title', read_only=True)
     member_number = serializers.CharField(source='member.membership_number', read_only=True)
-    student_name = serializers.CharField(source='member.student.user.name', read_only=True)
+    student_name = serializers.CharField(source='member.student.application.candidate.name', read_only=True, default='')
     roll_number = serializers.CharField(source='member.student.roll_number', read_only=True)
     is_overdue = serializers.SerializerMethodField()
 

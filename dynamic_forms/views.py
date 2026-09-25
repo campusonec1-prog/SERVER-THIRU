@@ -3,15 +3,15 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied
-from .models import FormModule, FormField, Application, ApplicationStatus, ApplicationUser
+from .models import FormModule, FormField, Application, ApplicationStatus, ApplicationUser, ApplicationFee
 from .serializers import (
     FormModuleSerializer, FormFieldSerializer, ApplicationSerializer, 
-    ApplicationStatusSerializer, ApplicationUserSerializer
+    ApplicationStatusSerializer, ApplicationUserSerializer, ApplicationFeeSerializer
 )
 from users.permissions import IsAdminUser
 from .permissions import (
     FormModulePermission, FormFieldPermission, ApplicationPermission,
-    ApplicationStatusPermission, ApplicationUserPermission
+    ApplicationStatusPermission, ApplicationUserPermission, ApplicationFeePermission
 )
 
 
@@ -146,9 +146,6 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         if not user or not user.is_authenticated:
             return Application.objects.none()
         
-        if user.__class__.__name__ == 'ApplicationUser':
-            return Application.objects.filter(candidate=user).order_by('-id')
-        
         is_admin = False
         try:
             role_name = user.role.role_name.upper()
@@ -157,9 +154,34 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         except AttributeError:
             pass
 
-        if is_admin:
-            return Application.objects.all().order_by('-id')
-        return Application.objects.none()
+        if user.__class__.__name__ == 'ApplicationUser':
+            qs = Application.objects.filter(candidate=user)
+        elif is_admin:
+            qs = Application.objects.all()
+        else:
+            return Application.objects.none()
+
+        status_id = self.request.query_params.get('status_id')
+        if status_id:
+            qs = qs.filter(status_id=status_id)
+
+        payment_status = self.request.query_params.get('payment_status')
+        if payment_status:
+            qs = qs.filter(payment_status__iexact=payment_status)
+
+        search = self.request.query_params.get('search')
+        if search:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(application_no__icontains=search) |
+                Q(candidate__name__icontains=search) |
+                Q(candidate__email__icontains=search) |
+                Q(candidate__phone_number__icontains=search) |
+                Q(payment_transactions__razorpay_payment_id__icontains=search) |
+                Q(payment_transactions__razorpay_order_id__icontains=search)
+            ).distinct()
+
+        return qs.order_by('-id')
 
     def handle_exception(self, exc):
         if isinstance(exc, (Http404, NotFound)):
@@ -197,7 +219,33 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         tracking_user = user if isinstance(user, StandardUser) else None
         
         # Candidate is automatically assigned via validate method in serializer
-        serializer.save(application_no=app_no, created_by=tracking_user, updated_by=tracking_user)
+        payment_id = self.request.data.get('payment_id') or self.request.data.get('razorpay_payment_id')
+        order_id = self.request.data.get('razorpay_order_id') or self.request.data.get('order_id')
+
+        payment_tx = None
+        if payment_id:
+            from .models import PaymentTransaction, PaymentStatus
+            payment_tx = PaymentTransaction.objects.filter(razorpay_payment_id=payment_id).first()
+        elif order_id:
+            from .models import PaymentTransaction, PaymentStatus
+            payment_tx = PaymentTransaction.objects.filter(razorpay_order_id=order_id).first()
+
+        payment_status = 'PAID' if payment_tx and payment_tx.status == 'SUCCESS' else 'UNPAID'
+        paid_amount = payment_tx.amount if payment_tx else None
+        paid_at = payment_tx.paid_at if payment_tx else None
+
+        app_instance = serializer.save(
+            application_no=app_no,
+            payment_status=payment_status,
+            paid_amount=paid_amount,
+            paid_at=paid_at,
+            created_by=tracking_user,
+            updated_by=tracking_user
+        )
+
+        if payment_tx:
+            payment_tx.application = app_instance
+            payment_tx.save(update_fields=['application'])
 
     def perform_update(self, serializer):
         user = self.request.user
@@ -1078,6 +1126,113 @@ class ApplicationPDFDownloadView(APIView):
         response['Content-Disposition'] = f'attachment; filename="Application_{application.application_no}.pdf"'
         response.write(pdf)
         return response
+
+
+class ApplicationFeeViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+    queryset = ApplicationFee.objects.all().select_related('program', 'academic_year').order_by('-id')
+    serializer_class = ApplicationFeeSerializer
+    permission_classes = [ApplicationFeePermission]
+    model_label = "Application Fee"
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+
+        is_active = params.get('is_active')
+        if is_active is not None and is_active != '':
+            if is_active.lower() == 'true':
+                qs = qs.filter(is_active=True)
+            elif is_active.lower() == 'false':
+                qs = qs.filter(is_active=False)
+
+        program_id = params.get('program_id')
+        if program_id:
+            qs = qs.filter(program_id=program_id)
+
+        academic_year_id = params.get('academic_year_id')
+        if academic_year_id:
+            qs = qs.filter(academic_year_id=academic_year_id)
+
+        search = params.get('search')
+        if search:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(program__program_name__icontains=search) |
+                Q(academic_year__academic_year__icontains=search) |
+                Q(description__icontains=search)
+            )
+
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        pagination = request.query_params.get('pagination', 'true').lower()
+        queryset = self.filter_queryset(self.get_queryset())
+
+        if pagination == 'false':
+            serializer = self.get_serializer(queryset, many=True)
+            return Response({
+                "code": 200,
+                "message": "Application fees listed successfully",
+                "data": serializer.data
+            }, status=status.HTTP_200_OK)
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return Response({
+                "code": 200,
+                "message": "Application fees listed successfully",
+                "data": {
+                    "count": self.paginator.page.paginator.count,
+                    "results": serializer.data
+                }
+            }, status=status.HTTP_200_OK)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            "code": 200,
+            "message": "Application fees listed successfully",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return Response({
+            "code": 200,
+            "message": "Application fee retrieved successfully",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response({
+            "code": 201,
+            "message": "Application fee created successfully",
+            "data": serializer.data
+        }, status=status.HTTP_201_CREATED, headers=headers)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response({
+            "code": 200,
+            "message": "Application fee updated successfully",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        super().destroy(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Application fee deleted successfully"
+        }, status=status.HTTP_200_OK)
 
 
 

@@ -533,7 +533,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         'related_substitution__batch', 'related_substitution__section',
         'related_substitution__subject', 'related_leave', 'related_leave__applicant',
         'related_leave__department', 'related_hostel_leave', 'related_hostel_leave__student',
-        'related_hostel_leave__student__department', 'related_hostel_leave__student__user'
+        'related_hostel_leave__student__department', 'related_hostel_leave__student__application', 'related_hostel_leave__student__application__candidate'
     ).all().order_by('-created_at')
     serializer_class = NotificationSerializer
     permission_classes = [NotificationPermission]
@@ -821,7 +821,7 @@ class LeaveHelperViewSet(viewsets.ViewSet):
 
 class HostelLeaveRequestViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = HostelLeaveRequest.objects.select_related(
-        'student', 'student__department', 'student__section', 'student__batch', 'student__user',
+        'student', 'student__department', 'student__section', 'student__batch', 'student__application', 'student__application__candidate',
         'hostel_approved_by', 'hod_approved_by'
     ).all().order_by('-id')
     serializer_class = HostelLeaveRequestSerializer
@@ -857,7 +857,7 @@ class HostelLeaveRequestViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         if role == 'STUDENT' or hasattr(user, 'student'):
             from student.models import Student
             try:
-                student = Student.objects.filter(user__name=user.name).first() or getattr(user, 'student', None)
+                student = Student.objects.filter(application__candidate__name=user.name).first() or getattr(user, 'student', None)
                 if student:
                     qs = qs.filter(student=student)
             except Exception:
@@ -898,7 +898,7 @@ class HostelLeaveRequestViewSet(AdminWriteMixin, viewsets.ModelViewSet):
             qs = qs.filter(
                 Q(student__roll_number__icontains=search_param) |
                 Q(student__register_number__icontains=search_param) |
-                Q(student__user__name__icontains=search_param) |
+                Q(student__application__candidate__name__icontains=search_param) |
                 Q(reason__icontains=search_param)
             )
 

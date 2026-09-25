@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class HostelVisitorLogViewSet(viewsets.ModelViewSet):
     queryset = HostelVisitorLog.objects.select_related(
-        'student', 'student__department', 'student__section', 'student__batch', 'student__user'
+        'student', 'student__department', 'student__section', 'student__batch', 'student__application', 'student__application__candidate'
     ).all().order_by('-check_in')
     serializer_class = HostelVisitorLogSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -147,7 +147,7 @@ class HostelVisitorLogViewSet(viewsets.ModelViewSet):
                 Q(visitor_phone__icontains=search) |
                 Q(student__roll_number__icontains=search) |
                 Q(student__register_number__icontains=search) |
-                Q(student__user__name__icontains=search)
+                Q(student__application__candidate__name__icontains=search)
             )
 
         page = self.paginate_queryset(queryset)
