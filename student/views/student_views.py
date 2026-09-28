@@ -2060,7 +2060,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                         }
                     }
 
-                    Application.objects.create(
+                    application = Application.objects.create(
                         candidate=app_user,
                         program=program,
                         application_no=app_no,
@@ -2076,7 +2076,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                         department=item["department"],
                         section=item["section"],
                         batch=item["batch"],
-                        user=app_user,
+                        application=application,
                         lab_batch=item["lab_batch"],
                         quota=item["quota"],
                         is_hostler=item["is_hostler"],
