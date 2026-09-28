@@ -3,17 +3,17 @@ from rest_framework import permissions
 
 class StudentStatusPermission(BaseRolePermission):
     read_roles = ['authenticated']
-    write_roles = ['admin', 'administrator']
+    write_roles = ['admin', 'administrator', 'office', 'manager', 'tech_supporter', 'administration_officer']
 
 
 class StudentPermission(BaseRolePermission):
     read_roles = ['authenticated']
-    write_roles = ['admin', 'administrator']
+    write_roles = ['admin', 'administrator', 'office', 'manager', 'tech_supporter', 'administration_officer']
 
 
 class MarksPermission(BaseRolePermission):
     read_roles = ['authenticated']
-    write_roles = ['admin', 'administrator', 'hod', 'faculty', 'principal', 'vice principal']
+    write_roles = ['admin', 'administrator', 'hod', 'faculty', 'principal', 'vice_principal', 'tech_supporter', 'administration_officer']
 
 
 class CounsellingReportPermission(BaseRolePermission):

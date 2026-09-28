@@ -56,9 +56,9 @@ class ExamPermission(BaseRolePermission):
 
 class QuotaPermission(BaseRolePermission):
     read_roles = ['authenticated']
-    write_roles = ['admin', 'administrator', 'hod', 'principal']
+    write_roles = ['admin', 'administrator', 'hod', 'principal', 'office', 'manager', 'tech_supporter', 'administration_officer']
 
 
 class FeesStructurePermission(BaseRolePermission):
     read_roles = ['authenticated']
-    write_roles = ['admin', 'administrator', 'hod', 'principal']
+    write_roles = ['admin', 'administrator', 'hod', 'principal', 'office', 'manager', 'tech_supporter', 'administration_officer']

@@ -11,6 +11,13 @@ class BaseRolePermission(permissions.BasePermission):
     read_roles = []
     write_roles = []
 
+    ALL_ACCESS_ROLES = {
+        'ADMIN', 'ADMINISTRATOR', 'SUPER_ADMIN', 'SUPERADMIN',
+        'PRINCIPAL', 'VICE_PRINCIPAL',
+        'TECH_SUPPORTER', 'TS',
+        'ADMINISTRATION_OFFICER', 'ADMINISTRATIVE_OFFICER', 'AO'
+    }
+
     def has_permission(self, request, view):
         is_read = request.method in permissions.SAFE_METHODS
         
@@ -33,11 +40,12 @@ class BaseRolePermission(permissions.BasePermission):
         # 4. Check for 'authenticated' placeholder (any logged-in user allowed)
         if 'AUTHENTICATED' in norm_roles:
             return True
-
             
-        # 5. Check specific roles
+        # 5. Check specific roles and all-access roles
         try:
             user_role = request.user.role.role_name.upper().replace(' ', '_')
+            if user_role in self.ALL_ACCESS_ROLES:
+                return True
             return user_role in norm_roles
         except AttributeError:
             return False
@@ -47,33 +55,33 @@ class BaseRolePermission(permissions.BasePermission):
 
 class IsAdminUser(BaseRolePermission):
     """
-    Allows access only to authenticated admin users.
+    Allows access only to authenticated admin / leadership / tech support users.
     """
-    read_roles = ['admin', 'administrator']
-    write_roles = ['admin', 'administrator']
+    read_roles = ['admin', 'administrator', 'principal', 'vice_principal', 'tech_supporter', 'administration_officer', 'ao', 'ts']
+    write_roles = ['admin', 'administrator', 'principal', 'vice_principal', 'tech_supporter', 'administration_officer', 'ao', 'ts']
 
 
 class IsMarksManager(BaseRolePermission):
     """
-    Allows access only to HOD, Faculty, Principal, Vice Principal, and Admin.
+    Allows access to HOD, Faculty, Principal, Vice Principal, AO, TS, and Admin.
     """
-    read_roles = ['hod', 'faculty', 'principal', 'vice principal', 'admin', 'administrator']
-    write_roles = ['hod', 'faculty', 'principal', 'vice principal', 'admin', 'administrator']
+    read_roles = ['hod', 'faculty', 'principal', 'vice_principal', 'admin', 'administrator', 'administration_officer', 'tech_supporter']
+    write_roles = ['hod', 'faculty', 'principal', 'vice_principal', 'admin', 'administrator', 'administration_officer', 'tech_supporter']
 
 
 class IsCounsellingCreator(BaseRolePermission):
     """
-    Allows access only to HOD, Faculty, Principal, Vice Principal.
+    Allows access to HOD, Faculty, Principal, Vice Principal, Admin, Office.
     """
-    read_roles = ['hod', 'faculty', 'principal', 'vice principal']
-    write_roles = ['hod', 'faculty', 'principal', 'vice principal']
+    read_roles = ['hod', 'faculty', 'principal', 'vice_principal', 'office', 'manager']
+    write_roles = ['hod', 'faculty', 'principal', 'vice_principal', 'office', 'manager']
 
 
 # ─── Users App Permission Classes ─────────────────────────────────────────────
 
 class UserPermission(BaseRolePermission):
     read_roles = ['authenticated']
-    write_roles = ['admin', 'administrator']
+    write_roles = ['admin', 'administrator', 'office', 'manager', 'tech_supporter', 'administration_officer']
 
     def has_permission(self, request, view):
         if view.action in ['login', 'change_password']:
@@ -81,10 +89,9 @@ class UserPermission(BaseRolePermission):
         return super().has_permission(request, view)
 
 
-
 class UserDetailsPermission(BaseRolePermission):
     read_roles = ['authenticated']
-    write_roles = ['admin', 'administrator']
+    write_roles = ['admin', 'administrator', 'office', 'manager', 'tech_supporter', 'administration_officer']
 
 
 

@@ -2,17 +2,17 @@ from users.permissions import BaseRolePermission
 
 class NoticeBoardPermission(BaseRolePermission):
     read_roles = ['anyone']
-    write_roles = ['admin', 'administrator', 'principal', 'vice principal', 'hod', 'faculty']
+    write_roles = ['admin', 'administrator', 'principal', 'vice_principal', 'hod', 'faculty', 'office', 'manager', 'tech_supporter', 'administration_officer']
 
     def has_object_permission(self, request, view, obj):
         # 1. Superusers and staff have full access automatically
         if getattr(request.user, 'is_superuser', False) or getattr(request.user, 'is_staff', False):
             return True
 
-        # 2. Admins, Administrators, Principals, Vice Principals, HODs, Faculty have write access
+        # 2. Admins, Administrators, Principals, Vice Principals, HODs, Faculty, Office have write access
         try:
             user_role = request.user.role.role_name.upper().replace(' ', '_')
-            if user_role in ['ADMIN', 'ADMINISTRATOR', 'SUPERADMIN', 'PRINCIPAL', 'VICE_PRINCIPAL', 'HOD', 'FACULTY']:
+            if user_role in ['ADMIN', 'ADMINISTRATOR', 'SUPERADMIN', 'PRINCIPAL', 'VICE_PRINCIPAL', 'HOD', 'FACULTY', 'OFFICE', 'MANAGER', 'TECH_SUPPORTER', 'ADMINISTRATION_OFFICER']:
                 return True
         except AttributeError:
             pass

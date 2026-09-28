@@ -8,7 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from student.models import Student
-from users.permissions import IsAdminUser
+from .permissions import LibraryPermission
 
 from .models import LibraryBook, LibraryMember, LibraryTransaction
 from .serializers import (
@@ -20,7 +20,7 @@ from .serializers import (
 
 
 class LibraryViewSetMixin:
-    permission_classes = [IsAdminUser]
+    permission_classes = [LibraryPermission]
 
     def _tracking_user(self):
         return self.request.user if self.request.user.is_authenticated else None

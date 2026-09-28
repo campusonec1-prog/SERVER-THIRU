@@ -2,5 +2,5 @@ from users.permissions import BaseRolePermission
 
 
 class LibraryPermission(BaseRolePermission):
-    read_roles = ['admin', 'administrator']
-    write_roles = ['admin', 'administrator']
+    read_roles = ['authenticated']
+    write_roles = ['admin', 'administrator', 'library', 'librarian']
