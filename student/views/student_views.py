@@ -2009,10 +2009,14 @@ class StudentViewSet(viewsets.ModelViewSet):
                         updated_by=tracking_user
                     )
 
-                    program = item["department"].program
+                    program = getattr(item["department"], 'program', None)
+                    if not program:
+                        from institution.models import Program
+                        program = Program.objects.first()
+                    program_level = getattr(program, 'program_level', 'UG') or 'UG'
                     year = dt_datetime.now().year
                     year_str = str(year)[2:]
-                    prefix = f"{program.program_level}{year_str}"
+                    prefix = f"{program_level}{year_str}"
 
                     if prefix not in program_indices:
                         last_app = Application.objects.filter(application_no__startswith=prefix).order_by('-application_no').first()
