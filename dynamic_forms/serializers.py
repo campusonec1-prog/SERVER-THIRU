@@ -307,7 +307,7 @@ class ApplicationUserSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'email', 'phone_number', 'password', 'created_at', 'updated_at', 'created_by', 'updated_by']
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
         extra_kwargs = {
-            'password': {'write_only': True},
+            'password': {'write_only': True, 'required': False, 'allow_blank': True, 'allow_null': True},
             'name': {'required': True},
             'email': {
                 'required': True,
@@ -318,6 +318,10 @@ class ApplicationUserSerializer(serializers.ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        if self.instance is not None and 'password' in self.fields:
+            self.fields['password'].required = False
+            self.fields['password'].allow_blank = True
+            self.fields['password'].allow_null = True
         apply_default_error_messages(self.fields)
 
     def validate_name(self, value):
@@ -335,9 +339,37 @@ class ApplicationUserSerializer(serializers.ModelSerializer):
         return value.strip()
 
     def validate_password(self, value):
-        if not value.strip() or len(value) < 6:
+        if not value or not str(value).strip():
+            if self.instance is None:
+                raise serializers.ValidationError("Password is required.")
+            return value
+        if len(value) < 6:
             raise serializers.ValidationError("Password must be at least 6 characters long.")
         return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if self.instance is None and not attrs.get('password'):
+            raise serializers.ValidationError({"password": "Password is required."})
+        if self.instance is not None and not attrs.get('password'):
+            attrs.pop('password', None)
+        return attrs
+
+    def create(self, validated_data):
+        password = validated_data.get('password')
+        if password:
+            import bcrypt
+            hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            validated_data['password'] = hashed_password
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop('password', None)
+        if password and str(password).strip():
+            import bcrypt
+            hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            instance.password = hashed_password
+        return super().update(instance, validated_data)
 
 
 class ApplicationSerializer(serializers.ModelSerializer):

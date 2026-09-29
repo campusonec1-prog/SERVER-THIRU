@@ -17,7 +17,12 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'username', 'password', 'mobile_number', 'mail', 'role_id', 'status', 'created_at', 'updated_at', 'created_by', 'updated_by']
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
         extra_kwargs = {
-            'password': {'write_only': True},  # Secure password by not returning it in reads
+            'password': {
+                'write_only': True,
+                'required': False,
+                'allow_blank': True,
+                'allow_null': True,
+            },
             'mail': {
                 'error_messages': {
                     'invalid': 'Please enter a valid email address.',
@@ -34,12 +39,21 @@ class UserSerializer(serializers.ModelSerializer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for field_name, field in self.fields.items():
+            if field_name == 'password' and self.instance is not None:
+                field.required = False
+                field.allow_blank = True
+                field.allow_null = True
+                continue
             friendly_name = field_name.replace('_', ' ').capitalize()
             field.error_messages['required'] = f"{friendly_name} is required."
             field.error_messages['blank'] = f"{friendly_name} cannot be empty."
             field.error_messages['null'] = f"{friendly_name} cannot be null."
 
     def validate_password(self, value):
+        if not value:
+            if self.instance is None:
+                raise serializers.ValidationError("Password is required.")
+            return value
         if len(value) < 8:
             raise serializers.ValidationError("Password must be at least 8 characters long.")
         return value
@@ -51,6 +65,16 @@ class UserSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Mobile number must be exactly 10 digits.")
         return value
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        # For creation, password is required
+        if self.instance is None and not attrs.get('password'):
+            raise serializers.ValidationError({"password": "Password is required."})
+        # For update, if password is blank/empty/None, remove it so the existing password is preserved
+        if self.instance is not None and not attrs.get('password'):
+            attrs.pop('password', None)
+        return attrs
+
     def create(self, validated_data):
         password = validated_data.get('password')
         if password:
@@ -59,10 +83,10 @@ class UserSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
-        password = validated_data.get('password')
-        if password:
+        password = validated_data.pop('password', None)
+        if password and str(password).strip():
             hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-            validated_data['password'] = hashed_password
+            instance.password = hashed_password
         return super().update(instance, validated_data)
 
 
