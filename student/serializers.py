@@ -314,9 +314,14 @@ class StudentSerializer(serializers.ModelSerializer):
             ret['fees_paid'] = 0.0
             ret['remarks'] = ''
 
-        # ── Form Data fields (Parent info, Address, Year of Passing) ───
+        # ── Form Data fields (Personal & Parent info, Address, Year of Passing) ───
+        dob_val = ''
+        nationality_val = ''
+        mother_tongue_val = ''
         parent_name_val = ''
         parent_phone_val = ''
+        parent_occupation_val = ''
+        annual_income_val = ''
         district_val = ''
         state_val = ''
         address_val = ''
@@ -324,10 +329,18 @@ class StudentSerializer(serializers.ModelSerializer):
         yop_val = ''
         if app and app.form_data and isinstance(app.form_data, dict):
             fd = app.form_data
+            personal_info = fd.get('personal_information') or fd.get('personal_details') or {}
+            if isinstance(personal_info, dict):
+                dob_val = str(personal_info.get('date_of_birth') or personal_info.get('dob') or personal_info.get('dateOfBirth') or personal_info.get('birth_date') or '')
+                nationality_val = str(personal_info.get('nationality') or '')
+                mother_tongue_val = str(personal_info.get('mother_tongue') or personal_info.get('motherTongue') or '')
+
             parent_info = fd.get('parent_information') or fd.get('parent_details') or {}
             if isinstance(parent_info, dict):
                 parent_name_val = str(parent_info.get('parent_name') or parent_info.get('father_name') or parent_info.get('guardian_name') or '')
                 parent_phone_val = str(parent_info.get('parent_mobile') or parent_info.get('father_mobile') or parent_info.get('parent_phone') or '')
+                parent_occupation_val = str(parent_info.get('parent_occupation') or parent_info.get('occupation') or parent_info.get('father_occupation') or '')
+                annual_income_val = str(parent_info.get('annual_income') or parent_info.get('income') or parent_info.get('family_income') or '')
                 district_val = str(parent_info.get('district') or '')
                 state_val = str(parent_info.get('state') or '')
                 address_val = str(parent_info.get('address') or parent_info.get('permanent_address') or '')
@@ -339,8 +352,13 @@ class StudentSerializer(serializers.ModelSerializer):
                 if isinstance(qual_list, list) and len(qual_list) > 0:
                     yop_val = str(qual_list[0].get('year_of_passing') or '')
 
+        ret['dob'] = dob_val
+        ret['nationality'] = nationality_val
+        ret['mother_tongue'] = mother_tongue_val
         ret['parent_name'] = parent_name_val
         ret['parent_phone'] = parent_phone_val
+        ret['parent_occupation'] = parent_occupation_val
+        ret['annual_income'] = annual_income_val
         ret['district'] = district_val
         ret['state'] = state_val
         ret['address'] = address_val

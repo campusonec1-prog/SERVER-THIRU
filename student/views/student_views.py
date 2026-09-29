@@ -1828,9 +1828,14 @@ class StudentViewSet(viewsets.ModelViewSet):
             bus_to = str(s.get('bus_to', '')).strip()
 
             # Additional Application Slip Details
+            dob = str(s.get('dob', '') or s.get('date_of_birth', '')).strip()
+            nationality = str(s.get('nationality', '')).strip()
+            mother_tongue = str(s.get('mother_tongue', '')).strip()
             parent_name = str(s.get('parent_name', '')).strip()
             parent_phone_raw = s.get('parent_phone', '') or s.get('parent_mobile', '') or s.get('father_mobile', '')
             parent_phone = sanitize_phone_number(parent_phone_raw)
+            parent_occupation = str(s.get('parent_occupation', '') or s.get('occupation', '')).strip()
+            annual_income = str(s.get('annual_income', '') or s.get('income', '')).strip()
             district = str(s.get('district', '')).strip()
             state = str(s.get('state', '')).strip()
             address = str(s.get('address', '')).strip()
@@ -1842,15 +1847,8 @@ class StudentViewSet(viewsets.ModelViewSet):
             qualification = str(s.get('qualification', '')).strip()
             year_of_passing = str(s.get('year_of_passing', '')).strip()
 
-            marks_maths = parse_int_or_none(s.get('marks_maths'))
-            marks_physics = parse_int_or_none(s.get('marks_physics'))
-            marks_chemistry = parse_int_or_none(s.get('marks_chemistry'))
-            marks_total = parse_int_or_none(s.get('marks_total'))
             marks_percentage = parse_decimal_or_none(s.get('marks_percentage'))
             
-            mode_of_admission = str(s.get('mode_of_admission', '')).strip() or 'I Sem'
-            recommendation_name = str(s.get('recommendation', '')).strip()
-
             row_errors = []
 
             # Check required fields
@@ -1919,17 +1917,6 @@ class StudentViewSet(viewsets.ModelViewSet):
                 else:
                     row_errors.append(f"Quota/Category '{quota_name}' does not exist.")
 
-            # Resolve recommendation staff (optional)
-            recommendation_user = None
-            if recommendation_name:
-                rec_key = recommendation_name.upper()
-                if rec_key in staff_map_by_name:
-                    recommendation_user = staff_map_by_name[rec_key]
-                elif rec_key in staff_map_by_username:
-                    recommendation_user = staff_map_by_username[rec_key]
-                else:
-                    pass
-
             # Resolve facilities flags
             is_hostler = is_hostler_raw in ['yes', 'true', '1']
             is_day_scholar = is_day_scholar_raw in ['yes', 'true', '1']
@@ -1978,8 +1965,13 @@ class StudentViewSet(viewsets.ModelViewSet):
                         "bus_to": bus_to or None,
                         
                         # Add slip fields
+                        "dob": dob,
+                        "nationality": nationality,
+                        "mother_tongue": mother_tongue,
                         "parent_name": parent_name,
                         "parent_phone": parent_phone,
+                        "parent_occupation": parent_occupation,
+                        "annual_income": annual_income,
                         "district": district,
                         "state": state,
                         "address": address,
@@ -1990,13 +1982,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                         "community": community,
                         "qualification": qualification,
                         "year_of_passing": year_of_passing,
-                        "marks_maths": marks_maths,
-                        "marks_physics": marks_physics,
-                        "marks_chemistry": marks_chemistry,
-                        "marks_total": marks_total,
                         "marks_percentage": marks_percentage,
-                        "mode_of_admission": mode_of_admission,
-                        "recommendation": recommendation_user
                     })
 
             if row_errors:
@@ -2064,12 +2050,18 @@ class StudentViewSet(viewsets.ModelViewSet):
                             "applicant_name": item["name"],
                             "student_mobile": item["phone_number"],
                             "email": item["email"],
+                            "dob": item["dob"] or "",
+                            "date_of_birth": item["dob"] or "",
+                            "nationality": item["nationality"] or "Indian",
+                            "mother_tongue": item["mother_tongue"] or "",
                             "aadhaar_number": item["aadhaar_number"] or "",
                             "community": item["community"] or "",
                         },
                         "parent_information": {
                             "parent_name": item["parent_name"] or "",
                             "parent_mobile": item["parent_phone"] or "",
+                            "parent_occupation": item["parent_occupation"] or "",
+                            "annual_income": item["annual_income"] or "",
                             "district": item["district"] or "",
                             "state": item["state"] or "",
                             "address": item["address"] or "",
@@ -2085,13 +2077,6 @@ class StudentViewSet(viewsets.ModelViewSet):
                                     "qualification": item["qualification"] or "",
                                     "year_of_passing": item["year_of_passing"] or "",
                                 }
-                            ]
-                        },
-                        "academic_performance": {
-                            "academic_performance": [
-                                {"subject": "Mathematics", "obtained_marks": str(item["marks_maths"]) if item["marks_maths"] is not None else ""},
-                                {"subject": "Physics", "obtained_marks": str(item["marks_physics"]) if item["marks_physics"] is not None else ""},
-                                {"subject": "Chemistry", "obtained_marks": str(item["marks_chemistry"]) if item["marks_chemistry"] is not None else ""}
                             ]
                         }
                     }
@@ -2132,13 +2117,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                             "umis_number": item["umis_number"] or None,
                             "qualification": item["qualification"] or None,
                             "community": item["community"] or None,
-                            "marks_maths": item["marks_maths"],
-                            "marks_physics": item["marks_physics"],
-                            "marks_chemistry": item["marks_chemistry"],
-                            "marks_total": item["marks_total"],
                             "marks_percentage": item["marks_percentage"],
-                            "mode_of_admission": item["mode_of_admission"] or 'I Sem',
-                            "recommendation": item["recommendation"],
                             "created_by": tracking_user,
                             "updated_by": tracking_user
                         }
