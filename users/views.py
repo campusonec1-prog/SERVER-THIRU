@@ -373,13 +373,27 @@ class UserViewSet(viewsets.ModelViewSet):
         errors = []
         validated_users = []
 
+        def sanitize_phone_number(val):
+            if not val:
+                return ''
+            s = str(val).strip()
+            if s.endswith('.0'):
+                s = s[:-2]
+            digits = re.sub(r'\D', '', s)
+            if len(digits) == 12 and digits.startswith('91'):
+                return digits[2:]
+            if len(digits) == 11 and digits.startswith('0'):
+                return digits[1:]
+            return digits
+
         # 1. Validation Phase (No DB writes)
         for idx, u in enumerate(users_data):
             row_num = u.get('s_no', idx + 1)
             name = str(u.get('name', '')).strip()
             faculty_code = str(u.get('faculty_code', '')).strip()
             mail = str(u.get('mail', '')).strip()
-            mobile_number = str(u.get('mobile_number', '')).strip()
+            mobile_raw = u.get('mobile_number', '') or u.get('phone_number', '') or u.get('phone', '')
+            mobile_number = sanitize_phone_number(mobile_raw)
             role_name = str(u.get('role', '')).strip().upper()
             qualification = str(u.get('qualification', '')).strip()
             designation = str(u.get('designation', '')).strip()

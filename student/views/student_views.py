@@ -212,7 +212,12 @@ class StudentViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_200_OK)
 
     def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        student_id = instance.id
+        StudentAdmissionSlip.objects.filter(student=instance).delete()
+        StudentFees.objects.filter(student=instance).delete()
         super().destroy(request, *args, **kwargs)
+        self._broadcast_delete(student_id)
         return Response({
             "code": 200,
             "message": "Student deleted successfully"
@@ -1787,12 +1792,26 @@ class StudentViewSet(viewsets.ModelViewSet):
             except (ValueError, TypeError):
                 return None
 
+        def sanitize_phone_number(val):
+            if not val:
+                return ''
+            s = str(val).strip()
+            if s.endswith('.0'):
+                s = s[:-2]
+            digits = re.sub(r'\D', '', s)
+            if len(digits) == 12 and digits.startswith('91'):
+                return digits[2:]
+            if len(digits) == 11 and digits.startswith('0'):
+                return digits[1:]
+            return digits
+
         # 1. Validation Phase (No DB writes)
         for idx, s in enumerate(students_data):
             row_num = s.get('s_no', idx + 1)
             name = str(s.get('name', '')).strip()
             email = str(s.get('email', '')).strip()
-            phone_number = str(s.get('phone_number', '')).strip()
+            phone_raw = s.get('phone_number', '') or s.get('mobile_number', '') or s.get('phone', '')
+            phone_number = sanitize_phone_number(phone_raw)
             roll_number = str(s.get('roll_number', '')).strip()
             register_number = str(s.get('register_number', '')).strip()
             
@@ -2091,26 +2110,28 @@ class StudentViewSet(viewsets.ModelViewSet):
                         updated_by=tracking_user
                     )
 
-                    # Create StudentAdmissionSlip eagerly
-                    StudentAdmissionSlip.objects.create(
+                    # Create / update StudentAdmissionSlip eagerly
+                    StudentAdmissionSlip.objects.update_or_create(
                         student=student,
-                        aadhaar_number=item["aadhaar_number"] or None,
-                        emis_number=item["emis_number"] or f"EMIS-{app_no}",
-                        umis_number=item["umis_number"] or None,
-                        qualification=item["qualification"] or None,
-                        community=item["community"] or None,
-                        marks_maths=item["marks_maths"],
-                        marks_physics=item["marks_physics"],
-                        marks_chemistry=item["marks_chemistry"],
-                        marks_total=item["marks_total"],
-                        marks_percentage=item["marks_percentage"],
-                        mode_of_admission=item["mode_of_admission"] or 'I Sem',
-                        recommendation=item["recommendation"],
-                        created_by=tracking_user,
-                        updated_by=tracking_user
+                        defaults={
+                            "aadhaar_number": item["aadhaar_number"] or None,
+                            "emis_number": item["emis_number"] or f"EMIS-{app_no}",
+                            "umis_number": item["umis_number"] or None,
+                            "qualification": item["qualification"] or None,
+                            "community": item["community"] or None,
+                            "marks_maths": item["marks_maths"],
+                            "marks_physics": item["marks_physics"],
+                            "marks_chemistry": item["marks_chemistry"],
+                            "marks_total": item["marks_total"],
+                            "marks_percentage": item["marks_percentage"],
+                            "mode_of_admission": item["mode_of_admission"] or 'I Sem',
+                            "recommendation": item["recommendation"],
+                            "created_by": tracking_user,
+                            "updated_by": tracking_user
+                        }
                     )
 
-                    # Create StudentFees eagerly from database Fee Structure
+                    # Create / update StudentFees eagerly from database Fee Structure
                     from institution.models import FeesStructure
                     total_fees = 0.0
                     if student.department and student.batch and student.quota:
@@ -2122,13 +2143,15 @@ class StudentViewSet(viewsets.ModelViewSet):
                         if fs:
                             total_fees = float(fs.fees)
 
-                    StudentFees.objects.create(
+                    StudentFees.objects.update_or_create(
                         student=student,
-                        total_fees=total_fees,
-                        paid_amount=0.0,
-                        balance_amount=total_fees,
-                        created_by=tracking_user,
-                        updated_by=tracking_user
+                        defaults={
+                            "total_fees": total_fees,
+                            "paid_amount": 0.0,
+                            "balance_amount": total_fees,
+                            "created_by": tracking_user,
+                            "updated_by": tracking_user
+                        }
                     )
 
                     self._broadcast_change(student, 'student_created')

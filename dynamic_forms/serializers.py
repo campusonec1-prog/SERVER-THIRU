@@ -330,13 +330,20 @@ class ApplicationUserSerializer(serializers.ModelSerializer):
         return value.strip()
 
     def validate_phone_number(self, value):
-        if not value.strip():
+        if not value or not str(value).strip():
             raise serializers.ValidationError("Phone number cannot be empty.")
         import re
-        pattern = r'^\d{10}$'
-        if not re.match(pattern, value.strip()):
+        s = str(value).strip()
+        if s.endswith('.0'):
+            s = s[:-2]
+        digits = re.sub(r'\D', '', s)
+        if len(digits) == 12 and digits.startswith('91'):
+            digits = digits[2:]
+        elif len(digits) == 11 and digits.startswith('0'):
+            digits = digits[1:]
+        if not (digits.isdigit() and len(digits) == 10):
             raise serializers.ValidationError("Phone number must be exactly 10 digits.")
-        return value.strip()
+        return digits
 
     def validate_password(self, value):
         if not value or not str(value).strip():

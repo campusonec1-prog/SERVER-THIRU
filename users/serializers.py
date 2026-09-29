@@ -60,10 +60,19 @@ class UserSerializer(serializers.ModelSerializer):
 
     def validate_mobile_number(self, value):
         import re
-        pattern = r'^\d{10}$'
-        if not re.match(pattern, value):
+        if not value:
+            raise serializers.ValidationError("Mobile number is required.")
+        s = str(value).strip()
+        if s.endswith('.0'):
+            s = s[:-2]
+        digits = re.sub(r'\D', '', s)
+        if len(digits) == 12 and digits.startswith('91'):
+            digits = digits[2:]
+        elif len(digits) == 11 and digits.startswith('0'):
+            digits = digits[1:]
+        if not (digits.isdigit() and len(digits) == 10):
             raise serializers.ValidationError("Mobile number must be exactly 10 digits.")
-        return value
+        return digits
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
