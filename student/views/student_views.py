@@ -1829,6 +1829,10 @@ class StudentViewSet(viewsets.ModelViewSet):
 
             # Additional Application Slip Details
             parent_name = str(s.get('parent_name', '')).strip()
+            parent_phone_raw = s.get('parent_phone', '') or s.get('parent_mobile', '') or s.get('father_mobile', '')
+            parent_phone = sanitize_phone_number(parent_phone_raw)
+            district = str(s.get('district', '')).strip()
+            state = str(s.get('state', '')).strip()
             address = str(s.get('address', '')).strip()
             pincode = str(s.get('pincode', '')).strip()
             aadhaar_number = str(s.get('aadhaar_number', '')).strip()
@@ -1836,6 +1840,7 @@ class StudentViewSet(viewsets.ModelViewSet):
             umis_number = str(s.get('umis_number', '')).strip()
             community = str(s.get('community', '')).strip()
             qualification = str(s.get('qualification', '')).strip()
+            year_of_passing = str(s.get('year_of_passing', '')).strip()
 
             marks_maths = parse_int_or_none(s.get('marks_maths'))
             marks_physics = parse_int_or_none(s.get('marks_physics'))
@@ -1974,6 +1979,9 @@ class StudentViewSet(viewsets.ModelViewSet):
                         
                         # Add slip fields
                         "parent_name": parent_name,
+                        "parent_phone": parent_phone,
+                        "district": district,
+                        "state": state,
                         "address": address,
                         "pincode": pincode,
                         "aadhaar_number": aadhaar_number,
@@ -1981,6 +1989,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                         "umis_number": umis_number,
                         "community": community,
                         "qualification": qualification,
+                        "year_of_passing": year_of_passing,
                         "marks_maths": marks_maths,
                         "marks_physics": marks_physics,
                         "marks_chemistry": marks_chemistry,
@@ -2060,6 +2069,9 @@ class StudentViewSet(viewsets.ModelViewSet):
                         },
                         "parent_information": {
                             "parent_name": item["parent_name"] or "",
+                            "parent_mobile": item["parent_phone"] or "",
+                            "district": item["district"] or "",
+                            "state": item["state"] or "",
                             "address": item["address"] or "",
                             "pincode": item["pincode"] or "",
                         },
@@ -2071,6 +2083,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                             "qualifications": [
                                 {
                                     "qualification": item["qualification"] or "",
+                                    "year_of_passing": item["year_of_passing"] or "",
                                 }
                             ]
                         },

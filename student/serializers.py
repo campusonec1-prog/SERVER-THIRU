@@ -312,12 +312,40 @@ class StudentSerializer(serializers.ModelSerializer):
         else:
             ret['fees_payment_id'] = None
             ret['fees_paid'] = 0.0
-            ret['fees_balance'] = total_fees
-            ret['payment_mode'] = 'Cash'
-            ret['books_fees_total'] = 0.0
-            ret['books_fees_paid'] = 0.0
-            ret['due_date'] = None
             ret['remarks'] = ''
+
+        # ── Form Data fields (Parent info, Address, Year of Passing) ───
+        parent_name_val = ''
+        parent_phone_val = ''
+        district_val = ''
+        state_val = ''
+        address_val = ''
+        pincode_val = ''
+        yop_val = ''
+        if app and app.form_data and isinstance(app.form_data, dict):
+            fd = app.form_data
+            parent_info = fd.get('parent_information') or fd.get('parent_details') or {}
+            if isinstance(parent_info, dict):
+                parent_name_val = str(parent_info.get('parent_name') or parent_info.get('father_name') or parent_info.get('guardian_name') or '')
+                parent_phone_val = str(parent_info.get('parent_mobile') or parent_info.get('father_mobile') or parent_info.get('parent_phone') or '')
+                district_val = str(parent_info.get('district') or '')
+                state_val = str(parent_info.get('state') or '')
+                address_val = str(parent_info.get('address') or parent_info.get('permanent_address') or '')
+                pincode_val = str(parent_info.get('pincode') or parent_info.get('pin_code') or '')
+
+            acad_qual = fd.get('academic_qualification') or {}
+            if isinstance(acad_qual, dict):
+                qual_list = acad_qual.get('qualifications') or []
+                if isinstance(qual_list, list) and len(qual_list) > 0:
+                    yop_val = str(qual_list[0].get('year_of_passing') or '')
+
+        ret['parent_name'] = parent_name_val
+        ret['parent_phone'] = parent_phone_val
+        ret['district'] = district_val
+        ret['state'] = state_val
+        ret['address'] = address_val
+        ret['pincode'] = pincode_val
+        ret['year_of_passing'] = yop_val
 
         return ret
 
