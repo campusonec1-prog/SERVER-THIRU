@@ -1781,14 +1781,19 @@ class StudentViewSet(viewsets.ModelViewSet):
             except (ValueError, TypeError):
                 return None
 
-        def parse_decimal_or_none(val):
+        def parse_decimal_or_none(val, is_percentage=False):
             if val is None:
                 return None
             val_str = str(val).strip()
             if not val_str:
                 return None
+            if val_str.endswith('%'):
+                val_str = val_str[:-1].strip()
             try:
-                return float(val_str)
+                num = float(val_str)
+                if is_percentage and 0 < num <= 1.0:
+                    num = round(num * 100, 2)
+                return num
             except (ValueError, TypeError):
                 return None
 
@@ -1857,7 +1862,7 @@ class StudentViewSet(viewsets.ModelViewSet):
             qualification = str(s.get('qualification', '')).strip()
             year_of_passing = str(s.get('year_of_passing', '')).strip()
 
-            marks_percentage = parse_decimal_or_none(s.get('marks_percentage'))
+            marks_percentage = parse_decimal_or_none(s.get('marks_percentage'), is_percentage=True)
             
             row_errors = []
 

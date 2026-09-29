@@ -499,6 +499,7 @@ class StudentBulkImportTest(APITestCase):
                     "batch": "2022-2026",
                     "section": "",
                     "quota": "Government",
+                    "marks_percentage": 0.63,
                 }
             ]
         }
@@ -521,6 +522,7 @@ class StudentBulkImportTest(APITestCase):
         from .serializers import StudentSerializer
         serializer = StudentSerializer(student)
         self.assertEqual(serializer.data.get('gender'), 'Female')
+        self.assertEqual(serializer.data.get('marks_percentage'), 63.0)
 
 
 
