@@ -279,6 +279,13 @@ class AssetAllocationViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        
+        my_assets_param = self.request.query_params.get('my_assets', None)
+        assigned_to_param = self.request.query_params.get('assigned_to', None)
+        if my_assets_param in ['true', '1', True] or str(assigned_to_param).lower() == 'me':
+            if self.request.user and self.request.user.is_authenticated:
+                qs = qs.filter(assigned_to=self.request.user)
+
         is_current_param = self.request.query_params.get('is_current', None)
         if is_current_param is not None and is_current_param != '' and is_current_param.lower() != 'all':
             val = is_current_param.lower()

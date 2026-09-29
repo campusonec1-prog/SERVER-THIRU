@@ -241,6 +241,13 @@ class AssetAllocationSerializer(serializers.ModelSerializer):
     department_name = serializers.CharField(source='department.department_name', read_only=True, default=None)
     department_code = serializers.CharField(source='department.department_code', read_only=True, default=None)
 
+    brand = serializers.CharField(source='asset.brand', read_only=True, default='')
+    model_number = serializers.CharField(source='asset.model_number', read_only=True, default='')
+    condition = serializers.CharField(source='asset.condition', read_only=True, default='')
+    status = serializers.CharField(source='asset.status', read_only=True, default='')
+    warranty_expiry = serializers.DateField(source='asset.warranty_expiry', read_only=True, default=None)
+    description = serializers.CharField(source='asset.description', read_only=True, default='')
+
     asset = serializers.PrimaryKeyRelatedField(
         queryset=Asset.objects.all(),
         required=True,
@@ -277,6 +284,12 @@ class AssetAllocationSerializer(serializers.ModelSerializer):
             'asset_name',
             'serial_number',
             'category_name',
+            'brand',
+            'model_number',
+            'condition',
+            'status',
+            'warranty_expiry',
+            'description',
             'location',
             'assigned_to',
             'assigned_to_name',
