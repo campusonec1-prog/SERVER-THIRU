@@ -2,9 +2,29 @@ from django.db import models
 from common.models import TrackingModel
 
 class Subject(TrackingModel):
-    subject_code = models.CharField(max_length=50, unique=True)
+    COURSE_TYPE_CHOICES = [
+        ('PCC', 'Professional Core Course (PCC)'),
+        ('PEC', 'Professional Elective Course (PEC)'),
+        ('OEC', 'Open Elective Course (OEC)'),
+        ('MC', 'Mandatory Course (MC)'),
+        ('EEC', 'Employability Enhancement / Skill Development (EEC)'),
+        ('HSMC', 'Humanities, Social Sciences & Management (HSMC)'),
+        ('BSC', 'Basic Science Course (BSC)'),
+        ('ESC', 'Engineering Science Course (ESC)'),
+        ('AC', 'Audit Course (AC)'),
+        ('VAC', 'Value Added Course (VAC)'),
+    ]
+
+    subject_code = models.CharField(max_length=50)
     subject_name = models.CharField(max_length=150)
     credits = models.FloatField()
+    course_type = models.CharField(
+        max_length=50,
+        choices=COURSE_TYPE_CHOICES,
+        default='PCC',
+        blank=True,
+        null=True
+    )
     regulation = models.ForeignKey(
         'institution.Regulation',
         on_delete=models.CASCADE,
@@ -29,6 +49,12 @@ class Subject(TrackingModel):
 
     class Meta:
         db_table = 'subjects'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['subject_code', 'regulation', 'department', 'semester'],
+                name='unique_subject_curriculum'
+            )
+        ]
         indexes = [
             models.Index(fields=['department', 'regulation']),
             models.Index(fields=['department', 'semester']),

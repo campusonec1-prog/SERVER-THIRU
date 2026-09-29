@@ -136,6 +136,7 @@ class SubjectViewSet(viewsets.ModelViewSet):
         department_id = request.query_params.get('department_id')
         regulation_id = request.query_params.get('regulation_id')
         semester_id = request.query_params.get('semester_id')
+        course_type = request.query_params.get('course_type')
         is_theory = request.query_params.get('is_theory')
         is_lab = request.query_params.get('is_lab')
         is_active = request.query_params.get('is_active')
@@ -147,6 +148,8 @@ class SubjectViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(regulation_id=regulation_id)
         if semester_id:
             queryset = queryset.filter(semester_id=semester_id)
+        if course_type:
+            queryset = queryset.filter(course_type__iexact=course_type)
         if is_theory:
             queryset = queryset.filter(is_theory=is_theory.lower() in ['true', 'yes', '1'])
         if is_lab:
@@ -248,8 +251,41 @@ class SubjectViewSet(viewsets.ModelViewSet):
             is_theory_raw = s.get('is_theory', True)
             is_lab_raw = s.get('is_lab', False)
             is_active_raw = s.get('is_active', True)
+            course_type_raw = str(s.get('course_type', '') or s.get('type', '')).strip()
 
             row_errors = []
+
+            # Normalize Course Type (Anna University course categories)
+            def normalize_course_type(raw_val):
+                if not raw_val:
+                    return 'PCC'
+                clean = str(raw_val).strip().upper()
+                if clean in ['PCC', 'PC', 'PROFESSIONAL CORE', 'PROFESSIONAL CORE COURSE', 'CORE', 'CORE COURSE']:
+                    return 'PCC'
+                if clean in ['PEC', 'PE', 'PROFESSIONAL ELECTIVE', 'PROFESSIONAL ELECTIVE COURSE', 'ELECTIVE', 'ELECTIVE COURSE']:
+                    return 'PEC'
+                if clean in ['OEC', 'OE', 'OPEN ELECTIVE', 'OPEN ELECTIVE COURSE']:
+                    return 'OEC'
+                if clean in ['MC', 'MANDATORY', 'MANDATORY COURSE', 'MANDATORY COURSES']:
+                    return 'MC'
+                if clean in ['EEC', 'SDC', 'SKILL DEVELOPMENT', 'SKILL DEVELOPMENT COURSE', 'EMPLOYABILITY ENHANCEMENT', 'EMPLOYABILITY ENHANCEMENT / SKILL DEVELOPMENT', 'EMPLOYABILITY ENHANCEMENT COURSE']:
+                    return 'EEC'
+                if clean in ['HSMC', 'HS', 'HUMANITIES', 'HUMANITIES AND SOCIAL SCIENCES', 'HUMANITIES, SOCIAL SCIENCES & MANAGEMENT', 'HUMANITIES, SOCIAL SCIENCES & MANAGEMENT (HSMC)']:
+                    return 'HSMC'
+                if clean in ['BSC', 'BS', 'BASIC SCIENCE', 'BASIC SCIENCE COURSE', 'BASIC SCIENCES', 'BASIC SCIENCE COURSE (BSC)']:
+                    return 'BSC'
+                if clean in ['ESC', 'ES', 'ENGINEERING SCIENCE', 'ENGINEERING SCIENCE COURSE', 'ENGINEERING SCIENCES', 'ENGINEERING SCIENCE COURSE (ESC)']:
+                    return 'ESC'
+                if clean in ['AC', 'AUDIT', 'AUDIT COURSE']:
+                    return 'AC'
+                if clean in ['VAC', 'VALUE ADDED', 'VALUE ADDED COURSE']:
+                    return 'VAC'
+                for code, label in Subject.COURSE_TYPE_CHOICES:
+                    if clean == code or clean in label.upper():
+                        return code
+                return 'PCC'
+
+            course_type_val = normalize_course_type(course_type_raw)
 
             if not subject_code:
                 row_errors.append("Subject code is required.")
@@ -360,6 +396,7 @@ class SubjectViewSet(viewsets.ModelViewSet):
                     "subject_code": subject_code,
                     "subject_name": subject_name,
                     "credits": credits_val,
+                    "course_type": course_type_val,
                     "regulation": regulation_obj,
                     "department": department_obj,
                     "semester": semester_obj,
@@ -388,6 +425,7 @@ class SubjectViewSet(viewsets.ModelViewSet):
                         subject_code=s_data["subject_code"],
                         subject_name=s_data["subject_name"],
                         credits=s_data["credits"],
+                        course_type=s_data["course_type"],
                         regulation=s_data["regulation"],
                         department=s_data["department"],
                         semester=s_data["semester"],

@@ -29,7 +29,7 @@ class SubjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subject
         fields = [
-            'id', 'subject_code', 'subject_name', 'credits', 
+            'id', 'subject_code', 'subject_name', 'credits', 'course_type',
             'regulation_id', 'department_id', 'semester_id', 
             'is_theory', 'is_lab', 'is_active',
             'created_at', 'updated_at', 'created_by', 'updated_by'
@@ -39,6 +39,7 @@ class SubjectSerializer(serializers.ModelSerializer):
             'subject_code': {'required': True},
             'subject_name': {'required': True},
             'credits': {'required': True},
+            'course_type': {'required': False, 'allow_null': True, 'allow_blank': True},
             'semester_id': {'required': True},
             'is_theory': {'required': False},
             'is_lab': {'required': False},
@@ -50,18 +51,12 @@ class SubjectSerializer(serializers.ModelSerializer):
         apply_default_error_messages(self.fields)
 
     def validate_subject_code(self, value):
-        if not value.strip():
+        if not value or not value.strip():
             raise serializers.ValidationError("Subject code cannot be empty.")
-        # Check uniqueness
-        qs = Subject.objects.filter(subject_code__iexact=value.strip())
-        if self.instance:
-            qs = qs.exclude(pk=self.instance.pk)
-        if qs.exists():
-            raise serializers.ValidationError("This subject code already exists.")
         return value.strip()
 
     def validate_subject_name(self, value):
-        if not value.strip():
+        if not value or not value.strip():
             raise serializers.ValidationError("Subject name cannot be empty.")
         return value.strip()
 
@@ -70,11 +65,33 @@ class SubjectSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Credits must be a positive number.")
         return value
 
+    def validate(self, attrs):
+        subject_code = attrs.get('subject_code', getattr(self.instance, 'subject_code', None))
+        regulation = attrs.get('regulation', getattr(self.instance, 'regulation', None))
+        department = attrs.get('department', getattr(self.instance, 'department', None))
+        semester = attrs.get('semester', getattr(self.instance, 'semester', None))
+
+        if subject_code and regulation and department and semester:
+            qs = Subject.objects.filter(
+                subject_code__iexact=subject_code.strip() if isinstance(subject_code, str) else subject_code,
+                regulation=regulation,
+                department=department,
+                semester=semester
+            )
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({
+                    "subject_code": "A subject with this code already exists for the selected regulation, department, and semester."
+                })
+        return attrs
+
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         ret['regulation_code'] = instance.regulation.regulation_code if instance.regulation else None
         ret['department_name'] = instance.department.department_name if instance.department else None
         ret['department_code'] = instance.department.department_code if instance.department else None
+        ret['course_type_display'] = instance.get_course_type_display() if hasattr(instance, 'get_course_type_display') and instance.course_type else (instance.course_type or 'Professional Core Course (PCC)')
         
         sec_str = ""
         if instance.semester:
