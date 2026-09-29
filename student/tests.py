@@ -448,8 +448,8 @@ class StudentBulkImportTest(APITestCase):
         app = Application.objects.get(candidate=app_user)
         self.assertEqual(app.status.status_name, "Approved")
         
-        self.assertTrue(Student.objects.filter(user=app_user).exists())
-        student = Student.objects.get(user=app_user)
+        self.assertTrue(Student.objects.filter(application__candidate=app_user).exists())
+        student = Student.objects.get(application__candidate=app_user)
         self.assertEqual(student.roll_number, "1002")
         self.assertEqual(student.register_number, "REG1002")
         self.assertEqual(student.quota, self.quota)
@@ -482,6 +482,45 @@ class StudentBulkImportTest(APITestCase):
         # Verify no database entities were created
         from dynamic_forms.models import ApplicationUser
         self.assertFalse(ApplicationUser.objects.filter(name="Jane Doe").exists())
+
+    @patch('channels.layers.get_channel_layer')
+    def test_bulk_import_with_gender_and_without_email(self, mock_channel_layer):
+        self.client.force_authenticate(user=self.admin_user)
+        payload = {
+            "students": [
+                {
+                    "s_no": 1,
+                    "name": "Alex Smith",
+                    "gender": "Female",
+                    "phone_number": "9876543299",
+                    "roll_number": "1009",
+                    "register_number": "REG1009",
+                    "department": "CSE",
+                    "batch": "2022-2026",
+                    "section": "",
+                    "quota": "Government",
+                }
+            ]
+        }
+        
+        url = reverse('student-bulk-import')
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['code'], 201)
+        self.assertEqual(response.data['data']['count'], 1)
+
+        # Verify database entities created with auto email and gender
+        from dynamic_forms.models import Application, ApplicationUser
+        app_user = ApplicationUser.objects.get(name="Alex Smith")
+        self.assertTrue(app_user.email.endswith("@student.ims"))
+        
+        app = Application.objects.get(candidate=app_user)
+        self.assertEqual(app.form_data.get('personal_information', {}).get('gender'), 'Female')
+
+        student = Student.objects.get(application__candidate=app_user)
+        from .serializers import StudentSerializer
+        serializer = StudentSerializer(student)
+        self.assertEqual(serializer.data.get('gender'), 'Female')
 
 
 

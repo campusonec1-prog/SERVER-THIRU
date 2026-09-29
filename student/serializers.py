@@ -316,6 +316,7 @@ class StudentSerializer(serializers.ModelSerializer):
 
         # ── Form Data fields (Personal & Parent info, Address, Year of Passing) ───
         dob_val = ''
+        gender_val = ''
         nationality_val = ''
         mother_tongue_val = ''
         parent_name_val = ''
@@ -332,6 +333,7 @@ class StudentSerializer(serializers.ModelSerializer):
             personal_info = fd.get('personal_information') or fd.get('personal_details') or {}
             if isinstance(personal_info, dict):
                 dob_val = str(personal_info.get('date_of_birth') or personal_info.get('dob') or personal_info.get('dateOfBirth') or personal_info.get('birth_date') or '')
+                gender_val = str(personal_info.get('gender') or personal_info.get('sex') or '')
                 nationality_val = str(personal_info.get('nationality') or '')
                 mother_tongue_val = str(personal_info.get('mother_tongue') or personal_info.get('motherTongue') or '')
 
@@ -353,6 +355,7 @@ class StudentSerializer(serializers.ModelSerializer):
                     yop_val = str(qual_list[0].get('year_of_passing') or '')
 
         ret['dob'] = dob_val
+        ret['gender'] = gender_val
         ret['nationality'] = nationality_val
         ret['mother_tongue'] = mother_tongue_val
         ret['parent_name'] = parent_name_val

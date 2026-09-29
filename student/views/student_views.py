@@ -1809,6 +1809,16 @@ class StudentViewSet(viewsets.ModelViewSet):
         for idx, s in enumerate(students_data):
             row_num = s.get('s_no', idx + 1)
             name = str(s.get('name', '')).strip()
+            raw_gender = str(s.get('gender', '') or s.get('sex', '')).strip()
+            if raw_gender.lower() in ['m', 'male']:
+                gender = 'Male'
+            elif raw_gender.lower() in ['f', 'female']:
+                gender = 'Female'
+            elif raw_gender.lower() in ['o', 'other']:
+                gender = 'Other'
+            else:
+                gender = raw_gender.capitalize() if raw_gender else ''
+
             email = str(s.get('email', '')).strip()
             phone_raw = s.get('phone_number', '') or s.get('mobile_number', '') or s.get('phone', '')
             phone_number = sanitize_phone_number(phone_raw)
@@ -1854,13 +1864,23 @@ class StudentViewSet(viewsets.ModelViewSet):
             # Check required fields
             if not name:
                 row_errors.append("Name is required.")
-            if not email:
-                row_errors.append("Email is required.")
-            else:
+
+            if email:
                 try:
                     validate_email(email)
                 except DjangoValidationError:
                     row_errors.append("Invalid email address format.")
+            else:
+                # Auto-generate a unique system email if not provided in sheet
+                base_id = roll_number or register_number or phone_number
+                clean_base = re.sub(r'[^a-zA-Z0-9]', '', str(base_id)).lower() if base_id else f"student_{idx + 1}"
+                generated_email = f"{clean_base}@student.ims"
+                counter = 1
+                candidate_email = generated_email
+                while candidate_email in seen_emails or ApplicationUser.objects.filter(email=candidate_email).exists():
+                    candidate_email = f"{clean_base}_{counter}@student.ims"
+                    counter += 1
+                email = candidate_email
 
             if not phone_number:
                 row_errors.append("Phone number is required.")
@@ -1949,6 +1969,7 @@ class StudentViewSet(viewsets.ModelViewSet):
 
                     validated_students.append({
                         "name": name,
+                        "gender": gender,
                         "email": email,
                         "phone_number": phone_number,
                         "roll_number": roll_number or None,
@@ -2050,6 +2071,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                             "applicant_name": item["name"],
                             "student_mobile": item["phone_number"],
                             "email": item["email"],
+                            "gender": item["gender"] or "",
                             "dob": item["dob"] or "",
                             "date_of_birth": item["dob"] or "",
                             "nationality": item["nationality"] or "Indian",
