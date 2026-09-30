@@ -666,6 +666,279 @@ class StudentViewSet(viewsets.ModelViewSet):
                 "errors": serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
 
+    @action(detail=True, methods=['put', 'post', 'patch'], url_path='full-profile-edit')
+    def full_profile_update(self, request, pk=None, *args, **kwargs):
+        """
+        Comprehensive Student Full Profile Update API.
+        Updates all aspects of a student:
+        - Student model: roll_number, register_number, department, batch, section, quota, status, lab_batch, is_hostler, hostel_building_type, hostel_room_number, is_day_scholar, is_bus, bus, route, stop
+        - Candidate / User (ApplicationUser): name, email, phone_number
+        - Application form_data JSON: personal_information, parent_information, etc.
+        - StudentAdmissionSlip: aadhaar_number, emis_number, umis_number, qualification, community, mode_of_admission, recommendation, marks_maths, marks_physics, marks_chemistry, marks_total, marks_percentage
+        """
+        try:
+            student = Student.objects.select_related(
+                'application', 'application__candidate', 'admission_slip', 'department', 'batch', 'section', 'quota', 'status'
+            ).get(pk=pk)
+        except Student.DoesNotExist:
+            return Response({"code": 404, "message": "Student not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data
+        user = self.request.user if self.request.user and self.request.user.is_authenticated else None
+        from users.models import User as StandardUser
+        tracking_user = user if isinstance(user, StandardUser) else None
+
+        # 1. Validation for unique fields
+        roll_num = data.get('roll_number')
+        if roll_num is not None:
+            roll_num = str(roll_num).strip() or None
+            if roll_num:
+                if Student.objects.filter(roll_number__iexact=roll_num).exclude(pk=student.pk).exists():
+                    return Response({
+                        "code": 400,
+                        "message": f"Roll number '{roll_num}' is already assigned to another student."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+        reg_num = data.get('register_number')
+        if reg_num is not None:
+            reg_num = str(reg_num).strip() or None
+            if reg_num:
+                if Student.objects.filter(register_number__iexact=reg_num).exclude(pk=student.pk).exists():
+                    return Response({
+                        "code": 400,
+                        "message": f"Register number '{reg_num}' is already assigned to another student."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+        email = data.get('email')
+        if email:
+            email = str(email).strip().lower()
+            try:
+                validate_email(email)
+            except DjangoValidationError:
+                return Response({
+                    "code": 400,
+                    "message": "Please enter a valid email address."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        phone = data.get('phone') or data.get('phone_number') or data.get('mobile_number')
+        if phone:
+            phone = str(phone).strip()
+            if not re.match(r'^\d{10}$', phone):
+                return Response({
+                    "code": 400,
+                    "message": "Student phone number must be exactly 10 digits."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        parent_phone = data.get('parent_phone') or data.get('parent_mobile')
+        if parent_phone:
+            parent_phone = str(parent_phone).strip()
+            if parent_phone and not re.match(r'^\d{10}$', parent_phone):
+                return Response({
+                    "code": 400,
+                    "message": "Parent phone number must be exactly 10 digits."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            # ── A. Update Student model ──
+            if roll_num is not None:
+                student.roll_number = roll_num
+            if reg_num is not None:
+                student.register_number = reg_num
+
+            if 'department_id' in data and data['department_id']:
+                student.department_id = int(data['department_id'])
+            if 'batch_id' in data and data['batch_id']:
+                student.batch_id = int(data['batch_id'])
+            if 'section_id' in data:
+                student.section_id = int(data['section_id']) if data['section_id'] else None
+            if 'quota_id' in data:
+                student.quota_id = int(data['quota_id']) if data['quota_id'] else None
+            if 'status_id' in data and data['status_id']:
+                student.status_id = int(data['status_id'])
+            if 'lab_batch' in data:
+                student.lab_batch = str(data['lab_batch']).strip() if data['lab_batch'] else None
+
+            # Accommodation
+            is_hostler = data.get('is_hostler')
+            if is_hostler is not None:
+                student.is_hostler = bool(is_hostler)
+                if student.is_hostler:
+                    student.is_day_scholar = False
+                    student.hostel_building_type = data.get('hostel_building_type') or None
+                    student.hostel_room_number = str(data.get('hostel_room_number', '')).strip() or None
+                else:
+                    student.hostel_building_type = None
+                    student.hostel_room_number = None
+
+            is_day_scholar = data.get('is_day_scholar')
+            if is_day_scholar is not None and bool(is_day_scholar):
+                student.is_day_scholar = True
+                student.is_hostler = False
+                student.hostel_building_type = None
+                student.hostel_room_number = None
+
+            # Transport
+            is_bus = data.get('is_bus')
+            if is_bus is not None:
+                student.is_bus = bool(is_bus)
+                if student.is_bus:
+                    student.bus_id = int(data['bus_id']) if data.get('bus_id') else None
+                    student.route_id = int(data['route_id']) if data.get('route_id') else None
+                    student.stop_id = int(data['stop_id']) if data.get('stop_id') else None
+                else:
+                    student.bus_id = None
+                    student.route_id = None
+                    student.stop_id = None
+
+            student.updated_by = tracking_user
+            student.save()
+
+            # ── B. Update Candidate (ApplicationUser) & Application form_data ──
+            app = student.application
+            if app:
+                cand = app.candidate
+                if cand:
+                    if 'name' in data and data['name']:
+                        cand.name = str(data['name']).strip()
+                    if email:
+                        from dynamic_forms.models import ApplicationUser
+                        if not ApplicationUser.objects.filter(email__iexact=email).exclude(pk=cand.pk).exists():
+                            cand.email = email
+                    if phone:
+                        cand.phone_number = phone
+                    cand.updated_by = tracking_user
+                    cand.save()
+
+                # Update nested form_data
+                fd = dict(app.form_data) if (app.form_data and isinstance(app.form_data, dict)) else {}
+                personal = dict(fd.get('personal_information', {})) if isinstance(fd.get('personal_information'), dict) else {}
+                parent = dict(fd.get('parent_information', {})) if isinstance(fd.get('parent_information'), dict) else {}
+
+                if 'name' in data and data['name']:
+                    personal['applicant_name'] = str(data['name']).strip()
+                if email:
+                    personal['email'] = email
+                if phone:
+                    personal['student_mobile'] = phone
+                if 'gender' in data and data['gender']:
+                    personal['gender'] = data['gender']
+                if 'dob' in data and data['dob']:
+                    personal['date_of_birth'] = data['dob']
+                    personal['dob'] = data['dob']
+                if 'community' in data and data['community']:
+                    personal['community'] = data['community']
+                if 'aadhaar_number' in data:
+                    personal['aadhaar_number'] = str(data['aadhaar_number']).strip()
+                if 'district' in data:
+                    personal['district'] = str(data['district']).strip()
+                    fd['district'] = str(data['district']).strip()
+
+                if 'parent_name' in data:
+                    parent['parent_name'] = str(data['parent_name']).strip()
+                    parent['father_name'] = str(data['parent_name']).strip()
+                if 'mother_name' in data:
+                    parent['mother_name'] = str(data['mother_name']).strip()
+                if parent_phone:
+                    parent['parent_mobile'] = parent_phone
+                    parent['father_mobile'] = parent_phone
+                if 'district' in data:
+                    parent['district'] = str(data['district']).strip()
+                if 'pincode' in data:
+                    parent['pincode'] = str(data['pincode']).strip()
+                if 'address' in data:
+                    parent['address'] = str(data['address']).strip()
+                    parent['communication_address'] = str(data['address']).strip()
+
+                fd['personal_information'] = personal
+                fd['parent_information'] = parent
+                app.form_data = fd
+                app.updated_by = tracking_user
+                app.save()
+
+            # ── C. Update StudentAdmissionSlip ──
+            admission_slip, _ = StudentAdmissionSlip.objects.get_or_create(student=student)
+            if 'aadhaar_number' in data:
+                admission_slip.aadhaar_number = str(data['aadhaar_number']).strip() or None
+            if 'emis_number' in data:
+                admission_slip.emis_number = str(data['emis_number']).strip() or None
+            if 'umis_number' in data:
+                admission_slip.umis_number = str(data['umis_number']).strip() or None
+            if 'qualification' in data:
+                admission_slip.qualification = str(data['qualification']).strip() or None
+            if 'community' in data:
+                admission_slip.community = str(data['community']).strip() or None
+            if 'mode_of_admission' in data:
+                admission_slip.mode_of_admission = str(data['mode_of_admission']).strip() or 'Regular Entry'
+            if 'recommendation_id' in data:
+                admission_slip.recommendation_id = int(data['recommendation_id']) if data['recommendation_id'] else None
+
+            # Qualifying Marks
+            m_maths = data.get('marks_maths')
+            m_physics = data.get('marks_physics')
+            m_chemistry = data.get('marks_chemistry')
+
+            if m_maths is not None and str(m_maths).strip() != '':
+                admission_slip.marks_maths = int(float(m_maths))
+            elif 'marks_maths' in data and (m_maths is None or str(m_maths).strip() == ''):
+                admission_slip.marks_maths = None
+
+            if m_physics is not None and str(m_physics).strip() != '':
+                admission_slip.marks_physics = int(float(m_physics))
+            elif 'marks_physics' in data and (m_physics is None or str(m_physics).strip() == ''):
+                admission_slip.marks_physics = None
+
+            if m_chemistry is not None and str(m_chemistry).strip() != '':
+                admission_slip.marks_chemistry = int(float(m_chemistry))
+            elif 'marks_chemistry' in data and (m_chemistry is None or str(m_chemistry).strip() == ''):
+                admission_slip.marks_chemistry = None
+
+            # Calculate or set total & percentage
+            if 'marks_total' in data and data['marks_total'] is not None and str(data['marks_total']).strip() != '':
+                admission_slip.marks_total = int(float(data['marks_total']))
+            elif admission_slip.marks_maths is not None or admission_slip.marks_physics is not None or admission_slip.marks_chemistry is not None:
+                admission_slip.marks_total = (admission_slip.marks_maths or 0) + (admission_slip.marks_physics or 0) + (admission_slip.marks_chemistry or 0)
+
+            if 'marks_percentage' in data and data['marks_percentage'] is not None and str(data['marks_percentage']).strip() != '':
+                admission_slip.marks_percentage = float(data['marks_percentage'])
+
+            admission_slip.updated_by = tracking_user
+            admission_slip.save()
+
+            # ── D. Sync User account if exists for login ──
+            try:
+                from users.models import User as AuthUser
+                auth_user = None
+                if student.roll_number:
+                    auth_user = AuthUser.objects.filter(username__iexact=student.roll_number).first()
+                if not auth_user and email:
+                    auth_user = AuthUser.objects.filter(mail__iexact=email).first()
+                if auth_user:
+                    if 'name' in data and data['name']:
+                        auth_user.name = str(data['name']).strip()
+                    if email and not AuthUser.objects.filter(mail__iexact=email).exclude(pk=auth_user.pk).exists():
+                        auth_user.mail = email
+                    if phone and re.match(r'^\d{10}$', phone):
+                        auth_user.mobile_number = phone
+                    if student.roll_number:
+                        auth_user.username = student.roll_number
+                    auth_user.updated_by = tracking_user
+                    auth_user.save()
+            except Exception as e:
+                logger.warning(f"Failed to sync AuthUser for student {student.id}: {e}")
+
+        # Broadcast real-time update
+        self._broadcast_change(student, 'student_updated')
+
+        return Response({
+            "code": 200,
+            "message": "Student complete profile updated successfully",
+            "data": {
+                "id": student.id,
+                "roll_number": student.roll_number,
+                "register_number": student.register_number,
+            }
+        }, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=['get'], url_path='comprehensive-view')
     def comprehensive_view(self, request, *args, **kwargs):
         """

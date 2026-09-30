@@ -78,6 +78,7 @@ INSTALLED_APPS = [
     'asset',
     'library',
     'research',
+    'placement',
 ]
 
 MIDDLEWARE = [

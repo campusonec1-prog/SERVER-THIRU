@@ -8,7 +8,7 @@ class StudentStatusPermission(BaseRolePermission):
 
 class StudentPermission(BaseRolePermission):
     read_roles = ['authenticated']
-    write_roles = ['admin', 'administrator', 'office', 'manager', 'tech_supporter', 'administration_officer']
+    write_roles = ['admin', 'administrator', 'office', 'manager', 'tech_supporter', 'administration_officer', 'administrative_officer', 'principal', 'vice_principal', 'hod', 'admissions_officer']
 
 
 class MarksPermission(BaseRolePermission):
