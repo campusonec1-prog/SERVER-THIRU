@@ -145,13 +145,13 @@ class UserViewSet(viewsets.ModelViewSet):
         # 2. Student fallback lookup by Roll Number, Register Number, or Phone Number if User record does NOT exist
         import re
 
-        student_qs = Student.objects.select_related('user').prefetch_related('user__applications')
+        student_qs = Student.objects.select_related('application', 'application__candidate')
         student = student_qs.filter(
             Q(roll_number=username_str) |
             Q(register_number=username_str) |
             Q(roll_number__iexact=username_str) |
             Q(register_number__iexact=username_str) |
-            Q(user__phone_number=username_str)
+            Q(application__candidate__phone_number=username_str)
         ).first()
 
         if student:
@@ -162,7 +162,7 @@ class UserViewSet(viewsets.ModelViewSet):
                 }, status=status.HTTP_403_FORBIDDEN)
 
             # Extract DOB from application form_data or user details
-            app = student.user.applications.all()[0] if (student.user and hasattr(student.user, 'applications') and student.user.applications.all()) else None
+            app = student.application
             fd = app.form_data if (app and app.form_data and isinstance(app.form_data, dict)) else {}
             personal = fd.get('personal_information', {}) if isinstance(fd, dict) else {}
 

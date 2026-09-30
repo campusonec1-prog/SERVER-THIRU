@@ -122,8 +122,21 @@ class Student(TrackingModel):
     def user_id(self):
         return self.application.candidate_id if self.application else None
 
+    @property
+    def name(self):
+        if self.application and self.application.candidate and self.application.candidate.name:
+            return self.application.candidate.name
+        if self.application and self.application.form_data and isinstance(self.application.form_data, dict):
+            fd = self.application.form_data
+            pd = fd.get('personal_details', {}) or fd.get('personal_information', {})
+            if isinstance(pd, dict) and (pd.get('candidate_name') or pd.get('name')):
+                return pd.get('candidate_name') or pd.get('name')
+            if fd.get('candidate_name') or fd.get('name'):
+                return fd.get('candidate_name') or fd.get('name')
+        return self.roll_number or self.register_number or "Student"
+
     def __str__(self):
-        cand_name = self.application.candidate.name if (self.application and self.application.candidate) else (self.roll_number or "Student")
+        cand_name = self.name
         return f"{self.roll_number or self.register_number or 'Student'} - {cand_name}"
 
 

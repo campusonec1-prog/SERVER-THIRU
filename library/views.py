@@ -409,14 +409,14 @@ class LibraryDashboardViewSet(LibraryViewSetMixin, viewsets.ViewSet):
 
 class LibraryStudentLookupViewSet(LibraryViewSetMixin, viewsets.ReadOnlyModelViewSet):
     serializer_class = StudentLookupSerializer
-    queryset = Student.objects.select_related('user', 'department', 'batch', 'section').order_by('roll_number')
+    queryset = Student.objects.select_related('application', 'application__candidate', 'department', 'batch', 'section').order_by('roll_number')
 
     def get_queryset(self):
         queryset = super().get_queryset()
         register_number = self.request.query_params.get('register_number')
         query = register_number or self.request.query_params.get('search')
         if query:
-            queryset = queryset.filter(Q(roll_number__icontains=query) | Q(register_number__icontains=query) | Q(user__name__icontains=query))
+            queryset = queryset.filter(Q(roll_number__icontains=query) | Q(register_number__icontains=query) | Q(application__candidate__name__icontains=query))
         filter_keys = {
             'program_id': 'department__program_id',
             'department_id': 'department_id',
