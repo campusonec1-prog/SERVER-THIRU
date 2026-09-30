@@ -10,6 +10,7 @@ from asgiref.sync import async_to_sync
 
 from common.pagination import CustomPageNumberPagination
 from common.r2 import upload_file_to_r2
+from student.models import Student, GradeSystem
 from .models import (
     PlacementCompany,
     PlacementDrive,
@@ -374,6 +375,286 @@ class PlacementDriveViewSet(viewsets.ModelViewSet):
                 "message": f"Failed to upload document to Cloudflare R2: {str(e)}"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @action(detail=True, methods=['get'], url_path='eligible-students')
+    def eligible_students(self, request, pk=None):
+        drive = self.get_object()
+        eligibility = PlacementDriveEligibility.objects.filter(drive=drive).prefetch_related('departments', 'batches', 'batches__department').first()
+        if not eligibility:
+            return Response({
+                "code": 404,
+                "message": f"No eligibility criteria configured for drive: {drive.job_role}",
+                "data": None
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        result_data = evaluate_drive_eligible_students(eligibility, request.query_params)
+        return Response({
+            "code": 200,
+            "message": "Eligible students evaluated and retrieved successfully",
+            "data": result_data
+        }, status=status.HTTP_200_OK)
+
+
+def evaluate_drive_eligible_students(eligibility, query_params):
+    """
+    Evaluates students across target batches and departments against drive eligibility criteria:
+    - Minimum CGPA (calculated dynamically using Anna University earned credit points formula)
+    - Maximum Allowed Standing Backlogs (latest university attempt != PASS)
+    - Target Departments (empty = all)
+    - Target Batches (empty = all)
+    """
+    min_cgpa = float(eligibility.minimum_cgpa or 0.0)
+    max_backlogs = int(eligibility.max_backlogs or 0)
+
+    target_dept_ids = list(eligibility.departments.values_list('id', flat=True))
+    target_batch_ids = list(eligibility.batches.values_list('id', flat=True))
+
+    grade_systems = list(GradeSystem.objects.filter(is_active=True).order_by('-points'))
+
+    def get_grade_point_and_pass(val):
+        if val is None or str(val).strip() == '':
+            return 0.0, False, '—'
+        str_val = str(val).strip().upper()
+        
+        # 1. Match by Grade Letter in GradeSystem table
+        for g in grade_systems:
+            if g.grade.strip().upper() == str_val:
+                return float(g.points), bool(g.is_pass), g.grade
+        
+        # 2. Match by Numeric Mark range
+        try:
+            num = float(str_val)
+            for g in grade_systems:
+                if g.min_mark is not None and g.max_mark is not None:
+                    if float(g.min_mark) <= num <= float(g.max_mark):
+                        return float(g.points), bool(g.is_pass), g.grade
+        except ValueError:
+            pass
+        
+        return 0.0, False, str_val
+
+    # Query candidate students from target batches and departments
+    students_qs = Student.objects.select_related(
+        'department',
+        'department__program',
+        'batch',
+        'section',
+        'status',
+        'application',
+        'application__candidate'
+    ).prefetch_related(
+        'marks',
+        'marks__subject',
+        'marks__exam',
+        'marks__exam__exam_type'
+    )
+
+    if target_dept_ids:
+        students_qs = students_qs.filter(department_id__in=target_dept_ids)
+    if target_batch_ids:
+        students_qs = students_qs.filter(batch_id__in=target_batch_ids)
+
+    # Optional department or batch filter from UI
+    dept_filter = query_params.get('department_id') or query_params.get('department')
+    if dept_filter:
+        students_qs = students_qs.filter(department_id=dept_filter)
+
+    batch_filter = query_params.get('batch_id') or query_params.get('batch')
+    if batch_filter:
+        students_qs = students_qs.filter(batch_id=batch_filter)
+
+    status_filter = query_params.get('status', 'all').lower()  # 'all', 'eligible', 'ineligible'
+    search_query = query_params.get('search', '').strip().lower()
+
+    evaluated_students = []
+    total_eligible = 0
+    total_ineligible = 0
+    sum_eligible_cgpa = 0.0
+
+    for student in students_qs:
+        # Resolve personal details
+        app = student.application
+        candidate = app.candidate if app else None
+        
+        name_val = candidate.name if candidate else None
+        email_val = candidate.email if candidate else None
+        phone_val = candidate.phone_number if (candidate and getattr(candidate, 'phone_number', None)) else None
+        photo_url = ""
+
+        if app and app.form_data and isinstance(app.form_data, dict):
+            fd = app.form_data
+            pd = fd.get('personal_details', {})
+            if isinstance(pd, dict):
+                if not name_val:
+                    name_val = pd.get('candidate_name') or pd.get('name')
+                if not phone_val:
+                    phone_val = pd.get('phone') or pd.get('mobile') or pd.get('phone_number')
+            if not name_val:
+                name_val = fd.get('candidate_name') or fd.get('name')
+            if not phone_val:
+                phone_val = fd.get('phone') or fd.get('mobile') or fd.get('phone_number')
+
+            if not photo_url:
+                photo_url = fd.get('photo', '')
+
+        # Gather university examination marks
+        univ_subject_attempts = {}
+        history_arrears_count = 0
+
+        for m in student.marks.all():
+            exam_type_label = 'CIA'
+            is_univ_exam = False
+            if m.exam:
+                if m.exam.exam_type:
+                    exam_type_label = getattr(m.exam.exam_type, 'exam_type_name', str(m.exam.exam_type))
+                else:
+                    exam_type_label = m.exam.exam_name or 'Internal'
+            
+            type_str = str(exam_type_label).lower()
+            if 'university' in type_str or 'external' in type_str or 'end sem' in type_str or 'semester exam' in type_str:
+                is_univ_exam = True
+
+            if is_univ_exam:
+                credits_val = float(m.subject.credits) if (m.subject and m.subject.credits is not None) else 0.0
+                gp, is_pass_val, grade_letter = get_grade_point_and_pass(m.marks_obtained)
+                
+                if not is_pass_val and m.marks_obtained:
+                    history_arrears_count += 1
+
+                subj_key = f"{m.subject_id}_{m.subject_category or 'THEORY'}"
+                if subj_key not in univ_subject_attempts:
+                    univ_subject_attempts[subj_key] = []
+                
+                univ_subject_attempts[subj_key].append({
+                    'id': m.id,
+                    'credits': credits_val,
+                    'grade_point': gp,
+                    'is_pass': is_pass_val,
+                    'marks_obtained': m.marks_obtained,
+                })
+
+        # Calculate student's latest CGPA and standing backlogs
+        total_reg_credits = 0.0
+        total_earned_credits = 0.0
+        total_credit_points = 0.0
+        standing_backlogs = 0
+
+        for subj_key, attempts in univ_subject_attempts.items():
+            sorted_att = sorted(attempts, key=lambda x: x['id'] or 0)
+            latest = sorted_att[-1]
+            c = latest['credits']
+            gp = latest['grade_point']
+            if c > 0:
+                total_reg_credits += c
+                total_credit_points += (c * gp)
+                if latest['is_pass']:
+                    total_earned_credits += c
+                else:
+                    standing_backlogs += 1
+            elif not latest['is_pass']:
+                standing_backlogs += 1
+
+        cgpa = round(total_credit_points / total_earned_credits, 2) if total_earned_credits > 0 else 0.00
+
+        is_cgpa_eligible = (cgpa >= min_cgpa)
+        is_backlog_eligible = (standing_backlogs <= max_backlogs)
+        is_eligible = (is_cgpa_eligible and is_backlog_eligible)
+
+        if is_eligible:
+            total_eligible += 1
+            sum_eligible_cgpa += cgpa
+        else:
+            total_ineligible += 1
+
+        ineligibility_reasons = []
+        if not is_cgpa_eligible:
+            ineligibility_reasons.append(f"CGPA ({cgpa:.2f}) is below required minimum ({min_cgpa:.2f})")
+        if not is_backlog_eligible:
+            ineligibility_reasons.append(f"Standing backlogs ({standing_backlogs}) exceed max allowed ({max_backlogs})")
+
+        sec_str = ""
+        if student.section:
+            if isinstance(student.section.sections, list):
+                sec_str = ", ".join(student.section.sections)
+            else:
+                sec_str = str(student.section.sections)
+
+        student_data = {
+            'student_id': student.id,
+            'roll_number': student.roll_number or '—',
+            'register_number': student.register_number or '—',
+            'student_name': name_val or f"Student #{student.id}",
+            'student_email': email_val,
+            'student_phone': phone_val or '—',
+            'student_photo': photo_url,
+            'department_id': student.department_id,
+            'department_name': student.department.department_name if student.department else '—',
+            'department_code': student.department.department_code if student.department else '—',
+            'department_short_name': student.department.short_name if (student.department and hasattr(student.department, 'short_name')) else (student.department.department_name if student.department else '—'),
+            'batch_id': student.batch_id,
+            'batch_name': student.batch.batch if student.batch else '—',
+            'section_name': sec_str or '—',
+            'cgpa': cgpa,
+            'total_registered_credits': total_reg_credits,
+            'total_earned_credits': total_earned_credits,
+            'standing_backlogs': standing_backlogs,
+            'history_arrears': history_arrears_count,
+            'is_eligible': is_eligible,
+            'is_cgpa_eligible': is_cgpa_eligible,
+            'is_backlog_eligible': is_backlog_eligible,
+            'ineligibility_reasons': ineligibility_reasons,
+        }
+
+        # Apply search filter
+        if search_query:
+            match_str = f"{student_data['student_name']} {student_data['roll_number']} {student_data['register_number']} {student_data['student_email'] or ''} {student_data['department_name']} {student_data['batch_name']}".lower()
+            if search_query not in match_str:
+                continue
+
+        # Apply status filter
+        if status_filter == 'eligible' and not is_eligible:
+            continue
+        if status_filter == 'ineligible' and is_eligible:
+            continue
+
+        evaluated_students.append(student_data)
+
+    # Sort students: eligible first, then by descending CGPA
+    evaluated_students.sort(key=lambda s: (not s['is_eligible'], -s['cgpa'], s['student_name']))
+
+    avg_cgpa = round(sum_eligible_cgpa / total_eligible, 2) if total_eligible > 0 else 0.00
+    total_evaluated = total_eligible + total_ineligible
+    eligible_percentage = round((total_eligible / total_evaluated * 100), 1) if total_evaluated > 0 else 0.0
+
+    return {
+        'criteria': {
+            'eligibility_id': eligibility.id,
+            'drive_id': eligibility.drive_id,
+            'job_role': eligibility.drive.job_role if eligibility.drive else 'Recruitment Drive',
+            'company_name': eligibility.drive.company.company_name if (eligibility.drive and eligibility.drive.company) else 'Hiring Company',
+            'drive_type': eligibility.drive.drive_type if eligibility.drive else 'FULL_TIME',
+            'drive_type_display': eligibility.drive.get_drive_type_display() if eligibility.drive else 'Full Time',
+            'minimum_cgpa': min_cgpa,
+            'max_backlogs': max_backlogs,
+            'departments': [
+                {'id': d.id, 'department_name': d.department_name, 'department_code': d.department_code, 'short_name': d.short_name}
+                for d in eligibility.departments.all()
+            ],
+            'batches': [
+                {'id': b.id, 'batch': b.batch, 'department_name': b.department.department_name if b.department else None}
+                for b in eligibility.batches.select_related('department').all()
+            ],
+        },
+        'summary': {
+            'total_students_evaluated': total_evaluated,
+            'total_eligible': total_eligible,
+            'total_ineligible': total_ineligible,
+            'eligible_percentage': eligible_percentage,
+            'average_eligible_cgpa': avg_cgpa,
+        },
+        'students': evaluated_students,
+        'count': len(evaluated_students),
+    }
+
 
 class PlacementDriveEligibilityViewSet(viewsets.ModelViewSet):
     queryset = PlacementDriveEligibility.objects.select_related(
@@ -492,4 +773,15 @@ class PlacementDriveEligibilityViewSet(viewsets.ModelViewSet):
             "message": "Drive eligibility retrieved successfully",
             "data": serializer.data
         }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='eligible-students')
+    def eligible_students(self, request, pk=None):
+        eligibility = self.get_object()
+        result_data = evaluate_drive_eligible_students(eligibility, request.query_params)
+        return Response({
+            "code": 200,
+            "message": "Eligible students evaluated and retrieved successfully",
+            "data": result_data
+        }, status=status.HTTP_200_OK)
+
 

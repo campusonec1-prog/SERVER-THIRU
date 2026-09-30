@@ -36,6 +36,9 @@ urlpatterns = [
     path('drives/summary-stats', PlacementDriveViewSet.as_view({'get': 'summary_stats'}), name='placement-drive-summary-stats'),
     path('drives/upload-document', PlacementDriveViewSet.as_view({'post': 'upload_document'}), name='placement-drive-upload-doc'),
 
+    path('drives/eligible-students/<int:pk>', PlacementDriveViewSet.as_view({'get': 'eligible_students'}), name='placement-drive-eligible-students'),
+    path('drives/<int:pk>/eligible-students', PlacementDriveViewSet.as_view({'get': 'eligible_students'})),
+
     # ── PLACEMENT DRIVE ELIGIBILITY: Standard 4 CRUD endpoints ──
     path('eligibility/create', PlacementDriveEligibilityViewSet.as_view({'post': 'create'}), name='placement-eligibility-create'),
     path('eligibility/list', PlacementDriveEligibilityViewSet.as_view({'get': 'list'}), name='placement-eligibility-list'),
@@ -44,5 +47,7 @@ urlpatterns = [
     path('eligibility/edit/<int:pk>', PlacementDriveEligibilityViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='placement-eligibility-edit'),
     path('eligibility/remove/<int:pk>', PlacementDriveEligibilityViewSet.as_view({'delete': 'destroy'}), name='placement-eligibility-remove'),
     path('eligibility/by-drive/<int:drive_id>', PlacementDriveEligibilityViewSet.as_view({'get': 'by_drive'}), name='placement-eligibility-by-drive'),
+    path('eligibility/eligible-students/<int:pk>', PlacementDriveEligibilityViewSet.as_view({'get': 'eligible_students'}), name='placement-eligibility-eligible-students'),
+    path('eligibility/<int:pk>/eligible-students', PlacementDriveEligibilityViewSet.as_view({'get': 'eligible_students'})),
 ]
 
