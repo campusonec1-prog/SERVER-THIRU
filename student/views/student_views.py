@@ -1240,11 +1240,36 @@ class StudentViewSet(viewsets.ModelViewSet):
             'fees': fees_data,
         }
 
-        # ── 2. Academic Marks ──────────────────────────────────────────────────
-        from ..models import Marks
+        # ── 2. Academic Marks & Anna University GPA / CGPA Calculation ────────
+        from ..models import Marks, GradeSystem
+        import re
+
+        grade_systems = list(GradeSystem.objects.filter(is_active=True).order_by('-points'))
         marks_qs = Marks.objects.filter(student=student).select_related(
-            'exam', 'subject', 'subject__semester'
+            'exam', 'exam__exam_type', 'subject', 'subject__semester'
         )
+
+        def extract_sem_num(sem_obj):
+            if not sem_obj:
+                return 1
+            if hasattr(sem_obj, 'semesters') and sem_obj.semesters:
+                if isinstance(sem_obj.semesters, list) and len(sem_obj.semesters) > 0:
+                    try:
+                        return int(sem_obj.semesters[0])
+                    except (ValueError, TypeError):
+                        pass
+                elif str(sem_obj.semesters).isdigit():
+                    return int(sem_obj.semesters)
+            if hasattr(sem_obj, 'semester_name') and sem_obj.semester_name:
+                m = re.search(r'\d+', str(sem_obj.semester_name))
+                if m:
+                    return int(m.group(0))
+            if hasattr(sem_obj, 'id') and sem_obj.id:
+                try:
+                    return int(sem_obj.id)
+                except (ValueError, TypeError):
+                    pass
+            return 1
 
         def resolve_sem_label(sem_obj):
             if not sem_obj:
@@ -1255,24 +1280,192 @@ class StudentViewSet(viewsets.ModelViewSet):
                 return f"Semester {sem_obj.id}"
             return "Semester 1"
 
+        def get_grade_point_and_pass(val):
+            if val is None or str(val).strip() == '':
+                return 0.0, False, '—'
+            str_val = str(val).strip().upper()
+            
+            # 1. Match by Letter Grade in GradeSystem table (e.g. O, A+, A, B+, B, C, U, RA, UA, AB)
+            for g in grade_systems:
+                if g.grade.strip().upper() == str_val:
+                    return float(g.points), bool(g.is_pass), g.grade
+            
+            # 2. Match by Numeric Mark range in GradeSystem table
+            try:
+                num = float(str_val)
+                for g in grade_systems:
+                    if g.min_mark is not None and g.max_mark is not None:
+                        if float(g.min_mark) <= num <= float(g.max_mark):
+                            return float(g.points), bool(g.is_pass), g.grade
+            except ValueError:
+                pass
+            
+            # 3. If not matched in GradeSystem, return 0.0 points and fail status
+            is_absent = str_val in ['AB', 'ABSENT', 'UA', 'W']
+            return 0.0, False, str_val
+
         marks_list = []
+        univ_marks_by_sem = {}  # { sem_num: [ { mark_info } ] }
+        all_univ_subject_attempts = {}  # { subject_key: [ { sem_num, credits, gp, is_pass, mark } ] }
+        history_arrears_count = 0
+
         for m in marks_qs:
-            sem_name = resolve_sem_label(m.subject.semester) if (m.subject and m.subject.semester) else "Semester 1"
+            sem_num = extract_sem_num(m.subject.semester) if (m.subject and m.subject.semester) else 1
+            sem_name = resolve_sem_label(m.subject.semester) if (m.subject and m.subject.semester) else f"Semester {sem_num}"
+            
             exam_type_label = 'CIA'
-            if m.exam and m.exam.exam_type:
-                exam_type_label = getattr(m.exam.exam_type, 'exam_type_name', str(m.exam.exam_type))
-            marks_list.append({
+            is_univ_exam = False
+            if m.exam:
+                if m.exam.exam_type:
+                    exam_type_label = getattr(m.exam.exam_type, 'exam_type_name', str(m.exam.exam_type))
+                else:
+                    exam_type_label = m.exam.exam_name or 'Internal'
+            
+            type_str = str(exam_type_label).lower()
+            if 'university' in type_str or 'external' in type_str or 'end sem' in type_str or 'semester exam' in type_str:
+                is_univ_exam = True
+
+            credits_val = float(m.subject.credits) if (m.subject and m.subject.credits is not None) else 0.0
+            course_type_val = m.subject.course_type if m.subject else ''
+            gp, is_pass_val, grade_letter = get_grade_point_and_pass(m.marks_obtained)
+            credit_points = round(credits_val * gp, 2)
+
+            mark_record = {
                 'id': m.id,
                 'exam_id': m.exam_id,
                 'exam_name': m.exam.exam_name if m.exam else '',
                 'exam_type': exam_type_label,
+                'is_university_exam': is_univ_exam,
                 'subject_id': m.subject_id,
                 'subject_code': m.subject.subject_code if m.subject else '',
                 'subject_name': m.subject.subject_name if m.subject else '',
                 'subject_category': m.subject_category or 'THEORY',
+                'credits': credits_val,
+                'course_type': course_type_val,
                 'semester_name': sem_name,
+                'semester_num': sem_num,
                 'marks_obtained': m.marks_obtained,
-            })
+                'grade_point': gp,
+                'is_pass': is_pass_val,
+                'grade_letter': grade_letter,
+                'credit_points': credit_points,
+            }
+            marks_list.append(mark_record)
+
+            # Accumulate university examination entries for GPA / CGPA computation
+            if is_univ_exam:
+                if not is_pass_val and m.marks_obtained:
+                    history_arrears_count += 1
+
+                if sem_num not in univ_marks_by_sem:
+                    univ_marks_by_sem[sem_num] = []
+                univ_marks_by_sem[sem_num].append(mark_record)
+
+                subj_key = f"{m.subject_id}_{m.subject_category or 'THEORY'}"
+                if subj_key not in all_univ_subject_attempts:
+                    all_univ_subject_attempts[subj_key] = []
+                all_univ_subject_attempts[subj_key].append(mark_record)
+
+        # ── Calculate Anna University GPA & CGPA for Semesters 1 to 8 ──────────
+        semester_performance_map = {}
+        for s_idx in range(1, 9):
+            s_marks = univ_marks_by_sem.get(s_idx, [])
+            
+            # Semester GPA: Sum(Credits * GP) / Sum(Credits) for non-zero credit courses
+            sem_total_credits = 0.0
+            sem_earned_credits = 0.0
+            sem_credit_points = 0.0
+            sem_has_arrear = False
+
+            for rec in s_marks:
+                c = rec['credits']
+                gp = rec['grade_point']
+                if c > 0:
+                    sem_total_credits += c
+                    sem_credit_points += (c * gp)
+                    if rec['is_pass']:
+                        sem_earned_credits += c
+                    else:
+                        sem_has_arrear = True
+                elif not rec['is_pass']:
+                    sem_has_arrear = True
+
+            gpa = round(sem_credit_points / sem_total_credits, 2) if sem_total_credits > 0 else 0.00
+
+            # Cumulative CGPA up to Semester s_idx:
+            # Considers all university subjects registered from Sem 1 up to Sem s_idx
+            # For subjects with multiple attempts up to Sem s_idx, take the latest attempt
+            cum_subjects = {}
+            for past_sem in range(1, s_idx + 1):
+                for rec in univ_marks_by_sem.get(past_sem, []):
+                    skey = f"{rec['subject_id']}_{rec['subject_category']}"
+                    cum_subjects[skey] = rec  # overwrites with latest attempt up to past_sem
+
+            cum_total_credits = 0.0
+            cum_earned_credits = 0.0
+            cum_credit_points = 0.0
+            for s_entry in cum_subjects.values():
+                c = s_entry['credits']
+                gp = s_entry['grade_point']
+                if c > 0:
+                    cum_total_credits += c
+                    cum_credit_points += (c * gp)
+                    if s_entry['is_pass']:
+                        cum_earned_credits += c
+
+            cgpa_up_to_sem = round(cum_credit_points / cum_total_credits, 2) if cum_total_credits > 0 else 0.00
+
+            semester_performance_map[s_idx] = {
+                'semester_num': s_idx,
+                'semester_name': f"Semester {s_idx}",
+                'gpa': gpa,
+                'cgpa': cgpa_up_to_sem,
+                'total_credits': sem_total_credits,
+                'earned_credits': sem_earned_credits,
+                'credit_points': round(sem_credit_points, 2),
+                'cumulative_credits': cum_total_credits,
+                'cumulative_earned_credits': cum_earned_credits,
+                'has_arrear': sem_has_arrear,
+                'subject_count': len(s_marks),
+                'has_records': len(s_marks) > 0,
+            }
+
+        # Overall Latest Cumulative CGPA & Standing Arrears Count
+        overall_unique_subjects = {}
+        for s_idx in range(1, 9):
+            for rec in univ_marks_by_sem.get(s_idx, []):
+                skey = f"{rec['subject_id']}_{rec['subject_category']}"
+                overall_unique_subjects[skey] = rec
+
+        tot_reg_credits = 0.0
+        tot_earned_credits = 0.0
+        tot_cum_points = 0.0
+        standing_arrears_count = 0
+
+        for rec in overall_unique_subjects.values():
+            c = rec['credits']
+            gp = rec['grade_point']
+            if c > 0:
+                tot_reg_credits += c
+                tot_cum_points += (c * gp)
+                if rec['is_pass']:
+                    tot_earned_credits += c
+                else:
+                    standing_arrears_count += 1
+            else:
+                if not rec['is_pass']:
+                    standing_arrears_count += 1
+
+        overall_cgpa = round(tot_cum_points / tot_reg_credits, 2) if tot_reg_credits > 0 else 0.00
+
+        academics_summary = {
+            'overall_cgpa': overall_cgpa,
+            'total_credits_registered': tot_reg_credits,
+            'total_credits_earned': tot_earned_credits,
+            'standing_arrears': standing_arrears_count,
+            'history_arrears': history_arrears_count,
+            'semesters': semester_performance_map,
+        }
 
         # ── 3. Attendance Percentage (Subject-wise & Overall) ─────────────────
         from ..models import StudentAttendance
@@ -1372,6 +1565,7 @@ class StudentViewSet(viewsets.ModelViewSet):
             "data": {
                 "profile": profile_data,
                 "marks": marks_list,
+                "academics": academics_summary,
                 "counselling": counselling_list,
                 "attendance": {
                     "overall": {
