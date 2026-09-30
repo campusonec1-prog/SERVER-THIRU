@@ -1249,36 +1249,32 @@ class StudentViewSet(viewsets.ModelViewSet):
             'exam', 'exam__exam_type', 'subject', 'subject__semester'
         )
 
-        def extract_sem_num(sem_obj):
-            if not sem_obj:
+        def extract_sem_num(subject_obj):
+            if not subject_obj:
                 return 1
-            if hasattr(sem_obj, 'semesters') and sem_obj.semesters:
-                if isinstance(sem_obj.semesters, list) and len(sem_obj.semesters) > 0:
-                    try:
-                        return int(sem_obj.semesters[0])
-                    except (ValueError, TypeError):
-                        pass
-                elif str(sem_obj.semesters).isdigit():
-                    return int(sem_obj.semesters)
-            if hasattr(sem_obj, 'semester_name') and sem_obj.semester_name:
-                m = re.search(r'\d+', str(sem_obj.semester_name))
-                if m:
-                    return int(m.group(0))
-            if hasattr(sem_obj, 'id') and sem_obj.id:
+            if hasattr(subject_obj, 'semester_id') and subject_obj.semester_id:
+                try:
+                    return int(subject_obj.semester_id)
+                except (ValueError, TypeError):
+                    pass
+            sem_obj = getattr(subject_obj, 'semester', None) if hasattr(subject_obj, 'semester') else subject_obj
+            if sem_obj and hasattr(sem_obj, 'id') and sem_obj.id:
                 try:
                     return int(sem_obj.id)
                 except (ValueError, TypeError):
                     pass
+            code = getattr(subject_obj, 'subject_code', '') or ''
+            m = re.search(r'^[A-Za-z]+(\d)(\d)', code)
+            if m:
+                try:
+                    return int(m.group(2))
+                except (ValueError, TypeError):
+                    pass
             return 1
 
-        def resolve_sem_label(sem_obj):
-            if not sem_obj:
-                return "Semester 1"
-            if hasattr(sem_obj, 'semester_name') and sem_obj.semester_name:
-                return f"Semester {sem_obj.semester_name}"
-            if hasattr(sem_obj, 'id') and sem_obj.id:
-                return f"Semester {sem_obj.id}"
-            return "Semester 1"
+        def resolve_sem_label(subject_obj):
+            sem_num = extract_sem_num(subject_obj)
+            return f"Semester {sem_num}"
 
         def get_grade_point_and_pass(val):
             if val is None or str(val).strip() == '':
@@ -1310,8 +1306,8 @@ class StudentViewSet(viewsets.ModelViewSet):
         history_arrears_count = 0
 
         for m in marks_qs:
-            sem_num = extract_sem_num(m.subject.semester) if (m.subject and m.subject.semester) else 1
-            sem_name = resolve_sem_label(m.subject.semester) if (m.subject and m.subject.semester) else f"Semester {sem_num}"
+            sem_num = extract_sem_num(m.subject) if m.subject else 1
+            sem_name = resolve_sem_label(m.subject) if m.subject else f"Semester {sem_num}"
             
             exam_type_label = 'CIA'
             is_univ_exam = False
@@ -1366,18 +1362,52 @@ class StudentViewSet(viewsets.ModelViewSet):
                     all_univ_subject_attempts[subj_key] = []
                 all_univ_subject_attempts[subj_key].append(mark_record)
 
+        # ── Process Chronological Attempts & Standing Arrears Tracker ──────────
+        standing_arrears_list = []
+        for subj_key, attempts in all_univ_subject_attempts.items():
+            origin_sem = attempts[0]['semester_num'] if attempts else 1
+            for idx, att in enumerate(attempts):
+                att_num = idx + 1
+                app_sem = min(8, origin_sem + idx)
+                att['origin_sem_num'] = origin_sem
+                att['origin_semester'] = f"Semester {origin_sem}"
+                att['attempt_count'] = att_num
+                att['appearance_sem_num'] = app_sem
+                att['appearance_semester'] = f"Semester {app_sem}"
+                att['is_arrear_appearance'] = (att_num > 1)
+
+            latest_att = attempts[-1]
+            if not latest_att['is_pass']:
+                standing_arrears_list.append({
+                    'subject_id': latest_att['subject_id'],
+                    'subject_code': latest_att['subject_code'],
+                    'subject_name': latest_att['subject_name'],
+                    'subject_category': latest_att['subject_category'],
+                    'origin_sem_num': origin_sem,
+                    'origin_semester': f"Semester {origin_sem}",
+                    'latest_attempt_count': len(attempts),
+                    'latest_grade': latest_att['marks_obtained'],
+                    'credits': latest_att['credits'],
+                    'next_appearance_sem': min(8, latest_att.get('appearance_sem_num', origin_sem) + 1),
+                })
+
         # ── Calculate Anna University GPA & CGPA for Semesters 1 to 8 ──────────
         semester_performance_map = {}
         for s_idx in range(1, 9):
             s_marks = univ_marks_by_sem.get(s_idx, [])
             
-            # Semester GPA: Sum(Credits * GP) / Sum(Credits) for non-zero credit courses
+            # Deduplicate by unique subject for that semester (latest attempt)
+            unique_sem_subjects = {}
+            for rec in s_marks:
+                skey = f"{rec['subject_id']}_{rec['subject_category']}"
+                unique_sem_subjects[skey] = rec
+
             sem_total_credits = 0.0
             sem_earned_credits = 0.0
             sem_credit_points = 0.0
             sem_has_arrear = False
 
-            for rec in s_marks:
+            for rec in unique_sem_subjects.values():
                 c = rec['credits']
                 gp = rec['grade_point']
                 if c > 0:
@@ -1390,7 +1420,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                 elif not rec['is_pass']:
                     sem_has_arrear = True
 
-            gpa = round(sem_credit_points / sem_total_credits, 2) if sem_total_credits > 0 else 0.00
+            gpa = round(sem_credit_points / sem_earned_credits, 2) if sem_earned_credits > 0 else 0.00
 
             # Cumulative CGPA up to Semester s_idx:
             # Considers all university subjects registered from Sem 1 up to Sem s_idx
@@ -1413,7 +1443,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                     if s_entry['is_pass']:
                         cum_earned_credits += c
 
-            cgpa_up_to_sem = round(cum_credit_points / cum_total_credits, 2) if cum_total_credits > 0 else 0.00
+            cgpa_up_to_sem = round(cum_credit_points / cum_earned_credits, 2) if (cum_earned_credits > 0 and len(unique_sem_subjects) > 0) else 0.00
 
             semester_performance_map[s_idx] = {
                 'semester_num': s_idx,
@@ -1426,8 +1456,8 @@ class StudentViewSet(viewsets.ModelViewSet):
                 'cumulative_credits': cum_total_credits,
                 'cumulative_earned_credits': cum_earned_credits,
                 'has_arrear': sem_has_arrear,
-                'subject_count': len(s_marks),
-                'has_records': len(s_marks) > 0,
+                'subject_count': len(unique_sem_subjects),
+                'has_records': len(unique_sem_subjects) > 0,
             }
 
         # Overall Latest Cumulative CGPA & Standing Arrears Count
@@ -1456,7 +1486,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                 if not rec['is_pass']:
                     standing_arrears_count += 1
 
-        overall_cgpa = round(tot_cum_points / tot_reg_credits, 2) if tot_reg_credits > 0 else 0.00
+        overall_cgpa = round(tot_cum_points / tot_earned_credits, 2) if tot_earned_credits > 0 else 0.00
 
         academics_summary = {
             'overall_cgpa': overall_cgpa,
@@ -1464,6 +1494,7 @@ class StudentViewSet(viewsets.ModelViewSet):
             'total_credits_earned': tot_earned_credits,
             'standing_arrears': standing_arrears_count,
             'history_arrears': history_arrears_count,
+            'standing_arrears_list': standing_arrears_list,
             'semesters': semester_performance_map,
         }
 
