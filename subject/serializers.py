@@ -36,9 +36,9 @@ class SubjectSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
         extra_kwargs = {
-            'subject_code': {'required': True},
+            'subject_code': {'required': False, 'allow_null': True, 'allow_blank': True},
             'subject_name': {'required': True},
-            'credits': {'required': True},
+            'credits': {'required': False},
             'course_type': {'required': False, 'allow_null': True, 'allow_blank': True},
             'semester_id': {'required': True},
             'is_theory': {'required': False},
@@ -51,19 +51,26 @@ class SubjectSerializer(serializers.ModelSerializer):
         apply_default_error_messages(self.fields)
 
     def validate_subject_code(self, value):
-        if not value or not value.strip():
-            raise serializers.ValidationError("Subject code cannot be empty.")
-        return value.strip()
+        if value and str(value).strip():
+            return str(value).strip().upper()
+        return None
 
     def validate_subject_name(self, value):
-        if not value or not value.strip():
+        if not value or not str(value).strip():
             raise serializers.ValidationError("Subject name cannot be empty.")
-        return value.strip()
+        return str(value).strip()
 
     def validate_credits(self, value):
-        if value <= 0:
-            raise serializers.ValidationError("Credits must be a positive number.")
+        if value is None:
+            return 0.0
+        if value < 0:
+            raise serializers.ValidationError("Credits cannot be negative.")
         return value
+
+    def validate_course_type(self, value):
+        if value and str(value).strip():
+            return str(value).strip()
+        return None
 
     def validate(self, attrs):
         subject_code = attrs.get('subject_code', getattr(self.instance, 'subject_code', None))
@@ -71,9 +78,9 @@ class SubjectSerializer(serializers.ModelSerializer):
         department = attrs.get('department', getattr(self.instance, 'department', None))
         semester = attrs.get('semester', getattr(self.instance, 'semester', None))
 
-        if subject_code and regulation and department and semester:
+        if subject_code and str(subject_code).strip() and regulation and department and semester:
             qs = Subject.objects.filter(
-                subject_code__iexact=subject_code.strip() if isinstance(subject_code, str) else subject_code,
+                subject_code__iexact=str(subject_code).strip(),
                 regulation=regulation,
                 department=department,
                 semester=semester
@@ -91,7 +98,7 @@ class SubjectSerializer(serializers.ModelSerializer):
         ret['regulation_code'] = instance.regulation.regulation_code if instance.regulation else None
         ret['department_name'] = instance.department.department_name if instance.department else None
         ret['department_code'] = instance.department.department_code if instance.department else None
-        ret['course_type_display'] = instance.get_course_type_display() if hasattr(instance, 'get_course_type_display') and instance.course_type else (instance.course_type or 'Professional Core Course (PCC)')
+        ret['course_type_display'] = instance.get_course_type_display() if (hasattr(instance, 'get_course_type_display') and instance.course_type) else (instance.course_type or None)
         
         sec_str = ""
         if instance.semester:

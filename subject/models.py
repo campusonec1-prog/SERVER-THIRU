@@ -15,13 +15,13 @@ class Subject(TrackingModel):
         ('VAC', 'Value Added Course (VAC)'),
     ]
 
-    subject_code = models.CharField(max_length=50)
+    subject_code = models.CharField(max_length=50, blank=True, null=True)
     subject_name = models.CharField(max_length=150)
-    credits = models.FloatField()
+    credits = models.FloatField(default=0.0)
     course_type = models.CharField(
         max_length=50,
         choices=COURSE_TYPE_CHOICES,
-        default='PCC',
+        default=None,
         blank=True,
         null=True
     )
@@ -62,7 +62,9 @@ class Subject(TrackingModel):
         ]
 
     def __str__(self):
-        return f"{self.subject_code} - {self.subject_name}"
+        if self.subject_code:
+            return f"{self.subject_code} - {self.subject_name}"
+        return self.subject_name
 
 
 class SharedNotes(TrackingModel):
@@ -119,5 +121,6 @@ class SharedNotes(TrackingModel):
         ]
 
     def __str__(self):
-        return f"{self.subject.subject_code} - {self.folder_name} - {self.file_name}"
+        sub_title = (self.subject.subject_code if self.subject and self.subject.subject_code else (self.subject.subject_name if self.subject else "Subject"))
+        return f"{sub_title} - {self.folder_name} - {self.file_name}"
 
