@@ -913,15 +913,15 @@ class HostelLeaveRequestViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         student = None
         if student_id:
             try:
-                student = Student.objects.select_related('user').filter(id=student_id).first()
+                student = Student.objects.select_related('application', 'application__candidate').filter(id=student_id).first()
             except Exception:
                 pass
         if not student and hasattr(user, 'student'):
             student = user.student
         if not student:
-            student = Student.objects.select_related('user').filter(user=user).first()
+            student = Student.objects.select_related('application', 'application__candidate').filter(application__candidate=user).first()
             if not student and getattr(user, 'name', None):
-                student = Student.objects.select_related('user').filter(user__name=user.name).first()
+                student = Student.objects.select_related('application', 'application__candidate').filter(application__candidate__name=user.name).first()
 
         if not student:
             # Fallback: grab first hostler student for dev testing if user is admin testing

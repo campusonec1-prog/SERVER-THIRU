@@ -285,11 +285,9 @@ class SubjectViewSet(viewsets.ModelViewSet):
                         return code
                 return 'PCC'
 
-            course_type_val = normalize_course_type(course_type_raw)
+            course_type_val = normalize_course_type(course_type_raw) if course_type_raw else None
 
-            if not subject_code:
-                row_errors.append("Subject code is required.")
-            else:
+            if subject_code:
                 if subject_code in seen_codes:
                     row_errors.append(f"Duplicate subject code '{subject_code}' in sheet.")
                 else:
@@ -302,11 +300,11 @@ class SubjectViewSet(viewsets.ModelViewSet):
 
             # Validate credits
             try:
-                credits_val = float(credits_raw)
-                if credits_val <= 0:
-                    row_errors.append("Credits must be a positive number.")
+                credits_val = float(credits_raw) if credits_raw is not None and str(credits_raw).strip() != '' else 0.0
+                if credits_val < 0:
+                    row_errors.append("Credits cannot be negative.")
             except (ValueError, TypeError):
-                row_errors.append(f"Invalid credits: '{credits_raw}'. Must be a positive number.")
+                row_errors.append(f"Invalid credits: '{credits_raw}'. Must be a valid number >= 0.")
 
             # Validate regulation
             regulation_obj = None

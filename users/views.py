@@ -81,167 +81,213 @@ class UserViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         import bcrypt
+        import re
+        from django.db import IntegrityError
         from django.db.models import Q
         from student.models import Student
         from role.models import Role
         from rest_framework_simplejwt.tokens import RefreshToken
 
-        # 1. Fast indexed lookup on User model (eagerly loading role in a single query)
-        user = User.objects.select_related('role').filter(username=username_str).first()
-        if not user:
-            # Try mobile number if username is numeric or lookup by iexact
-            if username_str.isdigit() and len(username_str) == 10:
-                user = User.objects.select_related('role').filter(mobile_number=username_str).first()
+        try:
+            # 1. Fast indexed lookup on User model (eagerly loading role in a single query)
+            user = User.objects.select_related('role').filter(username=username_str).first()
             if not user:
-                user = User.objects.select_related('role').filter(username__iexact=username_str).first()
+                # Try email lookup if username is an email address
+                if '@' in username_str:
+                    user = User.objects.select_related('role').filter(mail__iexact=username_str).first()
+                # Try mobile number if username is numeric or lookup by iexact
+                elif username_str.isdigit() and len(username_str) == 10:
+                    user = User.objects.select_related('role').filter(mobile_number=username_str).first()
+                if not user:
+                    user = User.objects.select_related('role').filter(username__iexact=username_str).first()
 
-        if user:
-            if bcrypt.checkpw(password_str.encode('utf-8'), user.password.encode('utf-8')):
-                user_role_name = (user.role.role_name if user.role else '').upper()
+            if user:
+                if bcrypt.checkpw(password_str.encode('utf-8'), user.password.encode('utf-8')):
+                    user_role_name = (user.role.role_name if user.role else '').upper()
 
-                # Role separation checks
-                if login_type == 'institution' and user_role_name == 'STUDENT':
+                    # Role separation checks
+                    if login_type == 'institution' and user_role_name == 'STUDENT':
+                        return Response({
+                            "code": 403,
+                            "message": "Student accounts are not allowed to log in via Institution Login. Please use Student Login."
+                        }, status=status.HTTP_403_FORBIDDEN)
+
+                    if login_type == 'student' and user_role_name and user_role_name != 'STUDENT':
+                        return Response({
+                            "code": 403,
+                            "message": "Only students can log in via Student Login. Please use Institution Login."
+                        }, status=status.HTTP_403_FORBIDDEN)
+
+                    refresh = RefreshToken.for_user(user)
+                    user_data = UserSerializer(user).data
+
+                    # Attach student_id ONLY if user is a student
+                    if user_role_name == 'STUDENT':
+                        student = Student.objects.filter(
+                            Q(roll_number=username_str) |
+                            Q(register_number=username_str) |
+                            Q(application__candidate__phone_number=user.mobile_number) |
+                            Q(application__candidate__email=user.mail)
+                        ).only('id', 'roll_number').first()
+                        if student:
+                            user_data['student_id'] = student.id
+                            user_data['student_roll'] = student.roll_number
+
+                    return Response({
+                        "code": 200,
+                        "message": "Logged in successfully",
+                        "data": {
+                            "access_token": str(refresh.access_token),
+                            "refresh_token": str(refresh),
+                            "user": user_data
+                        }
+                    }, status=status.HTTP_200_OK)
+                else:
+                    # User exists in User model but password failed -> reject immediately
+                    return Response({
+                        "code": 400,
+                        "message": "Invalid password."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+            # 2. Student fallback lookup by Roll Number, Register Number, Email, or Phone Number if User record does NOT exist
+            student_qs = Student.objects.select_related('application', 'application__candidate')
+            student = student_qs.filter(
+                Q(roll_number=username_str) |
+                Q(register_number=username_str) |
+                Q(roll_number__iexact=username_str) |
+                Q(register_number__iexact=username_str) |
+                Q(application__candidate__phone_number=username_str) |
+                Q(application__candidate__email__iexact=username_str)
+            ).first()
+
+            if student:
+                if login_type == 'institution':
                     return Response({
                         "code": 403,
                         "message": "Student accounts are not allowed to log in via Institution Login. Please use Student Login."
                     }, status=status.HTTP_403_FORBIDDEN)
 
-                if login_type == 'student' and user_role_name and user_role_name != 'STUDENT':
-                    return Response({
-                        "code": 403,
-                        "message": "Only students can log in via Student Login. Please use Institution Login."
-                    }, status=status.HTTP_403_FORBIDDEN)
+                # Extract DOB from application form_data or user details
+                app = student.application
+                fd = app.form_data if (app and app.form_data and isinstance(app.form_data, dict)) else {}
+                personal = fd.get('personal_information', {}) if isinstance(fd, dict) else {}
 
-                refresh = RefreshToken.for_user(user)
-                user_data = UserSerializer(user).data
+                dob_val = str(
+                    personal.get('date_of_birth', '') or
+                    personal.get('dob', '') or
+                    personal.get('dateOfBirth', '') or
+                    personal.get('birth_date', '') or
+                    ''
+                ).strip()
 
-                # Attach student_id ONLY if user is a student
-                if user_role_name == 'STUDENT':
-                    student = Student.objects.filter(
-                        Q(roll_number=username_str) |
-                        Q(register_number=username_str) |
-                        Q(user__phone_number=user.mobile_number)
-                    ).only('id', 'roll_number').first()
-                    if student:
-                        user_data['student_id'] = student.id
-                        user_data['student_roll'] = student.roll_number
+                def get_digits(s):
+                    return re.sub(r'\D', '', str(s))
 
-                return Response({
-                    "code": 200,
-                    "message": "Logged in successfully",
-                    "data": {
-                        "access_token": str(refresh.access_token),
-                        "refresh_token": str(refresh),
-                        "user": user_data
-                    }
-                }, status=status.HTTP_200_OK)
-            else:
-                # User exists in User model but password failed -> reject immediately
-                return Response({
-                    "code": 400,
-                    "message": "Invalid password."
-                }, status=status.HTTP_400_BAD_REQUEST)
+                digits_input = get_digits(password_str)
+                digits_dob = get_digits(dob_val)
 
-        # 2. Student fallback lookup by Roll Number, Register Number, or Phone Number if User record does NOT exist
-        import re
+                is_valid_dob = False
+                if digits_input and digits_dob:
+                    if digits_input == digits_dob:
+                        is_valid_dob = True
+                    elif len(digits_input) == 8 and len(digits_dob) == 8:
+                        d_in = digits_input
+                        d_dob = digits_dob
+                        # Compare DDMMYYYY with YYYYMMDD
+                        rev_in = d_in[4:] + d_in[2:4] + d_in[:2]
+                        if rev_in == d_dob or d_in == d_dob[4:] + d_dob[2:4] + d_dob[:2]:
+                            is_valid_dob = True
 
-        student_qs = Student.objects.select_related('user').prefetch_related('user__applications')
-        student = student_qs.filter(
-            Q(roll_number=username_str) |
-            Q(register_number=username_str) |
-            Q(roll_number__iexact=username_str) |
-            Q(register_number__iexact=username_str) |
-            Q(user__phone_number=username_str)
-        ).first()
-
-        if student:
-            if login_type == 'institution':
-                return Response({
-                    "code": 403,
-                    "message": "Student accounts are not allowed to log in via Institution Login. Please use Student Login."
-                }, status=status.HTTP_403_FORBIDDEN)
-
-            # Extract DOB from application form_data or user details
-            app = student.user.applications.all()[0] if (student.user and hasattr(student.user, 'applications') and student.user.applications.all()) else None
-            fd = app.form_data if (app and app.form_data and isinstance(app.form_data, dict)) else {}
-            personal = fd.get('personal_information', {}) if isinstance(fd, dict) else {}
-
-            dob_val = str(
-                personal.get('date_of_birth', '') or
-                personal.get('dob', '') or
-                personal.get('dateOfBirth', '') or
-                personal.get('birth_date', '') or
-                ''
-            ).strip()
-
-            def get_digits(s):
-                return re.sub(r'\D', '', str(s))
-
-            digits_input = get_digits(password_str)
-            digits_dob = get_digits(dob_val)
-
-            is_valid_dob = False
-            if digits_input and digits_dob:
-                if digits_input == digits_dob:
-                    is_valid_dob = True
-                elif len(digits_input) == 8 and len(digits_dob) == 8:
-                    d_in = digits_input
-                    d_dob = digits_dob
-                    # Compare DDMMYYYY with YYYYMMDD
-                    rev_in = d_in[4:] + d_in[2:4] + d_in[:2]
-                    if rev_in == d_dob or d_in == d_dob[4:] + d_dob[2:4] + d_dob[:2]:
+                if not is_valid_dob and dob_val:
+                    if password_str.lower() == dob_val.lower():
                         is_valid_dob = True
 
-            if not is_valid_dob and dob_val:
-                if password_str.lower() == dob_val.lower():
-                    is_valid_dob = True
+                if is_valid_dob:
+                    student_role = Role.objects.filter(role_name='STUDENT').first()
+                    if not student_role:
+                        student_role = Role.objects.create(role_name='STUDENT')
+                    candidate_name = student.user.name if student.user else f"Student {student.roll_number}"
+                    email = student.user.email if (student.user and student.user.email) else f"student_{student.id}@tec.edu"
+                    mobile = student.user.phone_number if (student.user and student.user.phone_number) else "9999999999"
 
-            if is_valid_dob:
-                student_role = Role.objects.filter(role_name='STUDENT').first()
-                if not student_role:
-                    student_role = Role.objects.create(role_name='STUDENT')
-                candidate_name = student.user.name if student.user else f"Student {student.roll_number}"
-                email = student.user.email if student.user else f"student_{student.id}@tec.edu"
-                mobile = student.user.phone_number if (student.user and student.user.phone_number) else "9999999999"
+                    username_key = student.roll_number or student.register_number or f"student_{student.id}"
 
-                username_key = student.roll_number or student.register_number or f"student_{student.id}"
+                    # Lookup user by username or email to avoid duplicate entry
+                    user_obj = User.objects.select_related('role').filter(username=username_key).first()
+                    if not user_obj and email:
+                        user_obj = User.objects.select_related('role').filter(mail__iexact=email).first()
 
-                user_obj = User.objects.select_related('role').filter(username=username_key).first()
-                if not user_obj:
                     hashed_pass = bcrypt.hashpw(password_str.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
                     valid_mobile = mobile if (len(mobile) == 10 and mobile.isdigit()) else "9999999999"
-                    user_obj = User.objects.create(
-                        name=candidate_name,
-                        username=username_key,
-                        password=hashed_pass,
-                        mobile_number=valid_mobile,
-                        mail=email,
-                        role=student_role
-                    )
-                else:
-                    if user_obj.role != student_role:
-                        user_obj.role = student_role
-                        user_obj.save(update_fields=['role'])
 
-                refresh = RefreshToken.for_user(user_obj)
-                user_data = UserSerializer(user_obj).data
-                user_data['student_id'] = student.id
-                user_data['student_roll'] = student.roll_number
+                    if not user_obj:
+                        try:
+                            user_obj = User.objects.create(
+                                name=candidate_name,
+                                username=username_key,
+                                password=hashed_pass,
+                                mobile_number=valid_mobile,
+                                mail=email,
+                                role=student_role
+                            )
+                        except IntegrityError:
+                            # If email is duplicate, find and update that user
+                            existing_user = User.objects.filter(mail__iexact=email).first()
+                            if existing_user:
+                                user_obj = existing_user
+                                user_obj.username = username_key
+                                user_obj.password = hashed_pass
+                                user_obj.role = student_role
+                                user_obj.save(update_fields=['username', 'password', 'role'])
+                            else:
+                                return Response({
+                                    "code": 400,
+                                    "message": "Your email already exists in the system or you don't have access to login. Please contact Technical Support."
+                                }, status=status.HTTP_400_BAD_REQUEST)
+                    else:
+                        fields_to_update = []
+                        if user_obj.role != student_role:
+                            user_obj.role = student_role
+                            fields_to_update.append('role')
+                        if user_obj.username != username_key and not User.objects.filter(username=username_key).exclude(pk=user_obj.pk).exists():
+                            user_obj.username = username_key
+                            fields_to_update.append('username')
+                        # Sync password with latest successful DOB login
+                        user_obj.password = hashed_pass
+                        fields_to_update.append('password')
+                        if fields_to_update:
+                            user_obj.save(update_fields=fields_to_update)
 
-                return Response({
-                    "code": 200,
-                    "message": "Logged in successfully",
-                    "data": {
-                        "access_token": str(refresh.access_token),
-                        "refresh_token": str(refresh),
-                        "user": user_data
-                    }
-                }, status=status.HTTP_200_OK)
+                    refresh = RefreshToken.for_user(user_obj)
+                    user_data = UserSerializer(user_obj).data
+                    user_data['student_id'] = student.id
+                    user_data['student_roll'] = student.roll_number
 
-        return Response({
-            "code": 400,
-            "message": "Invalid username or password."
-        }, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({
+                        "code": 200,
+                        "message": "Logged in successfully",
+                        "data": {
+                            "access_token": str(refresh.access_token),
+                            "refresh_token": str(refresh),
+                            "user": user_data
+                        }
+                    }, status=status.HTTP_200_OK)
+
+            return Response({
+                "code": 400,
+                "message": "Invalid username or password."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        except IntegrityError:
+            return Response({
+                "code": 400,
+                "message": "Your email already exists in the system or you don't have access to login. Please contact Technical Support."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                "code": 400,
+                "message": f"Unable to process login: {str(e)}. If this persists, please contact Technical Support."
+            }, status=status.HTTP_400_BAD_REQUEST)
 
     def change_password(self, request, *args, **kwargs):
         old_password = request.data.get('old_password')

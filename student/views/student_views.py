@@ -666,6 +666,279 @@ class StudentViewSet(viewsets.ModelViewSet):
                 "errors": serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
 
+    @action(detail=True, methods=['put', 'post', 'patch'], url_path='full-profile-edit')
+    def full_profile_update(self, request, pk=None, *args, **kwargs):
+        """
+        Comprehensive Student Full Profile Update API.
+        Updates all aspects of a student:
+        - Student model: roll_number, register_number, department, batch, section, quota, status, lab_batch, is_hostler, hostel_building_type, hostel_room_number, is_day_scholar, is_bus, bus, route, stop
+        - Candidate / User (ApplicationUser): name, email, phone_number
+        - Application form_data JSON: personal_information, parent_information, etc.
+        - StudentAdmissionSlip: aadhaar_number, emis_number, umis_number, qualification, community, mode_of_admission, recommendation, marks_maths, marks_physics, marks_chemistry, marks_total, marks_percentage
+        """
+        try:
+            student = Student.objects.select_related(
+                'application', 'application__candidate', 'admission_slip', 'department', 'batch', 'section', 'quota', 'status'
+            ).get(pk=pk)
+        except Student.DoesNotExist:
+            return Response({"code": 404, "message": "Student not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data
+        user = self.request.user if self.request.user and self.request.user.is_authenticated else None
+        from users.models import User as StandardUser
+        tracking_user = user if isinstance(user, StandardUser) else None
+
+        # 1. Validation for unique fields
+        roll_num = data.get('roll_number')
+        if roll_num is not None:
+            roll_num = str(roll_num).strip() or None
+            if roll_num:
+                if Student.objects.filter(roll_number__iexact=roll_num).exclude(pk=student.pk).exists():
+                    return Response({
+                        "code": 400,
+                        "message": f"Roll number '{roll_num}' is already assigned to another student."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+        reg_num = data.get('register_number')
+        if reg_num is not None:
+            reg_num = str(reg_num).strip() or None
+            if reg_num:
+                if Student.objects.filter(register_number__iexact=reg_num).exclude(pk=student.pk).exists():
+                    return Response({
+                        "code": 400,
+                        "message": f"Register number '{reg_num}' is already assigned to another student."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+        email = data.get('email')
+        if email:
+            email = str(email).strip().lower()
+            try:
+                validate_email(email)
+            except DjangoValidationError:
+                return Response({
+                    "code": 400,
+                    "message": "Please enter a valid email address."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        phone = data.get('phone') or data.get('phone_number') or data.get('mobile_number')
+        if phone:
+            phone = str(phone).strip()
+            if not re.match(r'^\d{10}$', phone):
+                return Response({
+                    "code": 400,
+                    "message": "Student phone number must be exactly 10 digits."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        parent_phone = data.get('parent_phone') or data.get('parent_mobile')
+        if parent_phone:
+            parent_phone = str(parent_phone).strip()
+            if parent_phone and not re.match(r'^\d{10}$', parent_phone):
+                return Response({
+                    "code": 400,
+                    "message": "Parent phone number must be exactly 10 digits."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            # ── A. Update Student model ──
+            if roll_num is not None:
+                student.roll_number = roll_num
+            if reg_num is not None:
+                student.register_number = reg_num
+
+            if 'department_id' in data and data['department_id']:
+                student.department_id = int(data['department_id'])
+            if 'batch_id' in data and data['batch_id']:
+                student.batch_id = int(data['batch_id'])
+            if 'section_id' in data:
+                student.section_id = int(data['section_id']) if data['section_id'] else None
+            if 'quota_id' in data:
+                student.quota_id = int(data['quota_id']) if data['quota_id'] else None
+            if 'status_id' in data and data['status_id']:
+                student.status_id = int(data['status_id'])
+            if 'lab_batch' in data:
+                student.lab_batch = str(data['lab_batch']).strip() if data['lab_batch'] else None
+
+            # Accommodation
+            is_hostler = data.get('is_hostler')
+            if is_hostler is not None:
+                student.is_hostler = bool(is_hostler)
+                if student.is_hostler:
+                    student.is_day_scholar = False
+                    student.hostel_building_type = data.get('hostel_building_type') or None
+                    student.hostel_room_number = str(data.get('hostel_room_number', '')).strip() or None
+                else:
+                    student.hostel_building_type = None
+                    student.hostel_room_number = None
+
+            is_day_scholar = data.get('is_day_scholar')
+            if is_day_scholar is not None and bool(is_day_scholar):
+                student.is_day_scholar = True
+                student.is_hostler = False
+                student.hostel_building_type = None
+                student.hostel_room_number = None
+
+            # Transport
+            is_bus = data.get('is_bus')
+            if is_bus is not None:
+                student.is_bus = bool(is_bus)
+                if student.is_bus:
+                    student.bus_id = int(data['bus_id']) if data.get('bus_id') else None
+                    student.route_id = int(data['route_id']) if data.get('route_id') else None
+                    student.stop_id = int(data['stop_id']) if data.get('stop_id') else None
+                else:
+                    student.bus_id = None
+                    student.route_id = None
+                    student.stop_id = None
+
+            student.updated_by = tracking_user
+            student.save()
+
+            # ── B. Update Candidate (ApplicationUser) & Application form_data ──
+            app = student.application
+            if app:
+                cand = app.candidate
+                if cand:
+                    if 'name' in data and data['name']:
+                        cand.name = str(data['name']).strip()
+                    if email:
+                        from dynamic_forms.models import ApplicationUser
+                        if not ApplicationUser.objects.filter(email__iexact=email).exclude(pk=cand.pk).exists():
+                            cand.email = email
+                    if phone:
+                        cand.phone_number = phone
+                    cand.updated_by = tracking_user
+                    cand.save()
+
+                # Update nested form_data
+                fd = dict(app.form_data) if (app.form_data and isinstance(app.form_data, dict)) else {}
+                personal = dict(fd.get('personal_information', {})) if isinstance(fd.get('personal_information'), dict) else {}
+                parent = dict(fd.get('parent_information', {})) if isinstance(fd.get('parent_information'), dict) else {}
+
+                if 'name' in data and data['name']:
+                    personal['applicant_name'] = str(data['name']).strip()
+                if email:
+                    personal['email'] = email
+                if phone:
+                    personal['student_mobile'] = phone
+                if 'gender' in data and data['gender']:
+                    personal['gender'] = data['gender']
+                if 'dob' in data and data['dob']:
+                    personal['date_of_birth'] = data['dob']
+                    personal['dob'] = data['dob']
+                if 'community' in data and data['community']:
+                    personal['community'] = data['community']
+                if 'aadhaar_number' in data:
+                    personal['aadhaar_number'] = str(data['aadhaar_number']).strip()
+                if 'district' in data:
+                    personal['district'] = str(data['district']).strip()
+                    fd['district'] = str(data['district']).strip()
+
+                if 'parent_name' in data:
+                    parent['parent_name'] = str(data['parent_name']).strip()
+                    parent['father_name'] = str(data['parent_name']).strip()
+                if 'mother_name' in data:
+                    parent['mother_name'] = str(data['mother_name']).strip()
+                if parent_phone:
+                    parent['parent_mobile'] = parent_phone
+                    parent['father_mobile'] = parent_phone
+                if 'district' in data:
+                    parent['district'] = str(data['district']).strip()
+                if 'pincode' in data:
+                    parent['pincode'] = str(data['pincode']).strip()
+                if 'address' in data:
+                    parent['address'] = str(data['address']).strip()
+                    parent['communication_address'] = str(data['address']).strip()
+
+                fd['personal_information'] = personal
+                fd['parent_information'] = parent
+                app.form_data = fd
+                app.updated_by = tracking_user
+                app.save()
+
+            # ── C. Update StudentAdmissionSlip ──
+            admission_slip, _ = StudentAdmissionSlip.objects.get_or_create(student=student)
+            if 'aadhaar_number' in data:
+                admission_slip.aadhaar_number = str(data['aadhaar_number']).strip() or None
+            if 'emis_number' in data:
+                admission_slip.emis_number = str(data['emis_number']).strip() or None
+            if 'umis_number' in data:
+                admission_slip.umis_number = str(data['umis_number']).strip() or None
+            if 'qualification' in data:
+                admission_slip.qualification = str(data['qualification']).strip() or None
+            if 'community' in data:
+                admission_slip.community = str(data['community']).strip() or None
+            if 'mode_of_admission' in data:
+                admission_slip.mode_of_admission = str(data['mode_of_admission']).strip() or 'Regular Entry'
+            if 'recommendation_id' in data:
+                admission_slip.recommendation_id = int(data['recommendation_id']) if data['recommendation_id'] else None
+
+            # Qualifying Marks
+            m_maths = data.get('marks_maths')
+            m_physics = data.get('marks_physics')
+            m_chemistry = data.get('marks_chemistry')
+
+            if m_maths is not None and str(m_maths).strip() != '':
+                admission_slip.marks_maths = int(float(m_maths))
+            elif 'marks_maths' in data and (m_maths is None or str(m_maths).strip() == ''):
+                admission_slip.marks_maths = None
+
+            if m_physics is not None and str(m_physics).strip() != '':
+                admission_slip.marks_physics = int(float(m_physics))
+            elif 'marks_physics' in data and (m_physics is None or str(m_physics).strip() == ''):
+                admission_slip.marks_physics = None
+
+            if m_chemistry is not None and str(m_chemistry).strip() != '':
+                admission_slip.marks_chemistry = int(float(m_chemistry))
+            elif 'marks_chemistry' in data and (m_chemistry is None or str(m_chemistry).strip() == ''):
+                admission_slip.marks_chemistry = None
+
+            # Calculate or set total & percentage
+            if 'marks_total' in data and data['marks_total'] is not None and str(data['marks_total']).strip() != '':
+                admission_slip.marks_total = int(float(data['marks_total']))
+            elif admission_slip.marks_maths is not None or admission_slip.marks_physics is not None or admission_slip.marks_chemistry is not None:
+                admission_slip.marks_total = (admission_slip.marks_maths or 0) + (admission_slip.marks_physics or 0) + (admission_slip.marks_chemistry or 0)
+
+            if 'marks_percentage' in data and data['marks_percentage'] is not None and str(data['marks_percentage']).strip() != '':
+                admission_slip.marks_percentage = float(data['marks_percentage'])
+
+            admission_slip.updated_by = tracking_user
+            admission_slip.save()
+
+            # ── D. Sync User account if exists for login ──
+            try:
+                from users.models import User as AuthUser
+                auth_user = None
+                if student.roll_number:
+                    auth_user = AuthUser.objects.filter(username__iexact=student.roll_number).first()
+                if not auth_user and email:
+                    auth_user = AuthUser.objects.filter(mail__iexact=email).first()
+                if auth_user:
+                    if 'name' in data and data['name']:
+                        auth_user.name = str(data['name']).strip()
+                    if email and not AuthUser.objects.filter(mail__iexact=email).exclude(pk=auth_user.pk).exists():
+                        auth_user.mail = email
+                    if phone and re.match(r'^\d{10}$', phone):
+                        auth_user.mobile_number = phone
+                    if student.roll_number:
+                        auth_user.username = student.roll_number
+                    auth_user.updated_by = tracking_user
+                    auth_user.save()
+            except Exception as e:
+                logger.warning(f"Failed to sync AuthUser for student {student.id}: {e}")
+
+        # Broadcast real-time update
+        self._broadcast_change(student, 'student_updated')
+
+        return Response({
+            "code": 200,
+            "message": "Student complete profile updated successfully",
+            "data": {
+                "id": student.id,
+                "roll_number": student.roll_number,
+                "register_number": student.register_number,
+            }
+        }, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=['get'], url_path='comprehensive-view')
     def comprehensive_view(self, request, *args, **kwargs):
         """
@@ -967,39 +1240,263 @@ class StudentViewSet(viewsets.ModelViewSet):
             'fees': fees_data,
         }
 
-        # ── 2. Academic Marks ──────────────────────────────────────────────────
-        from ..models import Marks
+        # ── 2. Academic Marks & Anna University GPA / CGPA Calculation ────────
+        from ..models import Marks, GradeSystem
+        import re
+
+        grade_systems = list(GradeSystem.objects.filter(is_active=True).order_by('-points'))
         marks_qs = Marks.objects.filter(student=student).select_related(
-            'exam', 'subject', 'subject__semester'
+            'exam', 'exam__exam_type', 'subject', 'subject__semester'
         )
 
-        def resolve_sem_label(sem_obj):
-            if not sem_obj:
-                return "Semester 1"
-            if hasattr(sem_obj, 'semester_name') and sem_obj.semester_name:
-                return f"Semester {sem_obj.semester_name}"
-            if hasattr(sem_obj, 'id') and sem_obj.id:
-                return f"Semester {sem_obj.id}"
-            return "Semester 1"
+        def extract_sem_num(subject_obj):
+            if not subject_obj:
+                return 1
+            if hasattr(subject_obj, 'semester_id') and subject_obj.semester_id:
+                try:
+                    return int(subject_obj.semester_id)
+                except (ValueError, TypeError):
+                    pass
+            sem_obj = getattr(subject_obj, 'semester', None) if hasattr(subject_obj, 'semester') else subject_obj
+            if sem_obj and hasattr(sem_obj, 'id') and sem_obj.id:
+                try:
+                    return int(sem_obj.id)
+                except (ValueError, TypeError):
+                    pass
+            code = getattr(subject_obj, 'subject_code', '') or ''
+            m = re.search(r'^[A-Za-z]+(\d)(\d)', code)
+            if m:
+                try:
+                    return int(m.group(2))
+                except (ValueError, TypeError):
+                    pass
+            return 1
+
+        def resolve_sem_label(subject_obj):
+            sem_num = extract_sem_num(subject_obj)
+            return f"Semester {sem_num}"
+
+        def get_grade_point_and_pass(val):
+            if val is None or str(val).strip() == '':
+                return 0.0, False, '—'
+            str_val = str(val).strip().upper()
+            
+            # 1. Match by Letter Grade in GradeSystem table (e.g. O, A+, A, B+, B, C, U, RA, UA, AB)
+            for g in grade_systems:
+                if g.grade.strip().upper() == str_val:
+                    return float(g.points), bool(g.is_pass), g.grade
+            
+            # 2. Match by Numeric Mark range in GradeSystem table
+            try:
+                num = float(str_val)
+                for g in grade_systems:
+                    if g.min_mark is not None and g.max_mark is not None:
+                        if float(g.min_mark) <= num <= float(g.max_mark):
+                            return float(g.points), bool(g.is_pass), g.grade
+            except ValueError:
+                pass
+            
+            # 3. If not matched in GradeSystem, return 0.0 points and fail status
+            is_absent = str_val in ['AB', 'ABSENT', 'UA', 'W']
+            return 0.0, False, str_val
 
         marks_list = []
+        univ_marks_by_sem = {}  # { sem_num: [ { mark_info } ] }
+        all_univ_subject_attempts = {}  # { subject_key: [ { sem_num, credits, gp, is_pass, mark } ] }
+        history_arrears_count = 0
+
         for m in marks_qs:
-            sem_name = resolve_sem_label(m.subject.semester) if (m.subject and m.subject.semester) else "Semester 1"
+            sem_num = extract_sem_num(m.subject) if m.subject else 1
+            sem_name = resolve_sem_label(m.subject) if m.subject else f"Semester {sem_num}"
+            
             exam_type_label = 'CIA'
-            if m.exam and m.exam.exam_type:
-                exam_type_label = getattr(m.exam.exam_type, 'exam_type_name', str(m.exam.exam_type))
-            marks_list.append({
+            is_univ_exam = False
+            if m.exam:
+                if m.exam.exam_type:
+                    exam_type_label = getattr(m.exam.exam_type, 'exam_type_name', str(m.exam.exam_type))
+                else:
+                    exam_type_label = m.exam.exam_name or 'Internal'
+            
+            type_str = str(exam_type_label).lower()
+            if 'university' in type_str or 'external' in type_str or 'end sem' in type_str or 'semester exam' in type_str:
+                is_univ_exam = True
+
+            credits_val = float(m.subject.credits) if (m.subject and m.subject.credits is not None) else 0.0
+            course_type_val = m.subject.course_type if m.subject else ''
+            gp, is_pass_val, grade_letter = get_grade_point_and_pass(m.marks_obtained)
+            credit_points = round(credits_val * gp, 2)
+
+            mark_record = {
                 'id': m.id,
                 'exam_id': m.exam_id,
                 'exam_name': m.exam.exam_name if m.exam else '',
                 'exam_type': exam_type_label,
+                'is_university_exam': is_univ_exam,
                 'subject_id': m.subject_id,
                 'subject_code': m.subject.subject_code if m.subject else '',
                 'subject_name': m.subject.subject_name if m.subject else '',
                 'subject_category': m.subject_category or 'THEORY',
+                'credits': credits_val,
+                'course_type': course_type_val,
                 'semester_name': sem_name,
+                'semester_num': sem_num,
                 'marks_obtained': m.marks_obtained,
-            })
+                'grade_point': gp,
+                'is_pass': is_pass_val,
+                'grade_letter': grade_letter,
+                'credit_points': credit_points,
+            }
+            marks_list.append(mark_record)
+
+            # Accumulate university examination entries for GPA / CGPA computation
+            if is_univ_exam:
+                if not is_pass_val and m.marks_obtained:
+                    history_arrears_count += 1
+
+                if sem_num not in univ_marks_by_sem:
+                    univ_marks_by_sem[sem_num] = []
+                univ_marks_by_sem[sem_num].append(mark_record)
+
+                subj_key = f"{m.subject_id}_{m.subject_category or 'THEORY'}"
+                if subj_key not in all_univ_subject_attempts:
+                    all_univ_subject_attempts[subj_key] = []
+                all_univ_subject_attempts[subj_key].append(mark_record)
+
+        # ── Process Chronological Attempts & Standing Arrears Tracker ──────────
+        standing_arrears_list = []
+        for subj_key, attempts in all_univ_subject_attempts.items():
+            origin_sem = attempts[0]['semester_num'] if attempts else 1
+            for idx, att in enumerate(attempts):
+                att_num = idx + 1
+                app_sem = min(8, origin_sem + idx)
+                att['origin_sem_num'] = origin_sem
+                att['origin_semester'] = f"Semester {origin_sem}"
+                att['attempt_count'] = att_num
+                att['appearance_sem_num'] = app_sem
+                att['appearance_semester'] = f"Semester {app_sem}"
+                att['is_arrear_appearance'] = (att_num > 1)
+
+            latest_att = attempts[-1]
+            if not latest_att['is_pass']:
+                standing_arrears_list.append({
+                    'subject_id': latest_att['subject_id'],
+                    'subject_code': latest_att['subject_code'],
+                    'subject_name': latest_att['subject_name'],
+                    'subject_category': latest_att['subject_category'],
+                    'origin_sem_num': origin_sem,
+                    'origin_semester': f"Semester {origin_sem}",
+                    'latest_attempt_count': len(attempts),
+                    'latest_grade': latest_att['marks_obtained'],
+                    'credits': latest_att['credits'],
+                    'next_appearance_sem': min(8, latest_att.get('appearance_sem_num', origin_sem) + 1),
+                })
+
+        # ── Calculate Anna University GPA & CGPA for Semesters 1 to 8 ──────────
+        semester_performance_map = {}
+        for s_idx in range(1, 9):
+            s_marks = univ_marks_by_sem.get(s_idx, [])
+            
+            # Deduplicate by unique subject for that semester (latest attempt)
+            unique_sem_subjects = {}
+            for rec in s_marks:
+                skey = f"{rec['subject_id']}_{rec['subject_category']}"
+                unique_sem_subjects[skey] = rec
+
+            sem_total_credits = 0.0
+            sem_earned_credits = 0.0
+            sem_credit_points = 0.0
+            sem_has_arrear = False
+
+            for rec in unique_sem_subjects.values():
+                c = rec['credits']
+                gp = rec['grade_point']
+                if c > 0:
+                    sem_total_credits += c
+                    sem_credit_points += (c * gp)
+                    if rec['is_pass']:
+                        sem_earned_credits += c
+                    else:
+                        sem_has_arrear = True
+                elif not rec['is_pass']:
+                    sem_has_arrear = True
+
+            gpa = round(sem_credit_points / sem_earned_credits, 2) if sem_earned_credits > 0 else 0.00
+
+            # Cumulative CGPA up to Semester s_idx:
+            # Considers all university subjects registered from Sem 1 up to Sem s_idx
+            # For subjects with multiple attempts up to Sem s_idx, take the latest attempt
+            cum_subjects = {}
+            for past_sem in range(1, s_idx + 1):
+                for rec in univ_marks_by_sem.get(past_sem, []):
+                    skey = f"{rec['subject_id']}_{rec['subject_category']}"
+                    cum_subjects[skey] = rec  # overwrites with latest attempt up to past_sem
+
+            cum_total_credits = 0.0
+            cum_earned_credits = 0.0
+            cum_credit_points = 0.0
+            for s_entry in cum_subjects.values():
+                c = s_entry['credits']
+                gp = s_entry['grade_point']
+                if c > 0:
+                    cum_total_credits += c
+                    cum_credit_points += (c * gp)
+                    if s_entry['is_pass']:
+                        cum_earned_credits += c
+
+            cgpa_up_to_sem = round(cum_credit_points / cum_earned_credits, 2) if (cum_earned_credits > 0 and len(unique_sem_subjects) > 0) else 0.00
+
+            semester_performance_map[s_idx] = {
+                'semester_num': s_idx,
+                'semester_name': f"Semester {s_idx}",
+                'gpa': gpa,
+                'cgpa': cgpa_up_to_sem,
+                'total_credits': sem_total_credits,
+                'earned_credits': sem_earned_credits,
+                'credit_points': round(sem_credit_points, 2),
+                'cumulative_credits': cum_total_credits,
+                'cumulative_earned_credits': cum_earned_credits,
+                'has_arrear': sem_has_arrear,
+                'subject_count': len(unique_sem_subjects),
+                'has_records': len(unique_sem_subjects) > 0,
+            }
+
+        # Overall Latest Cumulative CGPA & Standing Arrears Count
+        overall_unique_subjects = {}
+        for s_idx in range(1, 9):
+            for rec in univ_marks_by_sem.get(s_idx, []):
+                skey = f"{rec['subject_id']}_{rec['subject_category']}"
+                overall_unique_subjects[skey] = rec
+
+        tot_reg_credits = 0.0
+        tot_earned_credits = 0.0
+        tot_cum_points = 0.0
+        standing_arrears_count = 0
+
+        for rec in overall_unique_subjects.values():
+            c = rec['credits']
+            gp = rec['grade_point']
+            if c > 0:
+                tot_reg_credits += c
+                tot_cum_points += (c * gp)
+                if rec['is_pass']:
+                    tot_earned_credits += c
+                else:
+                    standing_arrears_count += 1
+            else:
+                if not rec['is_pass']:
+                    standing_arrears_count += 1
+
+        overall_cgpa = round(tot_cum_points / tot_earned_credits, 2) if tot_earned_credits > 0 else 0.00
+
+        academics_summary = {
+            'overall_cgpa': overall_cgpa,
+            'total_credits_registered': tot_reg_credits,
+            'total_credits_earned': tot_earned_credits,
+            'standing_arrears': standing_arrears_count,
+            'history_arrears': history_arrears_count,
+            'standing_arrears_list': standing_arrears_list,
+            'semesters': semester_performance_map,
+        }
 
         # ── 3. Attendance Percentage (Subject-wise & Overall) ─────────────────
         from ..models import StudentAttendance
@@ -1099,6 +1596,7 @@ class StudentViewSet(viewsets.ModelViewSet):
             "data": {
                 "profile": profile_data,
                 "marks": marks_list,
+                "academics": academics_summary,
                 "counselling": counselling_list,
                 "attendance": {
                     "overall": {

@@ -40,6 +40,7 @@ urlpatterns = [
     path('api/asset-maintenance/', include('asset.maintenance_urls')),
     path('api/asset-disposals/', include('asset.disposal_urls')),
     path('api/research/', include('research.urls')),
+    path('api/placement/', include('placement.urls')),
     path('api/infrastructure/', include('infrastructure.urls')),
     path('api/university-exam/', include('university_exam.urls')),
     path('api/documents/upload', DocumentUploadView.as_view(), name='document-upload'),

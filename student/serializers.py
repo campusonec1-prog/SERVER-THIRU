@@ -430,12 +430,43 @@ class MarksSerializer(serializers.ModelSerializer):
         exam = instance.exam
         if exam:
             ret['exam_name'] = exam.exam_name
+            if exam.exam_type:
+                exam_type_str = getattr(exam.exam_type, 'exam_type_name', str(exam.exam_type))
+            else:
+                exam_type_str = exam.exam_name or 'Internal'
+            ret['exam_type'] = exam_type_str
+            t_lower = str(exam_type_str).lower()
+            ret['is_university_exam'] = ('university' in t_lower or 'external' in t_lower or 'end sem' in t_lower or 'semester exam' in t_lower)
             
         subject = instance.subject
         if subject:
             ret['subject_name'] = subject.subject_name
             ret['subject_code'] = subject.subject_code
-            ret['semester_id'] = subject.semester.id if subject.semester else None
+            ret['credits'] = float(subject.credits) if subject.credits is not None else 0.0
+            ret['course_type'] = subject.course_type or ''
+            
+            sem_num = 1
+            if hasattr(subject, 'semester_id') and subject.semester_id:
+                try:
+                    sem_num = int(subject.semester_id)
+                except (ValueError, TypeError):
+                    pass
+            elif subject.semester and hasattr(subject.semester, 'id') and subject.semester.id:
+                try:
+                    sem_num = int(subject.semester.id)
+                except (ValueError, TypeError):
+                    pass
+            elif subject.subject_code:
+                import re
+                m_code = re.search(r'^[A-Za-z]+(\d)(\d)', subject.subject_code)
+                if m_code:
+                    try:
+                        sem_num = int(m_code.group(2))
+                    except (ValueError, TypeError):
+                        pass
+            ret['semester_num'] = sem_num
+            ret['semester_name'] = f"Semester {sem_num}"
+            ret['semester_id'] = subject.semester.id if subject.semester else sem_num
             
         if instance.created_by:
             ret['entered_by_name'] = instance.created_by.name
