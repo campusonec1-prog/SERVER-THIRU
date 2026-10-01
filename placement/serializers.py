@@ -5,9 +5,12 @@ from .models import (
     PlacementCompany,
     PlacementDrive,
     PlacementDriveEligibility,
+    StudentPlacementTracking,
     IndustryChoices,
     DriveTypeChoices,
-    DriveStatusChoices
+    DriveStatusChoices,
+    AttendanceStatusChoices,
+    PlacementOutcomeChoices
 )
 
 
@@ -123,6 +126,8 @@ class PlacementDriveSerializer(serializers.ModelSerializer):
             'job_description',
             'location',
             'ctc',
+            'no_of_rounds',
+            'rounds',
             'application_start_date',
             'application_end_date',
             'drive_date',
@@ -172,6 +177,26 @@ class PlacementDriveSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 "drive_date": "Drive date cannot be earlier than application start date."
             })
+
+        # Process rounds JSON
+        rounds_val = attrs.get('rounds')
+        if rounds_val is not None:
+            if isinstance(rounds_val, str):
+                import json
+                try:
+                    rounds_val = json.loads(rounds_val)
+                    attrs['rounds'] = rounds_val
+                except Exception:
+                    pass
+            if isinstance(rounds_val, list):
+                cleaned_rounds = [
+                    r.strip() if isinstance(r, str) else r
+                    for r in rounds_val
+                    if r is not None and (not isinstance(r, str) or r.strip())
+                ]
+                attrs['rounds'] = cleaned_rounds
+                if 'no_of_rounds' not in attrs or attrs.get('no_of_rounds') is None:
+                    attrs['no_of_rounds'] = len(cleaned_rounds)
 
         return attrs
 
@@ -254,3 +279,92 @@ class PlacementDriveEligibilitySerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError("Max backlogs cannot be negative.")
         return value
+
+
+class StudentPlacementTrackingSerializer(serializers.ModelSerializer):
+    student_details = serializers.SerializerMethodField(read_only=True)
+    drive_details = PlacementDriveSerializer(source='drive', read_only=True)
+    attendance_status_display = serializers.CharField(source='get_attendance_status_display', read_only=True)
+    final_status_display = serializers.CharField(source='get_final_status_display', read_only=True)
+    created_by_name = serializers.SerializerMethodField(read_only=True)
+    updated_by_name = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = StudentPlacementTracking
+        fields = [
+            'id',
+            'student',
+            'student_details',
+            'drive',
+            'drive_details',
+            'attendance_status',
+            'attendance_status_display',
+            'cleared_rounds',
+            'final_status',
+            'final_status_display',
+            'remarks',
+            'created_at',
+            'updated_at',
+            'created_by',
+            'created_by_name',
+            'updated_by',
+            'updated_by_name',
+        ]
+        read_only_fields = [
+            'id',
+            'created_at',
+            'updated_at',
+            'created_by',
+            'updated_by',
+            'student_details',
+            'drive_details',
+            'attendance_status_display',
+            'final_status_display'
+        ]
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.name or obj.created_by.username
+        return None
+
+    def get_updated_by_name(self, obj):
+        if obj.updated_by:
+            return obj.updated_by.name or obj.updated_by.username
+        return None
+
+    def get_student_details(self, obj):
+        if not obj.student:
+            return None
+        st = obj.student
+        app = st.application
+        cand = app.candidate if app else None
+        name = cand.name if cand else None
+        if not name and app and app.form_data:
+            fd = app.form_data
+            pd = fd.get('personal_details', {}) if isinstance(fd, dict) else {}
+            name = pd.get('candidate_name') or pd.get('name') or (fd.get('name') if isinstance(fd, dict) else None)
+
+        return {
+            'id': st.id,
+            'name': name or f"Student #{st.id}",
+            'roll_number': st.roll_number,
+            'register_number': st.register_number,
+            'email': cand.email if cand else None,
+            'department_name': st.department.department_name if st.department else None,
+            'batch_name': st.batch.batch if st.batch else None,
+        }
+
+    def validate(self, attrs):
+        rounds_val = attrs.get('cleared_rounds')
+        if rounds_val is not None:
+            if isinstance(rounds_val, str):
+                import json
+                try:
+                    rounds_val = json.loads(rounds_val)
+                    attrs['cleared_rounds'] = rounds_val
+                except Exception:
+                    pass
+            if not isinstance(rounds_val, list):
+                attrs['cleared_rounds'] = []
+        return attrs
+

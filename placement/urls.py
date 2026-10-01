@@ -2,7 +2,8 @@ from django.urls import path
 from .views import (
     PlacementCompanyViewSet,
     PlacementDriveViewSet,
-    PlacementDriveEligibilityViewSet
+    PlacementDriveEligibilityViewSet,
+    StudentPlacementTrackingViewSet
 )
 
 urlpatterns = [
@@ -49,5 +50,20 @@ urlpatterns = [
     path('eligibility/by-drive/<int:drive_id>', PlacementDriveEligibilityViewSet.as_view({'get': 'by_drive'}), name='placement-eligibility-by-drive'),
     path('eligibility/eligible-students/<int:pk>', PlacementDriveEligibilityViewSet.as_view({'get': 'eligible_students'}), name='placement-eligibility-eligible-students'),
     path('eligibility/<int:pk>/eligible-students', PlacementDriveEligibilityViewSet.as_view({'get': 'eligible_students'})),
+    path('eligibility/<int:pk>/remove-student', PlacementDriveEligibilityViewSet.as_view({'post': 'remove_ineligible_student'}), name='placement-eligibility-remove-student'),
+    path('eligibility/remove-student/<int:pk>', PlacementDriveEligibilityViewSet.as_view({'post': 'remove_ineligible_student'})),
+
+    # ── PLACEMENT STUDENT TRACKING ──
+    path('tracking/list', StudentPlacementTrackingViewSet.as_view({'get': 'list'}), name='placement-tracking-list'),
+    path('tracking/create', StudentPlacementTrackingViewSet.as_view({'post': 'create'}), name='placement-tracking-create'),
+    path('tracking/search-student', StudentPlacementTrackingViewSet.as_view({'get': 'search_student'}), name='placement-tracking-search-student'),
+    path('tracking/get/<int:pk>', StudentPlacementTrackingViewSet.as_view({'get': 'retrieve'}), name='placement-tracking-get'),
+    path('tracking/edit/<int:pk>', StudentPlacementTrackingViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='placement-tracking-edit'),
+    path('tracking/remove/<int:pk>', StudentPlacementTrackingViewSet.as_view({'delete': 'destroy'}), name='placement-tracking-remove'),
+    path('tracking/upsert', StudentPlacementTrackingViewSet.as_view({'post': 'upsert'}), name='placement-tracking-upsert'),
+    path('tracking/by-drive/<int:drive_id>', StudentPlacementTrackingViewSet.as_view({'get': 'by_drive'}), name='placement-tracking-by-drive'),
+    path('tracking/attendance-choices', StudentPlacementTrackingViewSet.as_view({'get': 'attendance_choices'}), name='placement-tracking-attendance-choices'),
+    path('tracking/outcome-choices', StudentPlacementTrackingViewSet.as_view({'get': 'outcome_choices'}), name='placement-tracking-outcome-choices'),
 ]
+
 

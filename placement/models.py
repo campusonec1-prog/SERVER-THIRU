@@ -96,6 +96,20 @@ class PlacementDrive(TrackingModel):
         help_text="e.g., 6.5 LPA, 30,000 / month, Best in Industry"
     )
 
+    # Selection Process & Rounds
+    no_of_rounds = models.PositiveIntegerField(
+        default=1,
+        blank=True,
+        null=True,
+        help_text="Number of selection rounds"
+    )
+    rounds = models.JSONField(
+        default=list,
+        blank=True,
+        null=True,
+        help_text="List of selection round names stored in JSON format"
+    )
+
     # Key Recruitment Dates
     application_start_date = models.DateField(db_index=True)
     application_end_date = models.DateField(db_index=True)
@@ -136,6 +150,19 @@ class PlacementDrive(TrackingModel):
         return f"{self.job_role} - {self.company.company_name} ({self.get_status_display()})"
 
 
+class AttendanceStatusChoices(models.TextChoices):
+    PENDING = 'PENDING', 'Pending'
+    PRESENT = 'PRESENT', 'Present'
+    ABSENT = 'ABSENT', 'Absent'
+
+
+class PlacementOutcomeChoices(models.TextChoices):
+    IN_PROGRESS = 'IN_PROGRESS', 'In Progress'
+    SELECTED = 'SELECTED', 'Selected'
+    REJECTED = 'REJECTED', 'Rejected'
+    NOT_ATTENDED = 'NOT_ATTENDED', 'Not Attended'
+
+
 class PlacementDriveEligibility(TrackingModel):
     drive = models.ForeignKey(
         PlacementDrive,
@@ -163,6 +190,11 @@ class PlacementDriveEligibility(TrackingModel):
         related_name='placement_eligibilities',
         blank=True
     )
+    excluded_students = models.ManyToManyField(
+        'student.Student',
+        related_name='excluded_placement_eligibilities',
+        blank=True
+    )
 
     class Meta:
         db_table = 'placement_drive_eligibility'
@@ -174,3 +206,56 @@ class PlacementDriveEligibility(TrackingModel):
 
     def __str__(self):
         return f"Eligibility for {self.drive.job_role} - {self.drive.company.company_name} (Min CGPA: {self.minimum_cgpa}, Max Backlogs: {self.max_backlogs})"
+
+
+class StudentPlacementTracking(TrackingModel):
+    student = models.ForeignKey(
+        'student.Student',
+        on_delete=models.CASCADE,
+        related_name='placement_trackings',
+        db_column='student_id'
+    )
+    drive = models.ForeignKey(
+        PlacementDrive,
+        on_delete=models.CASCADE,
+        related_name='student_trackings',
+        db_column='drive_id'
+    )
+    attendance_status = models.CharField(
+        max_length=20,
+        choices=AttendanceStatusChoices.choices,
+        default=AttendanceStatusChoices.PENDING,
+        db_index=True
+    )
+    cleared_rounds = models.JSONField(
+        default=list,
+        blank=True,
+        null=True,
+        help_text="List of cleared rounds (e.g. ['Round 1: Aptitude', 'Round 2: Technical'])"
+    )
+    final_status = models.CharField(
+        max_length=20,
+        choices=PlacementOutcomeChoices.choices,
+        default=PlacementOutcomeChoices.IN_PROGRESS,
+        db_index=True
+    )
+    remarks = models.TextField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'placement_student_trackings'
+        ordering = ['-updated_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['student', 'drive'],
+                name='unique_student_placement_drive'
+            )
+        ]
+        indexes = [
+            models.Index(fields=['drive', 'attendance_status']),
+            models.Index(fields=['drive', 'final_status']),
+            models.Index(fields=['student', 'drive']),
+        ]
+
+    def __str__(self):
+        return f"Tracking: Student #{self.student_id} for Drive #{self.drive_id} - Attendance: {self.attendance_status}, Status: {self.final_status}"
+
