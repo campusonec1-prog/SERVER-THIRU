@@ -78,6 +78,8 @@ INSTALLED_APPS = [
     'asset',
     'library',
     'research',
+    'infrastructure',
+    'university_exam',
 ]
 
 MIDDLEWARE = [
