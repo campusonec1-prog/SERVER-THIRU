@@ -7,6 +7,141 @@ from .models import User, UserDetails
 from .serializers import UserSerializer, UserDetailsSerializer
 from .permissions import IsAdminUser, UserPermission, UserDetailsPermission
 
+
+def resolve_user_presence_data(user, role_name=None, request=None):
+    from django.utils import timezone
+    from django.db.models import Q
+
+    role_str = role_name or (getattr(user.role, 'role_name', 'User') if hasattr(user, 'role') and user.role else 'User')
+    user_detail = getattr(user, 'user_details', None)
+    first_detail = user_detail.first() if hasattr(user_detail, 'first') else None
+
+    dept_name = None
+    if first_detail and getattr(first_detail, 'department', None):
+        dept_name = getattr(first_detail.department, 'department_name', None) or getattr(first_detail.department, 'short_name', None)
+    faculty_code = getattr(first_detail, 'faculty_code', '') if first_detail else ''
+    user_image = getattr(first_detail, 'user_image', '') if first_detail else ''
+
+    # If user is a Student or photo is not found in user_details, search Student & Application records
+    if not user_image or 'STUDENT' in str(role_str).upper():
+        try:
+            from student.models import Student
+            student = Student.objects.select_related('department', 'application', 'application__candidate').filter(
+                Q(roll_number=user.username) |
+                Q(register_number=user.username) |
+                Q(roll_number__iexact=user.username) |
+                Q(register_number__iexact=user.username) |
+                (Q(application__candidate__phone_number=user.mobile_number) & ~Q(application__candidate__phone_number='')) |
+                (Q(application__candidate__email__iexact=user.mail) & ~Q(application__candidate__email='')) |
+                (Q(application__candidate__name__iexact=user.name) & ~Q(application__candidate__name=''))
+            ).first()
+
+            if student:
+                if not dept_name and student.department:
+                    dept_name = getattr(student.department, 'department_name', None) or getattr(student.department, 'short_name', None)
+
+                app = student.application
+                if app and isinstance(app.form_data, dict):
+                    fd = app.form_data
+                    if not user_image:
+                        for key in ['photo', 'student_photo', 'candidate_photo', 'profile_photo', 'image', 'avatar']:
+                            val = fd.get(key)
+                            if isinstance(val, str) and val.strip():
+                                user_image = val.strip()
+                                break
+                            elif isinstance(val, dict) and val.get('url'):
+                                user_image = val.get('url')
+                                break
+
+                    if not user_image:
+                        certs = fd.get('certificates') or []
+                        if isinstance(certs, dict) and 'certificates' in certs:
+                            certs = certs['certificates']
+                        if isinstance(certs, list):
+                            for c in certs:
+                                if isinstance(c, dict):
+                                    ctype = str(c.get('certificate_type', '')).upper()
+                                    if any(x in ctype for x in ['PHOTO', 'PASSPORT', 'CANDIDATE', 'STUDENT', 'PROFILE']):
+                                        doc_val = c.get('document')
+                                        if isinstance(doc_val, str) and (doc_val.startswith('http') or doc_val.startswith('data:') or doc_val.startswith('/media')):
+                                            user_image = doc_val
+                                            break
+                                        elif isinstance(doc_val, dict) and isinstance(doc_val.get('url'), str):
+                                            user_image = doc_val.get('url')
+                                            break
+
+                    if not user_image:
+                        for k, v in fd.items():
+                            if isinstance(v, dict):
+                                for pkey in ['photo', 'student_photo', 'candidate_photo', 'image', 'document']:
+                                    pval = v.get(pkey)
+                                    if isinstance(pval, str) and (pval.startswith('http') or pval.startswith('data:') or pval.startswith('/media')):
+                                        user_image = pval
+                                        break
+                                if user_image:
+                                    break
+
+                if not user_image and getattr(student, 'student_photo', None):
+                    user_image = student.student_photo
+        except Exception:
+            pass
+
+    ip_addr = ''
+    if request:
+        ip_addr = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR', ''))
+        if ip_addr and ',' in ip_addr:
+            ip_addr = ip_addr.split(',')[0].strip()
+
+    return {
+        'id': user.id,
+        'name': getattr(user, 'name', '') or getattr(user, 'username', 'User'),
+        'username': getattr(user, 'username', ''),
+        'email': getattr(user, 'mail', '') or getattr(user, 'email', ''),
+        'mobile': getattr(user, 'mobile_number', '') or getattr(user, 'phone_number', ''),
+        'role_name': role_str,
+        'department_name': dept_name,
+        'faculty_code': faculty_code,
+        'user_image': user_image or '',
+        'student_photo': user_image or '',
+        'photo': user_image or '',
+        'avatar': user_image or '',
+        'last_seen': timezone.now().isoformat(),
+        'ip_address': ip_addr,
+        'status': 'online'
+    }
+
+
+def broadcast_user_online(online_info):
+    try:
+        from django.core.cache import cache
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+
+        user_id = online_info['id']
+        cache.set(f'online_user_{user_id}', online_info, timeout=90)
+        user_ids = cache.get('online_user_ids', set())
+        if not isinstance(user_ids, set):
+            user_ids = set(user_ids) if isinstance(user_ids, (list, tuple)) else set()
+        user_ids.add(user_id)
+        cache.set('online_user_ids', user_ids, timeout=None)
+
+        layer = get_channel_layer()
+        if layer:
+            async_to_sync(layer.group_send)(
+                'realtime_updates',
+                {
+                    'type': 'broadcast_update',
+                    'data': {
+                        'model': 'OnlineUser',
+                        'action': 'online',
+                        'user': online_info
+                    }
+                }
+            )
+    except Exception:
+        pass
+
+
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.select_related('role', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').prefetch_related('user_details', 'user_details__department').all().order_by('id')
     serializer_class = UserSerializer
@@ -132,6 +267,13 @@ class UserViewSet(viewsets.ModelViewSet):
                         if student:
                             user_data['student_id'] = student.id
                             user_data['student_roll'] = student.roll_number
+
+                    # Automatically register user in online cache and broadcast
+                    try:
+                        online_info = resolve_user_presence_data(user, user_role_name, request)
+                        broadcast_user_online(online_info)
+                    except Exception:
+                        pass
 
                     return Response({
                         "code": 200,
@@ -263,6 +405,13 @@ class UserViewSet(viewsets.ModelViewSet):
                     user_data['student_id'] = student.id
                     user_data['student_roll'] = student.roll_number
 
+                    # Automatically register student in online cache and broadcast
+                    try:
+                        online_info = resolve_user_presence_data(user_obj, 'STUDENT', request)
+                        broadcast_user_online(online_info)
+                    except Exception:
+                        pass
+
                     return Response({
                         "code": 200,
                         "message": "Logged in successfully",
@@ -364,47 +513,38 @@ class UserViewSet(viewsets.ModelViewSet):
             user_ids.discard(user_id)
             cache.set('online_user_ids', user_ids, timeout=None)
             cache.delete(f'online_user_{user_id}')
+            
+            # Broadcast offline presence via WebSockets
+            try:
+                from channels.layers import get_channel_layer
+                from asgiref.sync import async_to_sync
+                layer = get_channel_layer()
+                if layer:
+                    async_to_sync(layer.group_send)(
+                        'realtime_updates',
+                        {
+                            'type': 'broadcast_update',
+                            'data': {
+                                'model': 'OnlineUser',
+                                'action': 'offline',
+                                'user_id': user_id
+                            }
+                        }
+                    )
+            except Exception:
+                pass
+                
             return Response({"code": 200, "message": "Marked offline", "status": "offline"})
 
-        # Get user details for enriched response
-        role_name = getattr(user.role, 'role_name', 'User') if hasattr(user, 'role') and user.role else 'User'
-        user_detail = getattr(user, 'user_details', None)
-        first_detail = user_detail.first() if hasattr(user_detail, 'first') else None
-
-        dept_name = None
-        if first_detail and getattr(first_detail, 'department', None):
-            dept_name = getattr(first_detail.department, 'department_name', None) or getattr(first_detail.department, 'short_name', None)
-
-        faculty_code = getattr(first_detail, 'faculty_code', '') if first_detail else ''
-        user_image = getattr(first_detail, 'user_image', '') if first_detail else ''
-
-        ip_addr = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR', ''))
-        if ip_addr and ',' in ip_addr:
-            ip_addr = ip_addr.split(',')[0].strip()
-
-        online_data = {
-            'id': user_id,
-            'name': getattr(user, 'name', '') or getattr(user, 'username', 'User'),
-            'username': getattr(user, 'username', ''),
-            'email': getattr(user, 'mail', '') or getattr(user, 'email', ''),
-            'mobile': getattr(user, 'mobile_number', '') or getattr(user, 'phone_number', ''),
-            'role_name': role_name,
-            'department_name': dept_name,
-            'faculty_code': faculty_code,
-            'user_image': user_image,
-            'last_seen': timezone.now().isoformat(),
-            'ip_address': ip_addr,
-            'status': 'online'
-        }
-
-        cache.set(f'online_user_{user_id}', online_data, timeout=90)
-        user_ids.add(user_id)
-        cache.set('online_user_ids', user_ids, timeout=None)
+        # Enrich and broadcast presence
+        online_data = resolve_user_presence_data(user, None, request)
+        broadcast_user_online(online_data)
 
         return Response({
             "code": 200,
             "message": "Heartbeat updated",
-            "status": "online"
+            "status": "online",
+            "data": online_data
         }, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated], url_path='online-users')
@@ -433,24 +573,8 @@ class UserViewSet(viewsets.ModelViewSet):
         # Auto-hydrate current user if not yet in cache
         user_id = getattr(user, 'id', None)
         if user_id and not cache.get(f'online_user_{user_id}'):
-            r_name = getattr(user.role, 'role_name', 'Admin') if hasattr(user, 'role') and user.role else 'Admin'
-            current_user_data = {
-                'id': user_id,
-                'name': getattr(user, 'name', '') or getattr(user, 'username', 'User'),
-                'username': getattr(user, 'username', ''),
-                'email': getattr(user, 'mail', '') or getattr(user, 'email', ''),
-                'mobile': getattr(user, 'mobile_number', '') or getattr(user, 'phone_number', ''),
-                'role_name': r_name,
-                'department_name': None,
-                'faculty_code': '',
-                'user_image': '',
-                'last_seen': timezone.now().isoformat(),
-                'ip_address': '',
-                'status': 'online'
-            }
-            cache.set(f'online_user_{user_id}', current_user_data, timeout=90)
-            user_ids.add(user_id)
-            cache.set('online_user_ids', user_ids, timeout=None)
+            current_user_data = resolve_user_presence_data(user, None, request)
+            broadcast_user_online(current_user_data)
 
         active_users = []
         stale_ids = set()
@@ -458,6 +582,15 @@ class UserViewSet(viewsets.ModelViewSet):
         for uid in list(user_ids):
             data = cache.get(f'online_user_{uid}')
             if data:
+                # Ensure student photo / user image is resolved if missing
+                if not data.get('student_photo') and not data.get('user_image'):
+                    try:
+                        u_obj = User.objects.filter(id=uid).first()
+                        if u_obj:
+                            data = resolve_user_presence_data(u_obj, data.get('role_name'), None)
+                            cache.set(f'online_user_{uid}', data, timeout=90)
+                    except Exception:
+                        pass
                 active_users.append(data)
             else:
                 stale_ids.add(uid)

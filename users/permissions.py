@@ -84,8 +84,12 @@ class UserPermission(BaseRolePermission):
     write_roles = ['admin', 'administrator', 'office', 'manager', 'tech_supporter', 'administration_officer']
 
     def has_permission(self, request, view):
-        if view.action in ['login', 'change_password']:
+        if getattr(view, 'action', None) in ['login', 'change_password']:
             return True
+        if getattr(view, 'action', None) == 'heartbeat':
+            return bool(request.user and request.user.is_authenticated)
+        if getattr(view, 'action', None) == 'online_users':
+            return bool(request.user and request.user.is_authenticated)
         return super().has_permission(request, view)
 
 
