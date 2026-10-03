@@ -23,15 +23,13 @@ class Floor(TrackingModel):
         db_column='block_id',
         related_name='floors'
     )
-    floor_code = models.CharField(max_length=20)
     floor_name = models.CharField(max_length=100)
-    floor_order = models.PositiveIntegerField(default=0, help_text="Order for display (0=Ground, 1=First, etc.)")
     is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = 'floors'
-        ordering = ['block', 'floor_order']
-        unique_together = ('block', 'floor_code')
+        ordering = ['block', 'floor_name']
+        unique_together = ('block', 'floor_name')
 
     def __str__(self):
         return f"{self.block.block_code} / {self.floor_name}"

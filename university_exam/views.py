@@ -30,7 +30,7 @@ class UniversityExamHallViewSet(viewsets.ModelViewSet):
     queryset = UniversityExamHall.objects.select_related(
         'hall__floor__block',
         'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
-    ).all().order_by('hall__floor__block__block_code', 'hall__floor__floor_order', 'hall__hall_no')
+    ).all().order_by('hall__floor__block__block_code', 'hall__floor__floor_name', 'hall__hall_no')
     serializer_class = UniversityExamHallSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = None
@@ -211,13 +211,6 @@ class ExamAttendanceImportViewSet(viewsets.ModelViewSet):
 
         try:
             file_bytes = file_obj.read()
-            # DEBUG: Save file to disk so we can inspect its text format
-            import os
-            debug_path = os.path.join(r'C:\Users\Raiyan\.gemini\antigravity-ide\brain\fd1b47ff-4417-4243-a1ac-b507d8331566\scratch', 'latest_upload.pdf')
-            os.makedirs(os.path.dirname(debug_path), exist_ok=True)
-            with open(debug_path, 'wb') as f:
-                f.write(file_bytes)
-
             parsed_rows = parse_anna_university_pdf(file_bytes)
         except ImportError as e:
             return Response({'error': str(e)}, status=status.HTTP_501_NOT_IMPLEMENTED)
@@ -449,13 +442,13 @@ class UniversityExamScheduleViewSet(viewsets.ModelViewSet):
 
         available_halls = list(UniversityExamHall.objects.filter(
             id__in=available_hall_ids, is_active=True
-        ).select_related('hall__floor__block').order_by('hall__floor__block__block_code', 'hall__floor__floor_order', 'hall__hall_no'))
+        ).select_related('hall__floor__block').order_by('hall__floor__block__block_code', 'hall__floor__floor_name', 'hall__hall_no'))
 
         if not available_halls:
             # Fall back: use all active halls if no ExamHallDate records exist
             available_halls = list(UniversityExamHall.objects.filter(
                 is_active=True
-            ).select_related('hall__floor__block').order_by('hall__floor__block__block_code', 'hall__floor__floor_order', 'hall__hall_no'))
+            ).select_related('hall__floor__block').order_by('hall__floor__block__block_code', 'hall__floor__floor_name', 'hall__hall_no'))
 
         if not available_halls:
             return Response({'error': 'No active halls found for University Exams. Please go to "Hall Setup" from the sidebar and click "Sync Infra Halls" to pull your infrastructure halls into the exam module.'}, status=status.HTTP_400_BAD_REQUEST)

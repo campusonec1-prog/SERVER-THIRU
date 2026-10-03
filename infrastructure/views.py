@@ -19,7 +19,7 @@ class BlockViewSet(viewsets.ModelViewSet):
 
 
 class FloorViewSet(viewsets.ModelViewSet):
-    queryset = Floor.objects.select_related('block', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('block__block_code', 'floor_order')
+    queryset = Floor.objects.select_related('block', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('block__block_code', 'floor_name')
     serializer_class = FloorSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = None
@@ -36,7 +36,7 @@ class FloorViewSet(viewsets.ModelViewSet):
 
 
 class HallViewSet(viewsets.ModelViewSet):
-    queryset = Hall.objects.select_related('floor__block', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('floor__block__block_code', 'floor__floor_order', 'hall_no')
+    queryset = Hall.objects.select_related('floor__block', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('floor__block__block_code', 'floor__floor_name', 'hall_no')
     serializer_class = HallSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = None
