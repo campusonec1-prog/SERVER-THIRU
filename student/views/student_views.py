@@ -52,7 +52,11 @@ def _get_bus_to(student):
 
 
 class StudentViewSet(viewsets.ModelViewSet):
-    queryset = Student.objects.select_related('department', 'department__program', 'batch', 'section', 'status', 'quota', 'bus', 'route', 'stop', 'application', 'application__candidate').all().order_by('id')
+    queryset = Student.objects.select_related(
+        'department', 'department__program', 'batch', 'section', 'status', 'quota',
+        'bus', 'route', 'stop', 'application', 'application__candidate',
+        'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
+    ).all().order_by('id')
     serializer_class = StudentSerializer
     permission_classes = [StudentPermission]
 

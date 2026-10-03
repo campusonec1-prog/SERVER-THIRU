@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from common.serializers import TrackingModelSerializerMixin
 from .models import StudentStatus, Student, FacultyActivity, StudentAttendance
 from institution.models import Department, Section, Batch, Quota
 from users.models import User
@@ -15,11 +16,11 @@ def apply_default_error_messages(fields):
         field.error_messages['null'] = f"{friendly_name} cannot be null."
 
 
-class StudentStatusSerializer(serializers.ModelSerializer):
+class StudentStatusSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = StudentStatus
-        fields = ['id', 'status_name', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = ['id', 'status_name', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
             'status_name': {
                 'required': True,
@@ -43,7 +44,7 @@ class StudentStatusSerializer(serializers.ModelSerializer):
         return value.strip()
 
 
-class StudentSerializer(serializers.ModelSerializer):
+class StudentSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     department_id = serializers.PrimaryKeyRelatedField(
         source='department',
         queryset=Department.objects.all(),
@@ -109,8 +110,8 @@ class StudentSerializer(serializers.ModelSerializer):
             'is_day_scholar', 'is_bus',
             'bus_id', 'route_id', 'stop_id',
             'created_at', 'updated_at', 'created_by', 'updated_by'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
             'roll_number': {
                 'required': False,
@@ -375,7 +376,7 @@ from .models import Marks
 from institution.models import Exam
 from subject.models import Subject
 
-class MarksSerializer(serializers.ModelSerializer):
+class MarksSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     student_id = serializers.PrimaryKeyRelatedField(
         source='student',
         queryset=Student.objects.all(),
@@ -397,8 +398,8 @@ class MarksSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'student_id', 'exam_id', 'subject_id', 'subject_category', 'marks_obtained',
             'created_at', 'updated_at', 'created_by', 'updated_by'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -483,7 +484,7 @@ class MarksSerializer(serializers.ModelSerializer):
 from .models import CounsellingReport
 from institution.models import Semester
 
-class CounsellingReportSerializer(serializers.ModelSerializer):
+class CounsellingReportSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     student_id = serializers.PrimaryKeyRelatedField(
         source='student',
         queryset=Student.objects.all(),
@@ -500,8 +501,8 @@ class CounsellingReportSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'student_id', 'semester_id', 'report_date', 'remarks',
             'created_at', 'updated_at', 'created_by', 'updated_by'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -537,7 +538,7 @@ class CounsellingReportSerializer(serializers.ModelSerializer):
 
 from .models import StudentFees, StudentAdmissionSlip
 
-class StudentAdmissionSlipSerializer(serializers.ModelSerializer):
+class StudentAdmissionSlipSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     student_id = serializers.PrimaryKeyRelatedField(
         source='student',
         queryset=Student.objects.all(),
@@ -560,8 +561,8 @@ class StudentAdmissionSlipSerializer(serializers.ModelSerializer):
             'marks_maths', 'marks_physics', 'marks_chemistry', 'marks_total', 'marks_percentage',
             'mode_of_admission', 'certificates_surrendered', 'recommendation_id',
             'created_at', 'updated_at', 'created_by', 'updated_by',
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def validate(self, attrs):
         student = attrs.get('student')
@@ -593,7 +594,7 @@ class StudentAdmissionSlipSerializer(serializers.ModelSerializer):
         apply_default_error_messages(self.fields)
 
 
-class StudentFeesSerializer(serializers.ModelSerializer):
+class StudentFeesSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     student_id = serializers.PrimaryKeyRelatedField(
         source='student',
         queryset=Student.objects.all(),
@@ -607,15 +608,15 @@ class StudentFeesSerializer(serializers.ModelSerializer):
             'total_fees', 'paid_amount', 'balance_amount', 'payment_mode',
             'books_fees_total', 'books_fees_paid', 'due_date', 'remarks',
             'created_at', 'updated_at', 'created_by', 'updated_by',
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         apply_default_error_messages(self.fields)
 
 
-class FacultyActivitySerializer(serializers.ModelSerializer):
+class FacultyActivitySerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     timetable_id = serializers.PrimaryKeyRelatedField(
         source='timetable',
         queryset=FacultyActivity._meta.get_field('timetable').remote_field.model.objects.all(),
@@ -628,8 +629,8 @@ class FacultyActivitySerializer(serializers.ModelSerializer):
             'id', 'timetable_id', 'date', 'activity_type', 'other_activity',
             'remarks', 'status', 'suspension_reason', 'total_students', 'total_present', 'total_absentees', 'total_od',
             'created_at', 'updated_at', 'created_by', 'updated_by'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
 
     def __init__(self, *args, **kwargs):
@@ -687,7 +688,7 @@ class FacultyActivitySerializer(serializers.ModelSerializer):
         return ret
 
 
-class StudentAttendanceSerializer(serializers.ModelSerializer):
+class StudentAttendanceSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     faculty_activity_id = serializers.PrimaryKeyRelatedField(
         source='faculty_activity',
         queryset=FacultyActivity.objects.all(),
@@ -704,8 +705,8 @@ class StudentAttendanceSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'faculty_activity_id', 'student_id', 'status',
             'created_at', 'updated_at', 'created_by', 'updated_by'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -722,14 +723,20 @@ class StudentAttendanceSerializer(serializers.ModelSerializer):
 
 from .models import GradeSystem
 
-class GradeSystemSerializer(serializers.ModelSerializer):
+class GradeSystemSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = GradeSystem
         fields = [
             'id', 'grade', 'points', 'min_mark', 'max_mark', 'description', 'is_active', 'is_pass',
-            'created_at', 'updated_at', 'created_by', 'updated_by'
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
         ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        read_only_fields = [
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
         extra_kwargs = {
             'grade': {'required': True},
             'points': {'required': True},

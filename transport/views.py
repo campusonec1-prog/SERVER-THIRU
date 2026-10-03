@@ -168,7 +168,7 @@ class BaseTransportViewSet(viewsets.ModelViewSet):
 
 
 class DriverViewSet(BaseTransportViewSet):
-    queryset = Driver.objects.all().order_by('-id')
+    queryset = Driver.objects.select_related('created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('-id')
     serializer_class = DriverSerializer
 
     def get_queryset(self):
@@ -238,7 +238,7 @@ class DriverViewSet(BaseTransportViewSet):
 
 
 class BusViewSet(BaseTransportViewSet):
-    queryset = Bus.objects.select_related('driver', 'route').all().order_by('-id')
+    queryset = Bus.objects.select_related('driver', 'route', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('-id')
     serializer_class = BusSerializer
 
     def get_queryset(self):
@@ -317,7 +317,7 @@ class BusViewSet(BaseTransportViewSet):
 
 
 class TransportRouteViewSet(BaseTransportViewSet):
-    queryset = TransportRoute.objects.all().order_by('-id')
+    queryset = TransportRoute.objects.select_related('bus', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('-id')
     serializer_class = TransportRouteSerializer
 
     def get_queryset(self):
@@ -390,7 +390,7 @@ class TransportRouteViewSet(BaseTransportViewSet):
 
 
 class RouteStopViewSet(BaseTransportViewSet):
-    queryset = RouteStop.objects.select_related('route').all().order_by('route', 'stop_order')
+    queryset = RouteStop.objects.select_related('route', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('route', 'stop_order')
     serializer_class = RouteStopSerializer
 
     def get_queryset(self):
@@ -460,7 +460,7 @@ class RouteStopViewSet(BaseTransportViewSet):
 
 
 class TransportExpenseViewSet(BaseTransportViewSet):
-    queryset = TransportExpense.objects.select_related('bus', 'bus__driver', 'incharge_driver').all()
+    queryset = TransportExpense.objects.select_related('bus', 'bus__driver', 'incharge_driver', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all()
     serializer_class = TransportExpenseSerializer
     pagination_class = CustomPageNumberPagination
 

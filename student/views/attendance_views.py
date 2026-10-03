@@ -42,7 +42,10 @@ class FacultyActivityViewSet(viewsets.ModelViewSet):
         'timetable__batch', 
         'timetable__section', 
         'timetable__day', 
-        'created_by'
+        'created_by',
+        'created_by__role',
+        'updated_by',
+        'updated_by__role'
     ).all().order_by('-date', '-id')
     serializer_class = FacultyActivitySerializer
     permission_classes = [AttendancePermission]

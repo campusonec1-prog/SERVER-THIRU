@@ -1,12 +1,12 @@
 from django.utils import timezone
 from rest_framework import serializers
-
+from common.serializers import TrackingModelSerializerMixin
 from student.models import Student
 
 from .models import LibraryBook, LibraryMember, LibraryTransaction
 
 
-class LibraryBookSerializer(serializers.ModelSerializer):
+class LibraryBookSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     issued_copies = serializers.SerializerMethodField()
     next_due_on = serializers.SerializerMethodField()
     is_available = serializers.SerializerMethodField()
@@ -20,7 +20,7 @@ class LibraryBookSerializer(serializers.ModelSerializer):
             'pub_id', 'ven_id', 'department', 'pages', 'year_of_pub', 'curr_name',
             'remarks', 'catalog_details', 'total_copies', 'available_copies',
             'issued_copies', 'next_due_on', 'is_available', 'is_active', 'created_at', 'updated_at',
-        ]
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
         read_only_fields = ['available_copies', 'issued_copies', 'next_due_on', 'is_available', 'created_at', 'updated_at']
         extra_kwargs = {
             'total_copies': {'required': False, 'default': 1},
@@ -53,7 +53,7 @@ class LibraryBookSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
-class LibraryMemberSerializer(serializers.ModelSerializer):
+class LibraryMemberSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.application.candidate.name', read_only=True, default='')
     roll_number = serializers.CharField(source='student.roll_number', read_only=True)
     register_number = serializers.CharField(source='student.register_number', read_only=True)
@@ -67,7 +67,7 @@ class LibraryMemberSerializer(serializers.ModelSerializer):
             'id', 'student', 'student_name', 'roll_number', 'register_number',
             'department_name', 'batch_name', 'section_name',
             'membership_number', 'joined_on', 'is_active', 'created_at', 'updated_at',
-        ]
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
         read_only_fields = ['membership_number', 'created_at', 'updated_at']
 
     def validate_student(self, value):
@@ -94,7 +94,7 @@ class LibraryMemberSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
-class LibraryTransactionSerializer(serializers.ModelSerializer):
+class LibraryTransactionSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     book_title = serializers.CharField(source='book.title', read_only=True)
     member_number = serializers.CharField(source='member.membership_number', read_only=True)
     student_name = serializers.CharField(source='member.student.application.candidate.name', read_only=True, default='')
@@ -107,7 +107,7 @@ class LibraryTransactionSerializer(serializers.ModelSerializer):
             'id', 'book', 'book_title', 'member', 'member_number', 'student_name',
             'roll_number', 'issued_on', 'due_on', 'returned_on', 'renewal_count',
             'status', 'is_overdue', 'notes', 'history', 'created_at', 'updated_at',
-        ]
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
             'due_on': {'required': False},
         }

@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from common.serializers import TrackingModelSerializerMixin
 from .models import Driver, Bus, TransportRoute, RouteStop, TransportExpense
 
 
@@ -12,15 +13,15 @@ def apply_default_error_messages(fields):
             field.error_messages['null'] = f"{friendly} cannot be null."
 
 
-class DriverSerializer(serializers.ModelSerializer):
+class DriverSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = Driver
         fields = [
             'id', 'driver_name', 'license_number', 'phone_number',
             'address', 'date_of_joining', 'is_active', 'created_at',
             'updated_at', 'created_by', 'updated_by'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -36,7 +37,7 @@ class DriverSerializer(serializers.ModelSerializer):
         return value
 
 
-class BusSerializer(serializers.ModelSerializer):
+class BusSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     driver_id = serializers.PrimaryKeyRelatedField(
         source='driver',
         queryset=Driver.objects.filter(is_active=True),
@@ -59,8 +60,8 @@ class BusSerializer(serializers.ModelSerializer):
             'driver_id', 'route_id', 'fuel_type', 'fuel_tank_capacity',
             'is_active', 'status',
             'created_at', 'updated_at', 'created_by', 'updated_by'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def validate_fuel_type(self, value):
         if value:
@@ -122,7 +123,7 @@ class BusSerializer(serializers.ModelSerializer):
 
 
 
-class RouteStopSerializer(serializers.ModelSerializer):
+class RouteStopSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     route_id = serializers.PrimaryKeyRelatedField(
         source='route',
         queryset=TransportRoute.objects.all(),
@@ -135,8 +136,8 @@ class RouteStopSerializer(serializers.ModelSerializer):
             'id', 'route_id', 'stop_name', 'stop_order',
             'pickup_time', 'drop_time', 'created_at', 'updated_at',
             'created_by', 'updated_by'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -152,7 +153,7 @@ class RouteStopSerializer(serializers.ModelSerializer):
         return ret
 
 
-class TransportRouteSerializer(serializers.ModelSerializer):
+class TransportRouteSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     bus_id = serializers.PrimaryKeyRelatedField(
         source='bus',
         queryset=Bus.objects.all(),
@@ -168,8 +169,8 @@ class TransportRouteSerializer(serializers.ModelSerializer):
             'id', 'route_name', 'start_location', 'end_location',
             'bus_id', 'pickup_time', 'drop_time', 'is_active', 'stops',
             'created_at', 'updated_at', 'created_by', 'updated_by'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -192,7 +193,7 @@ class TransportRouteSerializer(serializers.ModelSerializer):
         return ret
 
 
-class TransportExpenseSerializer(serializers.ModelSerializer):
+class TransportExpenseSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     bus_id = serializers.PrimaryKeyRelatedField(
         source='bus',
         queryset=Bus.objects.all(),
@@ -213,8 +214,8 @@ class TransportExpenseSerializer(serializers.ModelSerializer):
             'amount', 'description', 'vendor', 'odometer_reading',
             'invoice_number', 'payment_mode', 'created_at', 'updated_at',
             'created_by', 'updated_by'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

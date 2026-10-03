@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from common.serializers import TrackingModelSerializerMixin
 from .models import ExamTimetable, ClassTimetable, ActivityType
 from institution.models import AcademicYear, Batch, Department, Exam, Section, Semester
 from schedule.models import Session, Day, Period
@@ -13,7 +14,7 @@ def apply_default_error_messages(fields):
         field.error_messages['blank'] = f"{friendly} cannot be empty."
         field.error_messages['null'] = f"{friendly} cannot be null."
 
-class ExamTimetableSerializer(serializers.ModelSerializer):
+class ExamTimetableSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     exam_date = serializers.DateField(
         input_formats=['%Y-%m-%d', '%d-%m-%Y'],
         error_messages={'invalid': 'Date has wrong format. Use YYYY-MM-DD or DD-MM-YYYY.'}
@@ -68,8 +69,8 @@ class ExamTimetableSerializer(serializers.ModelSerializer):
             'academic_year_id', 'batch_id', 'department_id', 'exam_id',
             'section_id', 'semester_id', 'subject_id', 'subject_category', 'created_at', 'updated_at',
             'created_by', 'updated_by'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -160,18 +161,18 @@ class ExamTimetableSerializer(serializers.ModelSerializer):
         return ret
 
 
-class ActivityTypeSerializer(serializers.ModelSerializer):
+class ActivityTypeSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = ActivityType
-        fields = ['id', 'activity_name', 'display_subject', 'is_active', 'created_at', 'updated_at']
-        read_only_fields = ['created_at', 'updated_at']
+        fields = ['id', 'activity_name', 'display_subject', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         apply_default_error_messages(self.fields)
 
 
-class ClassTimetableSerializer(serializers.ModelSerializer):
+class ClassTimetableSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     academic_year_id = serializers.PrimaryKeyRelatedField(
         source='academic_year',
         queryset=AcademicYear.objects.filter(is_active=True),
@@ -242,8 +243,8 @@ class ClassTimetableSerializer(serializers.ModelSerializer):
             'faculty_id', 'section_id', 'semester_id', 'subject_id', 'subject_category', 'batch_id',
             'activity_type_id', 'room_no', 'from_date', 'to_date',
             'created_at', 'updated_at', 'created_by', 'updated_by'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

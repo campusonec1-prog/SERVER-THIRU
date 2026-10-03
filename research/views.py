@@ -65,7 +65,11 @@ class FacultyResearchProjectViewSet(viewsets.ModelViewSet):
         qs = FacultyResearchProject.objects.select_related(
             'principal_investigator',
             'principal_investigator__user',
-            'principal_investigator__department'
+            'principal_investigator__department',
+            'created_by',
+            'created_by__role',
+            'updated_by',
+            'updated_by__role',
         ).prefetch_related(
             'co_investigators',
             'co_investigators__user',

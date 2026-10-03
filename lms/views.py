@@ -65,7 +65,7 @@ class LMSAssignmentViewSet(viewsets.ModelViewSet):
         role_name = (user.role.role_name if hasattr(user, 'role') and user.role else '').upper()
 
         queryset = LMSAssignment.objects.filter(is_active=True).select_related(
-            'department', 'batch', 'section', 'subject', 'target_student', 'created_by'
+            'department', 'batch', 'section', 'subject', 'target_student', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
         )
 
         # Filters from query params
@@ -383,7 +383,7 @@ class AssessmentQuestionViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return AssessmentQuestion.objects.filter(is_active=True).select_related(
             'subject', 'subject__department', 'subject__regulation', 'subject__semester',
-            'exam', 'exam__exam_type'
+            'exam', 'exam__exam_type', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
         ).prefetch_related('options').order_by('-id')
 
     def _broadcast_change(self, instance, event_name):
@@ -657,7 +657,7 @@ class LMSAssessmentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = LMSAssessment.objects.filter(is_active=True).select_related(
-            'department', 'batch', 'section', 'semester', 'regulation', 'subject', 'created_by'
+            'department', 'batch', 'section', 'semester', 'regulation', 'subject', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
         ).prefetch_related('items__question__options').order_by('-id')
 
         search = self.request.query_params.get('search')

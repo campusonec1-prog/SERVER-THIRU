@@ -1,11 +1,12 @@
 from rest_framework import serializers
+from common.serializers import TrackingModelSerializerMixin
 from .models import User, UserDetails
 from role.models import Role
 from institution.models import Department
 from common.r2 import upload_file_to_r2
 import bcrypt
 
-class UserSerializer(serializers.ModelSerializer):
+class UserSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     role_id = serializers.PrimaryKeyRelatedField(
         source='role',
         queryset=Role.objects.all(),
@@ -14,8 +15,17 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'name', 'username', 'password', 'mobile_number', 'mail', 'role_id', 'status', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = [
+            'id', 'name', 'username', 'password', 'mobile_number', 'mail', 'role_id', 'status',
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
+        read_only_fields = [
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
         extra_kwargs = {
             'password': {
                 'write_only': True,

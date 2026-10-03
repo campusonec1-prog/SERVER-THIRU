@@ -6,6 +6,9 @@ from schedule.models import Period, Day
 from subject.models import Subject
 
 
+from common.serializers import TrackingModelSerializerMixin
+
+
 def apply_default_error_messages(fields):
     for field_name, field in fields.items():
         friendly = field_name.replace('_', ' ').capitalize()
@@ -14,7 +17,7 @@ def apply_default_error_messages(fields):
         field.error_messages['null'] = f"{friendly} cannot be null."
 
 
-class LeavePolicySerializer(serializers.ModelSerializer):
+class LeavePolicySerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     academic_year_id = serializers.PrimaryKeyRelatedField(
         source='academic_year',
         queryset=AcademicYear.objects.all(),
@@ -27,16 +30,22 @@ class LeavePolicySerializer(serializers.ModelSerializer):
         fields = [
             'id', 'academic_year_id', 'academic_year_title',
             'total_cl', 'total_od', 'total_permissions', 'is_active',
-            'created_at', 'updated_at', 'created_by', 'updated_by'
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
         ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        read_only_fields = [
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         apply_default_error_messages(self.fields)
 
 
-class ClassSubstitutionSerializer(serializers.ModelSerializer):
+class ClassSubstitutionSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     period_no = serializers.IntegerField(source='period.period_no', read_only=True)
     period_time = serializers.SerializerMethodField()
     day_code = serializers.CharField(source='day.day_code', read_only=True)
@@ -59,7 +68,8 @@ class ClassSubstitutionSerializer(serializers.ModelSerializer):
             'substitute_faculty', 'substitute_faculty_name', 'class_timetable',
             'department', 'department_code', 'batch', 'batch_name',
             'semester', 'section', 'section_name', 'subject', 'subject_code', 'subject_name',
-            'status', 'rejection_reason', 'created_at', 'updated_at'
+            'status', 'rejection_reason', 'created_at', 'updated_at',
+            *TrackingModelSerializerMixin.TRACKING_FIELDS,
         ]
         read_only_fields = ['created_at', 'updated_at']
 
@@ -80,7 +90,7 @@ class ClassSubstitutionSerializer(serializers.ModelSerializer):
 
 
 
-class FacultyLeaveSerializer(serializers.ModelSerializer):
+class FacultyLeaveSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     applicant_id = serializers.PrimaryKeyRelatedField(
         source='applicant',
         queryset=User.objects.all()
@@ -96,7 +106,8 @@ class FacultyLeaveSerializer(serializers.ModelSerializer):
             'id', 'applicant_id', 'applicant_name', 'department', 'department_name',
             'academic_year', 'academic_year_title', 'leave_type', 'from_date', 'to_date',
             'total_days', 'reason', 'status', 'approved_by', 'rejection_reason',
-            'substitutions', 'created_at', 'updated_at'
+            'substitutions', 'created_at', 'updated_at',
+            *TrackingModelSerializerMixin.TRACKING_FIELDS,
         ]
         read_only_fields = ['created_at', 'updated_at']
 
@@ -108,7 +119,7 @@ class FacultyLeaveSerializer(serializers.ModelSerializer):
 
 from student.models import Student
 
-class HostelLeaveRequestSerializer(serializers.ModelSerializer):
+class HostelLeaveRequestSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     student = serializers.PrimaryKeyRelatedField(
         queryset=Student.objects.all(),
         required=False,
@@ -138,7 +149,8 @@ class HostelLeaveRequestSerializer(serializers.ModelSerializer):
             'from_date', 'to_date', 'total_days', 'reason', 'status', 'status_display',
             'hostel_approved_by', 'hostel_approved_by_name', 'hostel_approved_at', 'hostel_remarks',
             'hod_approved_by', 'hod_approved_by_name', 'hod_approved_at', 'hod_remarks',
-            'rejection_reason', 'created_at', 'updated_at'
+            'rejection_reason', 'created_at', 'updated_at',
+            *TrackingModelSerializerMixin.TRACKING_FIELDS,
         ]
         read_only_fields = [
             'total_days', 'status', 'hostel_approved_by', 'hostel_approved_at',

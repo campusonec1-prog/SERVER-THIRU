@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from common.serializers import TrackingModelSerializerMixin
 from .models import Day, Period, Session, AcademicCalendarEvent
 
 
@@ -7,16 +8,17 @@ def apply_default_error_messages(fields):
     """Apply standard required/blank/null error messages to all fields."""
     for field_name, field in fields.items():
         friendly = field_name.replace('_', ' ').capitalize()
-        field.error_messages['required'] = f"{friendly} is required."
-        field.error_messages['blank'] = f"{friendly} cannot be empty."
-        field.error_messages['null'] = f"{friendly} cannot be null."
+        if hasattr(field, 'error_messages'):
+            field.error_messages['required'] = f"{friendly} is required."
+            field.error_messages['blank'] = f"{friendly} cannot be empty."
+            field.error_messages['null'] = f"{friendly} cannot be null."
 
 
-class DaySerializer(serializers.ModelSerializer):
+class DaySerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = Day
-        fields = ['id', 'day_name', 'day_code', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = ['id', 'day_name', 'day_code', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
             'day_name': {
                 'required': True,
@@ -44,7 +46,7 @@ class DaySerializer(serializers.ModelSerializer):
         return value.strip().upper()
 
 
-class PeriodSerializer(serializers.ModelSerializer):
+class PeriodSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     session_id = serializers.PrimaryKeyRelatedField(
         source='session',
         queryset=Session.objects.all(),
@@ -53,8 +55,8 @@ class PeriodSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Period
-        fields = ['id', 'period_no', 'session_id', 'start_time', 'end_time', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = ['id', 'period_no', 'session_id', 'start_time', 'end_time', 'created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
             'period_no': {
                 'required': True,
@@ -83,11 +85,11 @@ class PeriodSerializer(serializers.ModelSerializer):
         return data
 
 
-class SessionSerializer(serializers.ModelSerializer):
+class SessionSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = Session
-        fields = ['id', 'session_name', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = ['id', 'session_name', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
             'session_name': {
                 'required': True,
@@ -106,7 +108,7 @@ class SessionSerializer(serializers.ModelSerializer):
         return value.strip()
 
 
-class AcademicCalendarEventSerializer(serializers.ModelSerializer):
+class AcademicCalendarEventSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     target_day_name = serializers.CharField(source='target_day.day_name', read_only=True)
     target_day_code = serializers.CharField(source='target_day.day_code', read_only=True)
     department_name = serializers.CharField(source='department.department_name', read_only=True)
@@ -119,8 +121,5 @@ class AcademicCalendarEventSerializer(serializers.ModelSerializer):
             'session_scope', 'holiday_category', 'title', 'reason',
             'department', 'department_name', 'batch', 'batch_name', 'academic_year',
             'created_at', 'updated_at', 'created_by', 'updated_by'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
-
-
-
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS

@@ -4,9 +4,10 @@ from users.models import UserDetails
 from users.serializers import UserDetailsSerializer
 from institution.models import Department
 from institution.serializers import DepartmentSerializer
+from common.serializers import TrackingModelSerializerMixin
 
 
-class FacultyResearchProjectSerializer(serializers.ModelSerializer):
+class FacultyResearchProjectSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     principal_investigator_detail = serializers.SerializerMethodField(read_only=True)
     co_investigators_detail = serializers.SerializerMethodField(read_only=True)
 
@@ -37,6 +38,7 @@ class FacultyResearchProjectSerializer(serializers.ModelSerializer):
             'updated_at',
             'created_by',
             'updated_by',
+            *TrackingModelSerializerMixin.TRACKING_FIELDS,
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by']
 

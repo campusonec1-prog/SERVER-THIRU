@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class GradeSystemViewSet(viewsets.ModelViewSet):
-    queryset = GradeSystem.objects.all().order_by('-points')
+    queryset = GradeSystem.objects.select_related('created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('-points')
     serializer_class = GradeSystemSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -86,7 +86,7 @@ class GradeSystemViewSet(viewsets.ModelViewSet):
 
     def list(self, request, *args, **kwargs):
         self._auto_seed_grades()
-        qs = GradeSystem.objects.all().order_by('-points')
+        qs = self.get_queryset()
 
         is_active = request.query_params.get('is_active')
         if is_active is not None:

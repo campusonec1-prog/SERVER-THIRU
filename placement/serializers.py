@@ -1,5 +1,6 @@
 import re
 from rest_framework import serializers
+from common.serializers import TrackingModelSerializerMixin
 from institution.models import Department, Batch
 from .models import (
     PlacementCompany,
@@ -31,10 +32,8 @@ class PlacementCompanyBriefSerializer(serializers.ModelSerializer):
         ]
 
 
-class PlacementCompanySerializer(serializers.ModelSerializer):
+class PlacementCompanySerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     industry_display = serializers.CharField(source='get_industry_display', read_only=True)
-    created_by_name = serializers.SerializerMethodField(read_only=True)
-    updated_by_name = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = PlacementCompany
@@ -55,26 +54,14 @@ class PlacementCompanySerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'created_by',
-            'created_by_name',
             'updated_by',
-            'updated_by_name',
-        ]
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'industry_display']
         extra_kwargs = {
             'contact_person_name': {'required': False, 'allow_null': True, 'allow_blank': True},
             'contact_email': {'required': False, 'allow_null': True, 'allow_blank': True},
             'contact_phone_number': {'required': False, 'allow_null': True, 'allow_blank': True},
         }
-
-    def get_created_by_name(self, obj):
-        if obj.created_by:
-            return obj.created_by.name or obj.created_by.username
-        return None
-
-    def get_updated_by_name(self, obj):
-        if obj.updated_by:
-            return obj.updated_by.name or obj.updated_by.username
-        return None
 
     def validate_company_name(self, value):
         val = value.strip()
@@ -107,12 +94,10 @@ class PlacementCompanySerializer(serializers.ModelSerializer):
         return value
 
 
-class PlacementDriveSerializer(serializers.ModelSerializer):
+class PlacementDriveSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     company_details = PlacementCompanyBriefSerializer(source='company', read_only=True)
     drive_type_display = serializers.CharField(source='get_drive_type_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
-    created_by_name = serializers.SerializerMethodField(read_only=True)
-    updated_by_name = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = PlacementDrive
@@ -138,10 +123,8 @@ class PlacementDriveSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'created_by',
-            'created_by_name',
             'updated_by',
-            'updated_by_name',
-        ]
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
         read_only_fields = [
             'id',
             'created_at',
@@ -152,16 +135,6 @@ class PlacementDriveSerializer(serializers.ModelSerializer):
             'status_display',
             'company_details'
         ]
-
-    def get_created_by_name(self, obj):
-        if obj.created_by:
-            return obj.created_by.name or obj.created_by.username
-        return None
-
-    def get_updated_by_name(self, obj):
-        if obj.updated_by:
-            return obj.updated_by.name or obj.updated_by.username
-        return None
 
     def validate(self, attrs):
         start_date = attrs.get('application_start_date') or (self.instance.application_start_date if self.instance else None)
@@ -201,12 +174,10 @@ class PlacementDriveSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class PlacementDriveEligibilitySerializer(serializers.ModelSerializer):
+class PlacementDriveEligibilitySerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     drive_details = PlacementDriveSerializer(source='drive', read_only=True)
     department_details = serializers.SerializerMethodField(read_only=True)
     batch_details = serializers.SerializerMethodField(read_only=True)
-    created_by_name = serializers.SerializerMethodField(read_only=True)
-    updated_by_name = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = PlacementDriveEligibility
@@ -223,10 +194,8 @@ class PlacementDriveEligibilitySerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'created_by',
-            'created_by_name',
             'updated_by',
-            'updated_by_name',
-        ]
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
         read_only_fields = [
             'id',
             'created_at',
@@ -237,16 +206,6 @@ class PlacementDriveEligibilitySerializer(serializers.ModelSerializer):
             'department_details',
             'batch_details'
         ]
-
-    def get_created_by_name(self, obj):
-        if obj.created_by:
-            return obj.created_by.name or obj.created_by.username
-        return None
-
-    def get_updated_by_name(self, obj):
-        if obj.updated_by:
-            return obj.updated_by.name or obj.updated_by.username
-        return None
 
     def get_department_details(self, obj):
         return [
@@ -281,13 +240,11 @@ class PlacementDriveEligibilitySerializer(serializers.ModelSerializer):
         return value
 
 
-class StudentPlacementTrackingSerializer(serializers.ModelSerializer):
+class StudentPlacementTrackingSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     student_details = serializers.SerializerMethodField(read_only=True)
     drive_details = PlacementDriveSerializer(source='drive', read_only=True)
     attendance_status_display = serializers.CharField(source='get_attendance_status_display', read_only=True)
     final_status_display = serializers.CharField(source='get_final_status_display', read_only=True)
-    created_by_name = serializers.SerializerMethodField(read_only=True)
-    updated_by_name = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = StudentPlacementTracking
@@ -306,10 +263,8 @@ class StudentPlacementTrackingSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'created_by',
-            'created_by_name',
             'updated_by',
-            'updated_by_name',
-        ]
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
         read_only_fields = [
             'id',
             'created_at',
@@ -321,16 +276,6 @@ class StudentPlacementTrackingSerializer(serializers.ModelSerializer):
             'attendance_status_display',
             'final_status_display'
         ]
-
-    def get_created_by_name(self, obj):
-        if obj.created_by:
-            return obj.created_by.name or obj.created_by.username
-        return None
-
-    def get_updated_by_name(self, obj):
-        if obj.updated_by:
-            return obj.updated_by.name or obj.updated_by.username
-        return None
 
     def get_student_details(self, obj):
         if not obj.student:

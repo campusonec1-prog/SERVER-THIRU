@@ -960,7 +960,7 @@ class ClassTimetableViewSet(viewsets.ModelViewSet):
 
 class ActivityTypeViewSet(viewsets.ModelViewSet):
 
-    queryset = ActivityType.objects.all().order_by('id')
+    queryset = ActivityType.objects.select_related('created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('id')
     serializer_class = ActivityTypeSerializer
     permission_classes = [ActivityTypePermission]
 

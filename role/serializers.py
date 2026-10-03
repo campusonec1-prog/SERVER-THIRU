@@ -1,11 +1,21 @@
 from rest_framework import serializers
+from common.serializers import TrackingModelSerializerMixin
 from .models import Role
 
-class RoleSerializer(serializers.ModelSerializer):
+class RoleSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = Role
-        fields = ['role_id', 'role_name', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = [
+            'role_id', 'role_name',
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
+        read_only_fields = [
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

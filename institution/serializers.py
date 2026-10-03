@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader, ExamType, Exam, Quota, FeesStructure
 from users.models import User
+from common.serializers import TrackingModelSerializerMixin
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
@@ -16,11 +17,20 @@ def apply_default_error_messages(fields):
 
 # ─── Program ─────────────────────────────────────────────────────────────────
 
-class ProgramSerializer(serializers.ModelSerializer):
+class ProgramSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = Program
-        fields = ['id', 'program_name', 'program_level', 'duration', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = [
+            'id', 'program_name', 'program_level', 'duration',
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
+        read_only_fields = [
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
         extra_kwargs = {
             'program_level': {
                 'error_messages': {
@@ -54,7 +64,7 @@ class ProgramSerializer(serializers.ModelSerializer):
 
 # ─── Department ──────────────────────────────────────────────────────────────
 
-class DepartmentSerializer(serializers.ModelSerializer):
+class DepartmentSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     program_id = serializers.PrimaryKeyRelatedField(
         source='program',
         queryset=Program.objects.all(),
@@ -78,9 +88,15 @@ class DepartmentSerializer(serializers.ModelSerializer):
             'program_id', 'program_name', 'program_level',
             'hod_id', 'is_active', 'is_display',
             'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
         ]
 
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        read_only_fields = [
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
         extra_kwargs = {
             'department_name': {'required': True},
             'department_code': {
@@ -124,15 +140,21 @@ class DepartmentSerializer(serializers.ModelSerializer):
 
 # ─── Academic Year ───────────────────────────────────────────────────────────
 
-class AcademicYearSerializer(serializers.ModelSerializer):
+class AcademicYearSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = AcademicYear
         fields = [
             'id', 'academic_year', 
             'is_active', 'is_display', 
-            'created_at', 'updated_at', 'created_by', 'updated_by'
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
         ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        read_only_fields = [
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
         extra_kwargs = {
             'academic_year': {
                 'required': True,
@@ -167,7 +189,7 @@ class AcademicYearSerializer(serializers.ModelSerializer):
 
 # ─── Batch ───────────────────────────────────────────────────────────────────
 
-class BatchSerializer(serializers.ModelSerializer):
+class BatchSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     department_id = serializers.PrimaryKeyRelatedField(
         source='department',
         queryset=Department.objects.all(),
@@ -176,8 +198,17 @@ class BatchSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Batch
-        fields = ['id', 'department_id', 'batch', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = [
+            'id', 'department_id', 'batch', 'is_active',
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
+        read_only_fields = [
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
         extra_kwargs = {
             'department_id': {'required': True},
             'batch': {'required': True},
@@ -211,11 +242,20 @@ class BatchSerializer(serializers.ModelSerializer):
 
 # ─── Regulation ──────────────────────────────────────────────────────────────
 
-class RegulationSerializer(serializers.ModelSerializer):
+class RegulationSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = Regulation
-        fields = ['id', 'regulation_code', 'effective_from_year', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = [
+            'id', 'regulation_code', 'effective_from_year', 'is_active',
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
+        read_only_fields = [
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
         extra_kwargs = {
             'regulation_code': {
                 'required': True,
@@ -242,7 +282,7 @@ class RegulationSerializer(serializers.ModelSerializer):
 
 # ─── Semester ──────────────────────────────────────────────────
 
-class SemesterSerializer(serializers.ModelSerializer):
+class SemesterSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     department_id = serializers.PrimaryKeyRelatedField(
         source='department',
         queryset=Department.objects.all(),
@@ -251,8 +291,17 @@ class SemesterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Semester
-        fields = ['id', 'department_id', 'semesters', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = [
+            'id', 'department_id', 'semesters',
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
+        read_only_fields = [
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
         extra_kwargs = {
             'department_id': {'required': True},
             'semesters': {'required': True},
@@ -284,7 +333,7 @@ class SemesterSerializer(serializers.ModelSerializer):
 
 # ─── Section ──────────────────────────────────────────────────
 
-class SectionSerializer(serializers.ModelSerializer):
+class SectionSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     department_id = serializers.PrimaryKeyRelatedField(
         source='department',
         queryset=Department.objects.all(),
@@ -293,8 +342,17 @@ class SectionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Section
-        fields = ['id', 'department_id', 'sections', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = [
+            'id', 'department_id', 'sections',
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
+        read_only_fields = [
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
         extra_kwargs = {
             'department_id': {'required': True},
             'sections': {'required': True},
@@ -348,14 +406,23 @@ class LogoField(serializers.Field):
         return value
 
 
-class CollegeHeaderSerializer(serializers.ModelSerializer):
+class CollegeHeaderSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     primary_logo = LogoField(required=False, allow_null=True)
     secondary_logo = LogoField(required=False, allow_null=True)
 
     class Meta:
         model = CollegeHeader
-        fields = ['id', 'college_name', 'address', 'header_type', 'primary_logo', 'secondary_logo', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = [
+            'id', 'college_name', 'address', 'header_type', 'primary_logo', 'secondary_logo',
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
+        read_only_fields = [
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
         extra_kwargs = {
             'college_name': {'required': True},
             'address': {'required': True},
@@ -405,11 +472,11 @@ class CollegeHeaderSerializer(serializers.ModelSerializer):
 
 # ─── Exam Type ─────────────────────────────────────────────────
 
-class ExamTypeSerializer(serializers.ModelSerializer):
+class ExamTypeSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = ExamType
-        fields = ['id', 'exam_type_name', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = ['id', 'exam_type_name', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
             'exam_type_name': {
                 'required': True,
@@ -430,7 +497,7 @@ class ExamTypeSerializer(serializers.ModelSerializer):
 
 # ─── Exam ──────────────────────────────────────────────────────
 
-class ExamSerializer(serializers.ModelSerializer):
+class ExamSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     exam_type_id = serializers.PrimaryKeyRelatedField(
         source='exam_type',
         queryset=ExamType.objects.all(),
@@ -443,8 +510,8 @@ class ExamSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Exam
-        fields = ['id', 'exam_name', 'exam_type_id', 'exam_type_name', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = ['id', 'exam_name', 'exam_type_id', 'exam_type_name', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
             'exam_name': {
                 'required': True,
@@ -465,11 +532,20 @@ class ExamSerializer(serializers.ModelSerializer):
 
 # ─── Quota ─────────────────────────────────────────────────────
 
-class QuotaSerializer(serializers.ModelSerializer):
+class QuotaSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = Quota
-        fields = ['id', 'quota_name', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = [
+            'id', 'quota_name', 'is_active',
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
+        read_only_fields = [
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
         extra_kwargs = {
             'quota_name': {
                 'required': True,
@@ -490,7 +566,7 @@ class QuotaSerializer(serializers.ModelSerializer):
 
 # ─── Fees Structure ───────────────────────────────────────────
 
-class FeesStructureSerializer(serializers.ModelSerializer):
+class FeesStructureSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     department_id = serializers.PrimaryKeyRelatedField(
         source='department',
         queryset=Department.objects.all(),
@@ -517,8 +593,8 @@ class FeesStructureSerializer(serializers.ModelSerializer):
             'id', 'department_id', 'department_name', 
             'batch_id', 'batch_name', 'quota_id', 'quota_name',
             'fees', 'created_at', 'updated_at', 'created_by', 'updated_by'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
             'fees': {'required': True},
         }

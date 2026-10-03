@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import NoticeBoard
 from users.models import User
+from common.serializers import TrackingModelSerializerMixin
 
 
 def apply_default_error_messages(fields):
@@ -15,7 +16,7 @@ def apply_default_error_messages(fields):
             field.error_messages['null'] = f"{friendly} cannot be null."
 
 
-class NoticeBoardSerializer(serializers.ModelSerializer):
+class NoticeBoardSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     faculty_id = serializers.PrimaryKeyRelatedField(
         source='faculty',
         read_only=True
@@ -39,7 +40,8 @@ class NoticeBoardSerializer(serializers.ModelSerializer):
             'is_active', 'faculty_id', 'faculty_name',
             'organizer', 'coordinator', 'sub_coordinators', 'poster_url',
             'target_audience_type', 'department', 'department_name', 'batch', 'section',
-            'created_at', 'updated_at', 'created_by', 'updated_by'
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            *TrackingModelSerializerMixin.TRACKING_FIELDS,
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by', 'faculty_id', 'faculty_name', 'department_name']
         extra_kwargs = {

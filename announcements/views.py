@@ -21,7 +21,10 @@ class NoticeBoardViewSet(viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
-        qs = NoticeBoard.objects.select_related('faculty', 'department').all().order_by('-id')
+        qs = NoticeBoard.objects.select_related(
+            'faculty', 'department',
+            'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
+        ).all().order_by('-id')
 
         notice_type = self.request.query_params.get('notice_type')
         if notice_type:

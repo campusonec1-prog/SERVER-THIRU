@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from common.serializers import TrackingModelSerializerMixin
 from .models import Subject, SharedNotes
 from institution.models import Regulation, Department, Semester, Batch, Section
 
@@ -9,7 +10,7 @@ def apply_default_error_messages(fields):
         field.error_messages['blank'] = f"{friendly_name} cannot be empty."
         field.error_messages['null'] = f"{friendly_name} cannot be null."
 
-class SubjectSerializer(serializers.ModelSerializer):
+class SubjectSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     regulation_id = serializers.PrimaryKeyRelatedField(
         source='regulation',
         queryset=Regulation.objects.all(),
@@ -32,9 +33,15 @@ class SubjectSerializer(serializers.ModelSerializer):
             'id', 'subject_code', 'subject_name', 'credits', 'course_type',
             'regulation_id', 'department_id', 'semester_id', 
             'is_theory', 'is_lab', 'is_active',
-            'created_at', 'updated_at', 'created_by', 'updated_by'
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
         ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        read_only_fields = [
+            'created_at', 'updated_at', 'created_by', 'updated_by',
+            'created_by_name', 'created_by_username', 'created_by_role',
+            'updated_by_name', 'updated_by_username', 'updated_by_role',
+        ]
         extra_kwargs = {
             'subject_code': {'required': False, 'allow_null': True, 'allow_blank': True},
             'subject_name': {'required': True},
@@ -110,7 +117,7 @@ class SubjectSerializer(serializers.ModelSerializer):
         return ret
 
 
-class SharedNotesSerializer(serializers.ModelSerializer):
+class SharedNotesSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     department_id = serializers.PrimaryKeyRelatedField(
         source='department',
         queryset=Department.objects.all(),
@@ -143,8 +150,8 @@ class SharedNotesSerializer(serializers.ModelSerializer):
             'id', 'department_id', 'batch_id', 'semester_id', 'section_id', 'subject_id',
             'folder_name', 'title', 'file_name', 'file_url', 'file_size', 'file_type',
             'uploaded_by', 'created_at', 'updated_at'
-        ]
-        read_only_fields = ['id', 'uploaded_by', 'created_at', 'updated_at']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['id', 'uploaded_by', 'created_at', 'updated_at'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

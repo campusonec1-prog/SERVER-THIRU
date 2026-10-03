@@ -51,7 +51,7 @@ def broadcast_placement_event(model_name, event_name, data):
 
 
 class PlacementCompanyViewSet(viewsets.ModelViewSet):
-    queryset = PlacementCompany.objects.select_related('created_by', 'updated_by').all().order_by('-created_at')
+    queryset = PlacementCompany.objects.select_related('created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('-created_at')
     serializer_class = PlacementCompanySerializer
     permission_classes = [PlacementCompanyPermission]
     pagination_class = CustomPageNumberPagination
@@ -198,7 +198,7 @@ class PlacementCompanyViewSet(viewsets.ModelViewSet):
 
 
 class PlacementDriveViewSet(viewsets.ModelViewSet):
-    queryset = PlacementDrive.objects.select_related('company', 'created_by', 'updated_by').all().order_by('-application_start_date', '-created_at')
+    queryset = PlacementDrive.objects.select_related('company', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('-application_start_date', '-created_at')
     serializer_class = PlacementDriveSerializer
     permission_classes = [PlacementCompanyPermission]
     pagination_class = CustomPageNumberPagination
@@ -767,7 +767,9 @@ class PlacementDriveEligibilityViewSet(viewsets.ModelViewSet):
         'drive',
         'drive__company',
         'created_by',
-        'updated_by'
+        'created_by__role',
+        'updated_by',
+        'updated_by__role'
     ).prefetch_related(
         'departments',
         'batches',
@@ -970,7 +972,9 @@ class StudentPlacementTrackingViewSet(viewsets.ModelViewSet):
         'student__department',
         'student__batch',
         'created_by',
-        'updated_by'
+        'created_by__role',
+        'updated_by',
+        'updated_by__role'
     ).all().order_by('-updated_at')
     serializer_class = StudentPlacementTrackingSerializer
     permission_classes = [PlacementCompanyPermission]

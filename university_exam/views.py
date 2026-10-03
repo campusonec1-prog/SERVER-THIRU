@@ -27,7 +27,10 @@ from .serializers import (
 # ─── New ViewSets ─────────────────────────────────────────────────────────────
 
 class UniversityExamHallViewSet(viewsets.ModelViewSet):
-    queryset = UniversityExamHall.objects.select_related('hall__floor__block').all().order_by('hall__floor__block__block_code', 'hall__floor__floor_order', 'hall__hall_no')
+    queryset = UniversityExamHall.objects.select_related(
+        'hall__floor__block',
+        'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
+    ).all().order_by('hall__floor__block__block_code', 'hall__floor__floor_order', 'hall__hall_no')
     serializer_class = UniversityExamHallSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = None
@@ -44,7 +47,10 @@ class UniversityExamHallViewSet(viewsets.ModelViewSet):
 
 
 class ExamHallDateViewSet(viewsets.ModelViewSet):
-    queryset = ExamHallDate.objects.select_related('exam_hall__hall__floor__block').all().order_by('-exam_date', 'session', 'exam_hall__hall__hall_no')
+    queryset = ExamHallDate.objects.select_related(
+        'exam_hall__hall__floor__block',
+        'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
+    ).all().order_by('-exam_date', 'session', 'exam_hall__hall__hall_no')
     serializer_class = ExamHallDateSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = None
@@ -380,7 +386,10 @@ class ExamAttendanceImportViewSet(viewsets.ModelViewSet):
 
 
 class UniversityExamScheduleViewSet(viewsets.ModelViewSet):
-    queryset = UniversityExamSchedule.objects.select_related('department', 'subject').annotate(
+    queryset = UniversityExamSchedule.objects.select_related(
+        'department', 'subject',
+        'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
+    ).annotate(
         student_count=Count('attendances')
     ).all().order_by('-exam_date', 'session')
     serializer_class = UniversityExamScheduleSerializer

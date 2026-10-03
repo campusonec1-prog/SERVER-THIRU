@@ -52,7 +52,7 @@ class AdminWriteMixin:
 # ─── Program ─────────────────────────────────────────────────────────────────
 
 class ProgramViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = Program.objects.all().order_by('id')
+    queryset = Program.objects.select_related('created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('id')
     serializer_class = ProgramSerializer
     permission_classes = [ProgramPermission]
     model_label = "Program"
@@ -81,7 +81,9 @@ class ProgramViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelVi
 # ─── Department ──────────────────────────────────────────────────────────────
 
 class DepartmentViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = Department.objects.all().order_by('id')
+    queryset = Department.objects.select_related(
+        'program', 'hod', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
+    ).all().order_by('id')
     serializer_class = DepartmentSerializer
     permission_classes = [DepartmentPermission]
     model_label = "Department"
@@ -110,7 +112,7 @@ class DepartmentViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.Mode
 # ─── Academic Year ───────────────────────────────────────────────────────────
 
 class AcademicYearViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = AcademicYear.objects.all().order_by('id')
+    queryset = AcademicYear.objects.select_related('created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('id')
     serializer_class = AcademicYearSerializer
     permission_classes = [AcademicYearPermission]
     model_label = "Academic year"
@@ -164,7 +166,7 @@ class AcademicYearViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.Mo
 # ─── Batch ───────────────────────────────────────────────────────────────────
 
 class BatchViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = Batch.objects.all().order_by('id')
+    queryset = Batch.objects.select_related('department', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('id')
     serializer_class = BatchSerializer
     permission_classes = [BatchPermission]
     model_label = "Batch"
@@ -196,7 +198,7 @@ class BatchViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelView
 # ─── Regulation ───────────────────────────────────────────────────
 
 class RegulationViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = Regulation.objects.all().order_by('id')
+    queryset = Regulation.objects.select_related('created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('id')
     serializer_class = RegulationSerializer
     permission_classes = [RegulationPermission]
     model_label = "Regulation"
@@ -225,7 +227,7 @@ class RegulationViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.Mode
 # ─── Semester ───────────────────────────────────────────────────
 
 class SemesterViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = Semester.objects.all().order_by('id')
+    queryset = Semester.objects.select_related('department', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('id')
     serializer_class = SemesterSerializer
     permission_classes = [SemesterPermission]
     model_label = "Semester"
@@ -254,7 +256,7 @@ class SemesterViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelV
 # ─── Section ───────────────────────────────────────────────────────
 
 class SectionViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = Section.objects.all().order_by('id')
+    queryset = Section.objects.select_related('department', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('id')
     serializer_class = SectionSerializer
     permission_classes = [SectionPermission]
     model_label = "Section"
@@ -388,7 +390,7 @@ class SectionViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelVi
 # ─── College Header ────────────────────────────────────────────────
 
 class CollegeHeaderViewSet(AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = CollegeHeader.objects.all().order_by('id')
+    queryset = CollegeHeader.objects.select_related('created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('id')
     serializer_class = CollegeHeaderSerializer
     permission_classes = [CollegeHeaderPermission]
     model_label = "College Header"
@@ -417,7 +419,7 @@ class CollegeHeaderViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 # ─── Exam Type ─────────────────────────────────────────────────────
 
 class ExamTypeViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = ExamType.objects.all().order_by('id')
+    queryset = ExamType.objects.select_related('created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('id')
     serializer_class = ExamTypeSerializer
     permission_classes = [ExamTypePermission]
     model_label = "Exam Type"
@@ -446,7 +448,7 @@ class ExamTypeViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelV
 # ─── Exam ──────────────────────────────────────────────────────────
 
 class ExamViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = Exam.objects.all().order_by('id')
+    queryset = Exam.objects.select_related('exam_type', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('id')
     serializer_class = ExamSerializer
     permission_classes = [ExamPermission]
     model_label = "Exam"
@@ -475,7 +477,7 @@ class ExamViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewS
 # ─── Quota ──────────────────────────────────────────────────────────
 
 class QuotaViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = Quota.objects.all().order_by('id')
+    queryset = Quota.objects.select_related('created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('id')
     serializer_class = QuotaSerializer
     permission_classes = [QuotaPermission]
     model_label = "Quota"
@@ -504,7 +506,7 @@ class QuotaViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelView
 # ─── Fees Structure ──────────────────────────────────────────
 
 class FeesStructureViewSet(AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = FeesStructure.objects.all().order_by('id')
+    queryset = FeesStructure.objects.all().select_related('department', 'batch', 'quota', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').order_by('id')
     serializer_class = FeesStructureSerializer
     permission_classes = [FeesStructurePermission]
     model_label = "Fees Structure"

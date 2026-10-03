@@ -56,7 +56,7 @@ class AdminWriteMixin:
 
 
 class FormModuleViewSet(AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = FormModule.objects.all().order_by('display_order', 'id')
+    queryset = FormModule.objects.all().select_related('created_by', 'created_by__role', 'updated_by', 'updated_by__role').order_by('display_order', 'id')
     serializer_class = FormModuleSerializer
     permission_classes = [FormModulePermission]
     model_label = "Form Module"
@@ -94,7 +94,7 @@ class FormModuleViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 
 class FormFieldViewSet(AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = FormField.objects.all().order_by('display_order', 'id')
+    queryset = FormField.objects.all().select_related('form_module', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').order_by('display_order', 'id')
     serializer_class = FormFieldSerializer
     permission_classes = [FormFieldPermission]
     model_label = "Form Field"
@@ -155,9 +155,9 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             pass
 
         if user.__class__.__name__ == 'ApplicationUser':
-            qs = Application.objects.filter(candidate=user)
+            qs = Application.objects.filter(candidate=user).select_related('candidate', 'program', 'status', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role')
         elif is_admin:
-            qs = Application.objects.all()
+            qs = Application.objects.all().select_related('candidate', 'program', 'status', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role')
         else:
             return Application.objects.none()
 
@@ -1129,7 +1129,7 @@ class ApplicationPDFDownloadView(APIView):
 
 
 class ApplicationFeeViewSet(AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = ApplicationFee.objects.all().select_related('program', 'academic_year').order_by('-id')
+    queryset = ApplicationFee.objects.all().select_related('program', 'academic_year', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').order_by('-id')
     serializer_class = ApplicationFeeSerializer
     permission_classes = [ApplicationFeePermission]
     model_label = "Application Fee"

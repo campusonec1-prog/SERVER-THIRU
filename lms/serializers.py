@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.utils import timezone
+from common.serializers import TrackingModelSerializerMixin
 from .models import (
     LMSAssignment, LMSSubmission, AssessmentQuestion, AssessmentOption,
     LMSAssessment, LMSAssessmentQuestionItem, LMSAssessmentAttempt, LMSAssessmentStudentAnswer
@@ -30,13 +31,12 @@ class AttachmentField(serializers.Field):
         return None
 
 
-class LMSAssignmentSerializer(serializers.ModelSerializer):
+class LMSAssignmentSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     department_name = serializers.CharField(source='department.department_name', read_only=True)
     batch_name = serializers.CharField(source='batch.batch', read_only=True)
     section_name = serializers.CharField(source='section.sections', read_only=True)
     target_student_name = serializers.SerializerMethodField()
     subject_name = serializers.CharField(source='subject.subject_name', read_only=True)
-    created_by_name = serializers.SerializerMethodField()
     attachment = AttachmentField(required=False, allow_null=True)
     is_active = serializers.BooleanField(default=True, required=False)
 
@@ -52,10 +52,10 @@ class LMSAssignmentSerializer(serializers.ModelSerializer):
             'target_type', 'department', 'department_name', 'batch', 'batch_name',
             'section', 'section_name', 'target_student', 'target_student_name',
             'due_date', 'total_marks', 'attachment', 'is_active',
-            'created_at', 'updated_at', 'created_by', 'created_by_name',
+            'created_at', 'updated_at', 'created_by',
             'total_submissions', 'total_evaluated', 'total_target_students', 'my_submission'
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def get_target_student_name(self, obj):
         if obj.target_student and obj.target_student.user:
@@ -172,7 +172,7 @@ class AssessmentOptionSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by']
 
 
-class AssessmentQuestionSerializer(serializers.ModelSerializer):
+class AssessmentQuestionSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     subject_code = serializers.CharField(source='subject.subject_code', read_only=True)
     subject_name = serializers.CharField(source='subject.subject_name', read_only=True)
     department_id = serializers.IntegerField(source='subject.department.id', read_only=True)
@@ -196,8 +196,8 @@ class AssessmentQuestionSerializer(serializers.ModelSerializer):
             'question_type', 'exam', 'exam_name', 'exam_type_id', 'exam_type_name',
             'question_text', 'question_image', 'marks', 'answer', 'is_active',
             'options', 'created_at', 'updated_at', 'created_by', 'updated_by'
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def validate_question_text(self, value):
         if not value or not value.strip():
@@ -266,7 +266,7 @@ class LMSAssessmentQuestionItemSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'assessment']
 
 
-class LMSAssessmentSerializer(serializers.ModelSerializer):
+class LMSAssessmentSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     department_name = serializers.CharField(source='department.department_name', read_only=True)
     batch_name = serializers.CharField(source='batch.batch', read_only=True)
     section_name = serializers.CharField(source='section.sections', read_only=True)
@@ -274,7 +274,6 @@ class LMSAssessmentSerializer(serializers.ModelSerializer):
     regulation_code = serializers.CharField(source='regulation.regulation_code', read_only=True)
     subject_code = serializers.CharField(source='subject.subject_code', read_only=True)
     subject_name = serializers.CharField(source='subject.subject_name', read_only=True)
-    created_by_name = serializers.SerializerMethodField()
 
     items = LMSAssessmentQuestionItemSerializer(many=True, read_only=True)
     question_ids = serializers.ListField(
@@ -297,13 +296,13 @@ class LMSAssessmentSerializer(serializers.ModelSerializer):
             'start_time', 'end_time', 'duration_minutes',
             'total_questions', 'total_marks',
             'items', 'question_ids',
-            'created_at', 'updated_at', 'created_by', 'created_by_name',
+            'created_at', 'updated_at', 'created_by',
             'is_active'
-        ]
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
         read_only_fields = [
             'id', 'duration_minutes', 'total_questions', 'total_marks',
             'created_at', 'updated_at', 'created_by'
-        ]
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def get_semester_name(self, obj):
         if obj.semester:

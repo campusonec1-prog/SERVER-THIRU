@@ -33,7 +33,9 @@ def broadcast_event(model_name, event_name, payload):
 
 
 class StudentStatusViewSet(CachedOptionViewSetMixin, viewsets.ModelViewSet):
-    queryset = StudentStatus.objects.all().order_by('id')
+    queryset = StudentStatus.objects.select_related(
+        'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
+    ).all().order_by('id')
     serializer_class = StudentStatusSerializer
     permission_classes = [StudentStatusPermission]
 

@@ -4,9 +4,10 @@ from .models import (
     UniversityExamAttendance, ExamHallAllocation, ExamSeatAllocation,
     UniversityExamHall, ExamHallDate
 )
+from common.serializers import TrackingModelSerializerMixin
 
 
-class UniversityExamHallSerializer(serializers.ModelSerializer):
+class UniversityExamHallSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     hall_no = serializers.CharField(source='hall.hall_no', read_only=True)
     hall_name = serializers.CharField(source='hall.hall_name', read_only=True)
     floor_name = serializers.CharField(source='hall.floor.floor_name', read_only=True)
@@ -14,7 +15,12 @@ class UniversityExamHallSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UniversityExamHall
-        fields = '__all__'
+        fields = [
+            'id', 'hall', 'hall_no', 'hall_name', 'floor_name', 'block_code',
+            'min_capacity', 'max_capacity', 'total_seats', 'rows_count', 'columns_count',
+            'is_active', 'created_at', 'updated_at',
+            *TrackingModelSerializerMixin.TRACKING_FIELDS,
+        ]
 
     def validate(self, attrs):
         # Handle instance updates where attrs might be partial
@@ -38,15 +44,19 @@ class UniversityExamHallSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class ExamHallDateSerializer(serializers.ModelSerializer):
+class ExamHallDateSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     hall_no = serializers.CharField(source='exam_hall.hall.hall_no', read_only=True)
 
     class Meta:
         model = ExamHallDate
-        fields = '__all__'
+        fields = [
+            'id', 'exam_hall', 'hall_no', 'exam_date', 'session', 'is_available', 'notes',
+            'created_at', 'updated_at',
+            *TrackingModelSerializerMixin.TRACKING_FIELDS,
+        ]
 
 
-class ExamAttendanceImportSerializer(serializers.ModelSerializer):
+class ExamAttendanceImportSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     branch_code = serializers.CharField(source='department.department_code', read_only=True)
     branch_name = serializers.CharField(source='department.department_name', read_only=True)
     register_no = serializers.CharField(source='student.register_number', read_only=True)
@@ -56,7 +66,14 @@ class ExamAttendanceImportSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ExamAttendanceImport
-        fields = '__all__'
+        fields = [
+            'id', 'department', 'student', 'subject', 'exam_date', 'session',
+            'answer_book_no', 'qp_code', 'source_file', 'source_page',
+            'import_status', 'error_message', 'branch_code', 'branch_name',
+            'register_no', 'student_name', 'subject_code', 'subject_name',
+            'created_at', 'updated_at',
+            *TrackingModelSerializerMixin.TRACKING_FIELDS,
+        ]
 
     def get_student_name(self, obj):
         if obj.student and obj.student.application:
@@ -64,7 +81,7 @@ class ExamAttendanceImportSerializer(serializers.ModelSerializer):
         return ''
 
 
-class UniversityExamScheduleSerializer(serializers.ModelSerializer):
+class UniversityExamScheduleSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     department_name = serializers.CharField(source='department.department_name', read_only=True)
     department_code = serializers.CharField(source='department.department_code', read_only=True)
     subject_code = serializers.CharField(source='subject.subject_code', read_only=True)
@@ -78,11 +95,12 @@ class UniversityExamScheduleSerializer(serializers.ModelSerializer):
             'subject', 'subject_code', 'subject_name',
             'exam_date', 'session', 'qp_code', 'exam_type',
             'seating_strategy', 'status', 'student_count',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at',
+            *TrackingModelSerializerMixin.TRACKING_FIELDS,
         ]
 
 
-class UniversityExamAttendanceSerializer(serializers.ModelSerializer):
+class UniversityExamAttendanceSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     register_number = serializers.CharField(source='student.register_number', read_only=True)
     department_name = serializers.CharField(source='department.department_name', read_only=True)
@@ -94,7 +112,8 @@ class UniversityExamAttendanceSerializer(serializers.ModelSerializer):
             'id', 'exam_schedule', 'student', 'student_name', 'register_number',
             'department', 'department_name', 'subject_code',
             'attendance_status', 'answer_book_no', 'qp_code', 'attendance_marked_at',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at',
+            *TrackingModelSerializerMixin.TRACKING_FIELDS,
         ]
 
     def get_student_name(self, obj):
@@ -104,7 +123,7 @@ class UniversityExamAttendanceSerializer(serializers.ModelSerializer):
             return obj.student.roll_number or str(obj.student.id)
 
 
-class ExamHallAllocationSerializer(serializers.ModelSerializer):
+class ExamHallAllocationSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     hall_no = serializers.CharField(source='exam_hall.hall.hall_no', read_only=True)
     hall_name = serializers.CharField(source='exam_hall.hall.hall_name', read_only=True)
     block_code = serializers.CharField(source='exam_hall.hall.floor.block.block_code', read_only=True)
@@ -118,11 +137,12 @@ class ExamHallAllocationSerializer(serializers.ModelSerializer):
             'id', 'exam_schedule', 'exam_date', 'session',
             'exam_hall', 'hall_no', 'hall_name', 'block_code', 'floor_name',
             'allocation_order', 'planned_capacity', 'allocated_students', 'status',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at',
+            *TrackingModelSerializerMixin.TRACKING_FIELDS,
         ]
 
 
-class ExamSeatAllocationSerializer(serializers.ModelSerializer):
+class ExamSeatAllocationSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     register_number = serializers.CharField(source='student.register_number', read_only=True)
     department_name = serializers.CharField(source='department.department_name', read_only=True)
@@ -145,7 +165,8 @@ class ExamSeatAllocationSerializer(serializers.ModelSerializer):
             'department', 'department_name', 'department_code', 'department_short_name',
             'subject', 'subject_code', 'subject_name',
             'allocation_status', 'answer_book_no',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at',
+            *TrackingModelSerializerMixin.TRACKING_FIELDS,
         ]
 
     def get_answer_book_no(self, obj):

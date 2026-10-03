@@ -5,7 +5,7 @@ from .serializers import RoleSerializer
 from .permissions import RolePermission
 
 class RoleViewSet(viewsets.ModelViewSet):
-    queryset = Role.objects.all().order_by('role_id')
+    queryset = Role.objects.select_related('created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('role_id')
     serializer_class = RoleSerializer
     permission_classes = [RolePermission]
 

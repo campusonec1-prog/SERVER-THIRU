@@ -33,7 +33,7 @@ class LibraryViewSetMixin:
 
 
 class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
-    queryset = LibraryBook.objects.all()
+    queryset = LibraryBook.objects.select_related('created_by', 'created_by__role', 'updated_by', 'updated_by__role').all()
     serializer_class = LibraryBookSerializer
 
     def get_queryset(self):
@@ -228,7 +228,7 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
 
 
 class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
-    queryset = LibraryMember.objects.select_related('student__application', 'student__application__candidate')
+    queryset = LibraryMember.objects.select_related('student__application', 'student__application__candidate', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role')
     serializer_class = LibraryMemberSerializer
 
     def get_queryset(self):
@@ -269,7 +269,7 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
 
 
 class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
-    queryset = LibraryTransaction.objects.select_related('book', 'member__student__application', 'member__student__application__candidate')
+    queryset = LibraryTransaction.objects.select_related('book', 'member__student__application', 'member__student__application__candidate', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role')
     serializer_class = LibraryTransactionSerializer
 
     def get_queryset(self):

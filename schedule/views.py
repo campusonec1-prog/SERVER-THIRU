@@ -42,7 +42,7 @@ class AdminWriteMixin:
 
 
 class DayViewSet(AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = Day.objects.all().order_by('id')
+    queryset = Day.objects.select_related('created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('id')
     serializer_class = DaySerializer
     permission_classes = [DayPermission]
     model_label = "Day"
@@ -69,7 +69,7 @@ class DayViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 
 class PeriodViewSet(AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = Period.objects.all().order_by('id')
+    queryset = Period.objects.select_related('session', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('id')
     serializer_class = PeriodSerializer
     permission_classes = [PeriodPermission]
     model_label = "Period"
@@ -96,7 +96,7 @@ class PeriodViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 
 class SessionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = Session.objects.all().order_by('id')
+    queryset = Session.objects.select_related('created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('id')
     serializer_class = SessionSerializer
     permission_classes = [SessionPermission]
     model_label = "Session"

@@ -8,7 +8,7 @@ from .serializers import UserSerializer, UserDetailsSerializer
 from .permissions import IsAdminUser, UserPermission, UserDetailsPermission
 
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.select_related('role').prefetch_related('user_details', 'user_details__department').all().order_by('id')
+    queryset = User.objects.select_related('role', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').prefetch_related('user_details', 'user_details__department').all().order_by('id')
     serializer_class = UserSerializer
     permission_classes = [UserPermission]
 

@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from common.serializers import TrackingModelSerializerMixin
 from .models import FormModule, FormField, Application, ApplicationStatus, ApplicationUser, ApplicationFee, PaymentTransaction, PaymentStatus
 from institution.models import Program, AcademicYear
 
@@ -129,12 +130,12 @@ class FormModuleListSerializer(serializers.ListSerializer):
         return [FormModule.objects.create(**item) for item in validated_data]
 
 
-class FormModuleSerializer(serializers.ModelSerializer):
+class FormModuleSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = FormModule
         list_serializer_class = FormModuleListSerializer
-        fields = ['id', 'module_name', 'module_key', 'display_order', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = ['id', 'module_name', 'module_key', 'display_order', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
             'module_name': {'required': True},
             'module_key': {
@@ -180,7 +181,7 @@ class FormFieldListSerializer(serializers.ListSerializer):
         return [FormField.objects.create(**item) for item in validated_data]
 
 
-class FormFieldSerializer(serializers.ModelSerializer):
+class FormFieldSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     form_module_id = serializers.PrimaryKeyRelatedField(
         source='form_module',
         queryset=FormModule.objects.all(),
@@ -195,8 +196,8 @@ class FormFieldSerializer(serializers.ModelSerializer):
             'placeholder', 'default_value', 'required', 'unique', 'validation', 
             'choices', 'help_text', 'display_order', 'is_active',
             'created_at', 'updated_at', 'created_by', 'updated_by'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
             'field_key': {'required': True},
             'field_label': {'required': True},
@@ -278,11 +279,11 @@ class FormFieldSerializer(serializers.ModelSerializer):
         return data
 
 
-class ApplicationStatusSerializer(serializers.ModelSerializer):
+class ApplicationStatusSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = ApplicationStatus
-        fields = ['id', 'status_name', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = ['id', 'status_name', 'is_active', 'created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
             'status_name': {
                 'required': True,
@@ -301,11 +302,11 @@ class ApplicationStatusSerializer(serializers.ModelSerializer):
         return value.strip()
 
 
-class ApplicationUserSerializer(serializers.ModelSerializer):
+class ApplicationUserSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = ApplicationUser
-        fields = ['id', 'name', 'email', 'phone_number', 'password', 'created_at', 'updated_at', 'created_by', 'updated_by']
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
+        fields = ['id', 'name', 'email', 'phone_number', 'password', 'created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
             'password': {'write_only': True, 'required': False, 'allow_blank': True, 'allow_null': True},
             'name': {'required': True},
@@ -379,7 +380,7 @@ class ApplicationUserSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
-class ApplicationSerializer(serializers.ModelSerializer):
+class ApplicationSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     candidate_id = serializers.PrimaryKeyRelatedField(
         source='candidate',
         queryset=ApplicationUser.objects.all(),
@@ -412,8 +413,8 @@ class ApplicationSerializer(serializers.ModelSerializer):
             'application_no', 'form_data', 'readable_form_data', 'status_id', 'status_name', 
             'payment_status', 'paid_amount', 'paid_at', 'payment_details',
             'created_at', 'updated_at', 'created_by', 'updated_by'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by', 'application_no', 'payment_status', 'paid_amount', 'paid_at']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by', 'application_no', 'payment_status', 'paid_amount', 'paid_at'] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
             'form_data': {'required': False, 'default': dict},
         }
@@ -756,7 +757,7 @@ class ApplicationSerializer(serializers.ModelSerializer):
         return data
 
 
-class ApplicationFeeSerializer(serializers.ModelSerializer):
+class ApplicationFeeSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     program_id = serializers.PrimaryKeyRelatedField(
         queryset=Program.objects.all(),
         source='program',
@@ -792,8 +793,8 @@ class ApplicationFeeSerializer(serializers.ModelSerializer):
             'updated_at',
             'created_by',
             'updated_by'
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'total_fee']
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'total_fee'] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
             'program': {'write_only': True, 'required': False},
             'academic_year': {'write_only': True, 'required': False},
@@ -841,7 +842,7 @@ class ApplicationFeeSerializer(serializers.ModelSerializer):
         return data
 
 
-class PaymentTransactionSerializer(serializers.ModelSerializer):
+class PaymentTransactionSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     candidate_name = serializers.CharField(source='user.name', read_only=True)
     candidate_email = serializers.CharField(source='user.email', read_only=True)
     candidate_phone = serializers.CharField(source='user.phone_number', read_only=True)

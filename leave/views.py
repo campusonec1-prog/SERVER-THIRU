@@ -82,7 +82,7 @@ def _broadcast_realtime(payload, event_name, target_user_id=None):
 
 
 class LeavePolicyViewSet(AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = LeavePolicy.objects.all().order_by('-id')
+    queryset = LeavePolicy.objects.select_related('academic_year', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('-id')
     serializer_class = LeavePolicySerializer
     permission_classes = [LeavePolicyPermission]
     model_label = "Leave Policy"
@@ -104,7 +104,8 @@ class LeavePolicyViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
 class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = FacultyLeave.objects.select_related(
-        'applicant', 'department', 'academic_year'
+        'applicant', 'department', 'academic_year',
+        'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
     ).prefetch_related(
         'substitutions', 'substitutions__period', 'substitutions__day',
         'substitutions__original_faculty', 'substitutions__substitute_faculty',
@@ -822,7 +823,8 @@ class LeaveHelperViewSet(viewsets.ViewSet):
 class HostelLeaveRequestViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = HostelLeaveRequest.objects.select_related(
         'student', 'student__department', 'student__section', 'student__batch', 'student__application', 'student__application__candidate',
-        'hostel_approved_by', 'hod_approved_by'
+        'hostel_approved_by', 'hod_approved_by',
+        'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
     ).all().order_by('-id')
     serializer_class = HostelLeaveRequestSerializer
     permission_classes = [IsAuthenticated]

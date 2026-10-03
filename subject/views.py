@@ -11,7 +11,7 @@ from .permissions import SubjectPermission
 
 
 class SubjectViewSet(viewsets.ModelViewSet):
-    queryset = Subject.objects.select_related('department', 'regulation', 'semester').all().order_by('id')
+    queryset = Subject.objects.select_related('department', 'regulation', 'semester', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('id')
     serializer_class = SubjectSerializer
     permission_classes = [SubjectPermission]
 
@@ -466,7 +466,10 @@ class SubjectViewSet(viewsets.ModelViewSet):
 
 
 class SharedNotesViewSet(viewsets.ModelViewSet):
-    queryset = SharedNotes.objects.select_related('department', 'batch', 'semester', 'section', 'subject', 'uploaded_by').all().order_by('-created_at')
+    queryset = SharedNotes.objects.select_related(
+        'department', 'batch', 'semester', 'section', 'subject', 'uploaded_by',
+        'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
+    ).all().order_by('-created_at')
     serializer_class = SharedNotesSerializer
     permission_classes = [permissions.IsAuthenticated]
 
