@@ -342,6 +342,152 @@ class UserViewSet(viewsets.ModelViewSet):
             "message": "Password updated successfully."
         }, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=['post'], permission_classes=[permissions.IsAuthenticated], url_path='heartbeat')
+    def heartbeat(self, request):
+        from django.core.cache import cache
+        from django.utils import timezone
+
+        user = request.user
+        if not user or not getattr(user, 'is_authenticated', False):
+            return Response({"code": 401, "message": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        status_req = str(request.data.get('status', 'online')).lower()
+        user_id = getattr(user, 'id', None)
+        if not user_id:
+            return Response({"code": 200, "message": "OK"})
+
+        user_ids = cache.get('online_user_ids', set())
+        if not isinstance(user_ids, set):
+            user_ids = set(user_ids) if isinstance(user_ids, (list, tuple)) else set()
+
+        if status_req == 'offline':
+            user_ids.discard(user_id)
+            cache.set('online_user_ids', user_ids, timeout=None)
+            cache.delete(f'online_user_{user_id}')
+            return Response({"code": 200, "message": "Marked offline", "status": "offline"})
+
+        # Get user details for enriched response
+        role_name = getattr(user.role, 'role_name', 'User') if hasattr(user, 'role') and user.role else 'User'
+        user_detail = getattr(user, 'user_details', None)
+        first_detail = user_detail.first() if hasattr(user_detail, 'first') else None
+
+        dept_name = None
+        if first_detail and getattr(first_detail, 'department', None):
+            dept_name = getattr(first_detail.department, 'department_name', None) or getattr(first_detail.department, 'short_name', None)
+
+        faculty_code = getattr(first_detail, 'faculty_code', '') if first_detail else ''
+        user_image = getattr(first_detail, 'user_image', '') if first_detail else ''
+
+        ip_addr = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR', ''))
+        if ip_addr and ',' in ip_addr:
+            ip_addr = ip_addr.split(',')[0].strip()
+
+        online_data = {
+            'id': user_id,
+            'name': getattr(user, 'name', '') or getattr(user, 'username', 'User'),
+            'username': getattr(user, 'username', ''),
+            'email': getattr(user, 'mail', '') or getattr(user, 'email', ''),
+            'mobile': getattr(user, 'mobile_number', '') or getattr(user, 'phone_number', ''),
+            'role_name': role_name,
+            'department_name': dept_name,
+            'faculty_code': faculty_code,
+            'user_image': user_image,
+            'last_seen': timezone.now().isoformat(),
+            'ip_address': ip_addr,
+            'status': 'online'
+        }
+
+        cache.set(f'online_user_{user_id}', online_data, timeout=90)
+        user_ids.add(user_id)
+        cache.set('online_user_ids', user_ids, timeout=None)
+
+        return Response({
+            "code": 200,
+            "message": "Heartbeat updated",
+            "status": "online"
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated], url_path='online-users')
+    def online_users(self, request):
+        from django.core.cache import cache
+        from django.utils import timezone
+
+        user = request.user
+        role_name_raw = (getattr(user.role, 'role_name', '') if hasattr(user, 'role') and user.role else '').upper().strip()
+
+        # Check permissions: Admin or Technical Support only
+        is_allowed = getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False) or any(
+            r in role_name_raw for r in ['ADMIN', 'SUPER', 'TECH', 'SUPPORT', 'TS', 'SYSTEM', 'OFFICER']
+        )
+
+        if not is_allowed:
+            return Response({
+                "code": 403,
+                "message": "Access restricted: Only Admin and Technical Support can view active online users."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        user_ids = cache.get('online_user_ids', set())
+        if not isinstance(user_ids, set):
+            user_ids = set(user_ids) if isinstance(user_ids, (list, tuple)) else set()
+
+        # Auto-hydrate current user if not yet in cache
+        user_id = getattr(user, 'id', None)
+        if user_id and not cache.get(f'online_user_{user_id}'):
+            r_name = getattr(user.role, 'role_name', 'Admin') if hasattr(user, 'role') and user.role else 'Admin'
+            current_user_data = {
+                'id': user_id,
+                'name': getattr(user, 'name', '') or getattr(user, 'username', 'User'),
+                'username': getattr(user, 'username', ''),
+                'email': getattr(user, 'mail', '') or getattr(user, 'email', ''),
+                'mobile': getattr(user, 'mobile_number', '') or getattr(user, 'phone_number', ''),
+                'role_name': r_name,
+                'department_name': None,
+                'faculty_code': '',
+                'user_image': '',
+                'last_seen': timezone.now().isoformat(),
+                'ip_address': '',
+                'status': 'online'
+            }
+            cache.set(f'online_user_{user_id}', current_user_data, timeout=90)
+            user_ids.add(user_id)
+            cache.set('online_user_ids', user_ids, timeout=None)
+
+        active_users = []
+        stale_ids = set()
+
+        for uid in list(user_ids):
+            data = cache.get(f'online_user_{uid}')
+            if data:
+                active_users.append(data)
+            else:
+                stale_ids.add(uid)
+
+        # Clean up stale IDs
+        if stale_ids:
+            user_ids.difference_update(stale_ids)
+            cache.set('online_user_ids', user_ids, timeout=None)
+
+        # Search query filter if provided
+        search = request.query_params.get('search', '').strip().lower()
+        if search:
+            active_users = [
+                u for u in active_users
+                if search in u.get('name', '').lower()
+                or search in u.get('username', '').lower()
+                or search in u.get('role_name', '').lower()
+                or search in (u.get('department_name') or '').lower()
+            ]
+
+        # Sort users by last_seen descending
+        active_users.sort(key=lambda x: x.get('last_seen', ''), reverse=True)
+
+        return Response({
+            "code": 200,
+            "message": "Online users fetched successfully",
+            "count": len(active_users),
+            "data": active_users
+        }, status=status.HTTP_200_OK)
+
     def handle_exception(self, exc):
         from django.http import Http404
         from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied
