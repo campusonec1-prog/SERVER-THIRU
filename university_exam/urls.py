@@ -21,6 +21,11 @@ urlpatterns = [
     path('hall-dates/remove/<int:pk>', ExamHallDateViewSet.as_view({'delete': 'destroy'}), name='univ-exam-hall-date-remove'),
 
     # Attendance Import
+    path('import/preview', ExamAttendanceImportViewSet.as_view({'post': 'preview_pdf'}), name='univ-exam-import-preview'),
+    path('import/quick-add-dept', ExamAttendanceImportViewSet.as_view({'post': 'quick_add_dept'}), name='univ-exam-import-quick-add-dept'),
+    path('import/quick-add-subject', ExamAttendanceImportViewSet.as_view({'post': 'quick_add_subject'}), name='univ-exam-import-quick-add-subject'),
+    path('import/quick-add-student', ExamAttendanceImportViewSet.as_view({'post': 'quick_add_student'}), name='univ-exam-import-quick-add-student'),
+    path('import/confirm-save', ExamAttendanceImportViewSet.as_view({'post': 'confirm_save'}), name='univ-exam-import-confirm-save'),
     path('import/upload', ExamAttendanceImportViewSet.as_view({'post': 'upload_pdf'}), name='univ-exam-import-upload'),
     path('import/process', ExamAttendanceImportViewSet.as_view({'post': 'process_imports'}), name='univ-exam-import-process'),
     path('import/list', ExamAttendanceImportViewSet.as_view({'get': 'list'}), name='univ-exam-import-list'),

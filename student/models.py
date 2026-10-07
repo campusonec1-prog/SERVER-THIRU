@@ -14,6 +14,7 @@ class StudentStatus(TrackingModel):
 
 
 class Student(TrackingModel):
+    student_name = models.CharField(max_length=255, null=True, blank=True)
     roll_number = models.CharField(max_length=50, unique=True, null=True, blank=True)
     register_number = models.CharField(max_length=50, unique=True, null=True, blank=True)
     department = models.ForeignKey(
@@ -38,9 +39,11 @@ class Student(TrackingModel):
     )
     application = models.OneToOneField(
         'dynamic_forms.Application',
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         db_column='application_id',
-        related_name='student'
+        related_name='student',
+        null=True,
+        blank=True
     )
     lab_batch = models.CharField(max_length=50, null=True, blank=True)
     quota = models.ForeignKey(
@@ -124,6 +127,8 @@ class Student(TrackingModel):
 
     @property
     def name(self):
+        if self.student_name:
+            return self.student_name
         if self.application and self.application.candidate and self.application.candidate.name:
             return self.application.candidate.name
         if self.application and self.application.form_data and isinstance(self.application.form_data, dict):

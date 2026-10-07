@@ -1256,22 +1256,20 @@ class StudentViewSet(viewsets.ModelViewSet):
         def extract_sem_num(subject_obj):
             if not subject_obj:
                 return 1
-            if hasattr(subject_obj, 'semester_id') and subject_obj.semester_id:
-                try:
-                    return int(subject_obj.semester_id)
-                except (ValueError, TypeError):
-                    pass
-            sem_obj = getattr(subject_obj, 'semester', None) if hasattr(subject_obj, 'semester') else subject_obj
-            if sem_obj and hasattr(sem_obj, 'id') and sem_obj.id:
-                try:
-                    return int(sem_obj.id)
-                except (ValueError, TypeError):
-                    pass
             code = getattr(subject_obj, 'subject_code', '') or ''
             m = re.search(r'^[A-Za-z]+(\d)(\d)', code)
             if m:
                 try:
-                    return int(m.group(2))
+                    sem_digit = int(m.group(2))
+                    if 1 <= sem_digit <= 8:
+                        return sem_digit
+                except (ValueError, TypeError):
+                    pass
+            if hasattr(subject_obj, 'semester_id') and subject_obj.semester_id:
+                try:
+                    s_id = int(subject_obj.semester_id)
+                    if 1 <= s_id <= 8:
+                        return s_id
                 except (ValueError, TypeError):
                     pass
             return 1

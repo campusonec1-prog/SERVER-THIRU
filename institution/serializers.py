@@ -195,11 +195,15 @@ class BatchSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer)
         queryset=Department.objects.all(),
         error_messages={'does_not_exist': 'Department does not exist.'}
     )
+    department_code = serializers.CharField(source='department.department_code', read_only=True)
+    department_name = serializers.CharField(source='department.department_name', read_only=True)
+    department_short_name = serializers.CharField(source='department.short_name', read_only=True)
 
     class Meta:
         model = Batch
         fields = [
-            'id', 'department_id', 'batch', 'is_active',
+            'id', 'department_id', 'department_code', 'department_name', 'department_short_name',
+            'batch', 'is_active',
             'created_at', 'updated_at', 'created_by', 'updated_by',
             'created_by_name', 'created_by_username', 'created_by_role',
             'updated_by_name', 'updated_by_username', 'updated_by_role',

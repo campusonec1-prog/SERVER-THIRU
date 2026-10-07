@@ -184,7 +184,7 @@ def parse_anna_university_pdf(file_bytes):
 # ─── ViewSets ────────────────────────────────────────────────────────────────
 
 class ExamAttendanceImportViewSet(viewsets.ModelViewSet):
-    queryset = ExamAttendanceImport.objects.all().order_by('id')
+    queryset = ExamAttendanceImport.objects.all().order_by('-id')
     serializer_class = ExamAttendanceImportSerializer
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -199,9 +199,16 @@ class ExamAttendanceImportViewSet(viewsets.ModelViewSet):
             qs = qs.filter(exam_date=exam_date)
         return qs
 
-    @action(detail=False, methods=['post'], url_path='upload', parser_classes=[MultiPartParser, FormParser])
-    def upload_pdf(self, request):
-        """Upload a PDF and parse it into the staging table."""
+    @action(detail=False, methods=['post'], url_path='preview', parser_classes=[MultiPartParser, FormParser])
+    def preview_pdf(self, request):
+        """
+        Parse an uploaded PDF and return preview analysis:
+        - Departments Found vs Not Found
+        - Subjects Found vs Not Found
+        - Students Found vs Not Found
+        - Distinct Exam Schedule Slots
+        Does NOT store anything into the database.
+        """
         file_obj = request.FILES.get('file')
         if not file_obj:
             return Response({'error': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
@@ -218,100 +225,623 @@ class ExamAttendanceImportViewSet(viewsets.ModelViewSet):
             return Response({'error': f'Failed to parse PDF: {str(e)}'}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
         if not parsed_rows:
-            return Response({'error': 'No student data found in the PDF'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'No student data found in the PDF. Please verify the format.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from institution.models import Department, Batch
+        from subject.models import Subject
+        from student.models import Student
+
+        # 1. Departments Analysis (Found vs Not Found)
+        all_departments = list(Department.objects.filter(is_active=True).values('id', 'department_code', 'department_name', 'short_name'))
+        dept_code_map = {d['department_code'].lower(): d for d in all_departments if d['department_code']}
+        
+        raw_branches = {}
+        for row in parsed_rows:
+            b_code = (row.get('branch_code') or 'UNKNOWN').strip()
+            b_name = (row.get('branch_name') or '').strip()
+            key = b_code
+            if key not in raw_branches:
+                raw_branches[key] = {
+                    'branch_code': b_code,
+                    'branch_name': b_name,
+                    'student_count': 0
+                }
+            raw_branches[key]['student_count'] += 1
+
+        departments_analysis = []
+        for b_code, b_info in raw_branches.items():
+            matched_dept = dept_code_map.get(b_code.lower())
+            if not matched_dept and b_info['branch_name']:
+                # Try finding by name substring
+                for d in all_departments:
+                    if b_info['branch_name'].lower() in d['department_name'].lower() or d['department_name'].lower() in b_info['branch_name'].lower():
+                        matched_dept = d
+                        break
+
+            is_found = matched_dept is not None
+            departments_analysis.append({
+                'branch_code': b_code,
+                'branch_name': b_info['branch_name'],
+                'is_found': is_found,
+                'mapped_department_id': matched_dept['id'] if matched_dept else (all_departments[0]['id'] if all_departments else None),
+                'matched_department_code': matched_dept['department_code'] if matched_dept else None,
+                'matched_department_name': matched_dept['department_name'] if matched_dept else None,
+                'matched_department_short_name': matched_dept.get('short_name') or (matched_dept['department_code'] if matched_dept else None),
+                'student_count': b_info['student_count']
+            })
+
+        # 2. Subjects Analysis (Found vs Not Found)
+        all_subjects_qs = Subject.objects.filter(is_active=True).select_related(
+            'department', 'regulation', 'semester'
+        )
+        all_subjects = []
+        for s in all_subjects_qs:
+            reg_code = s.regulation.regulation_code if s.regulation else ''
+            if not reg_code and s.regulation and s.regulation.effective_from_year:
+                reg_code = f"R{s.regulation.effective_from_year}"
+
+            sem_str = ""
+            if s.semester:
+                if isinstance(s.semester.semesters, list):
+                    if len(s.semester.semesters) == 1:
+                        sem_str = f"Sem {s.semester.semesters[0]}"
+                    elif 0 < len(s.semester.semesters) <= 3:
+                        sem_str = f"Sem {', '.join(map(str, s.semester.semesters))}"
+                elif s.semester.semesters:
+                    sem_str = f"Sem {s.semester.semesters}"
+
+            dept_short = s.department.short_name if (s.department and s.department.short_name) else (s.department.department_code if s.department else '')
+
+            all_subjects.append({
+                'id': s.id,
+                'subject_code': s.subject_code or '',
+                'subject_name': s.subject_name or '',
+                'department_id': s.department_id,
+                'department_code': s.department.department_code if s.department else '',
+                'department_name': s.department.department_name if s.department else '',
+                'department_short_name': dept_short,
+                'short_name': dept_short,
+                'regulation_id': s.regulation_id,
+                'regulation_code': reg_code,
+                'semester_id': s.semester_id,
+                'semester_name': sem_str,
+            })
+
+        subj_code_map = {}
+        for s in all_subjects:
+            code_lower = s['subject_code'].lower() if s['subject_code'] else ''
+            if code_lower not in subj_code_map:
+                subj_code_map[code_lower] = []
+            subj_code_map[code_lower].append(s)
+        
+        raw_subjects = {}
+        for row in parsed_rows:
+            s_code = (row.get('subject_code') or 'UNKNOWN').strip()
+            s_name = (row.get('subject_name') or '').strip()
+            b_code = (row.get('branch_code') or '').strip()
+            b_name = (row.get('branch_name') or '').strip()
+            key = f"{b_code}__{s_code}" if b_code else s_code
+            if key not in raw_subjects:
+                raw_subjects[key] = {
+                    'key': key,
+                    'subject_code': s_code,
+                    'subject_name': s_name,
+                    'branch_code': b_code,
+                    'branch_name': b_name,
+                    'student_count': 0
+                }
+            raw_subjects[key]['student_count'] += 1
+
+        subjects_analysis = []
+        for key, s_info in raw_subjects.items():
+            s_code = s_info['subject_code']
+            b_code = s_info['branch_code']
+            b_name = s_info['branch_name']
+
+            # Find matched department for this branch
+            matched_dept = dept_code_map.get(b_code.lower())
+            if not matched_dept and b_name:
+                for d in all_departments:
+                    if b_name.lower() in d['department_name'].lower() or d['department_name'].lower() in b_name.lower():
+                        matched_dept = d
+                        break
+
+            matched_dept_id = matched_dept['id'] if matched_dept else None
+
+            # Look for matching subject in this department first
+            matched_subj = None
+            cand_subjs = subj_code_map.get(s_code.lower(), [])
+            if matched_dept_id:
+                for s in cand_subjs:
+                    if s['department_id'] == matched_dept_id:
+                        matched_subj = s
+                        break
+
+            # Fallback to any department matching subject_code
+            if not matched_subj and cand_subjs:
+                matched_subj = cand_subjs[0]
+
+            # Fallback to subject_name matching in the department
+            if not matched_subj and s_info['subject_name'] and matched_dept_id:
+                for s in all_subjects:
+                    if s['department_id'] == matched_dept_id and (
+                        s_info['subject_name'].lower() in s['subject_name'].lower() or
+                        s['subject_name'].lower() in s_info['subject_name'].lower()
+                    ):
+                        matched_subj = s
+                        break
+
+            # Fallback to subject_name matching anywhere
+            if not matched_subj and s_info['subject_name']:
+                for s in all_subjects:
+                    if (
+                        s_info['subject_name'].lower() in s['subject_name'].lower() or
+                        s['subject_name'].lower() in s_info['subject_name'].lower()
+                    ):
+                        matched_subj = s
+                        break
+
+            is_found = matched_subj is not None
+            dept_subjects = [s for s in all_subjects if s['department_id'] == matched_dept_id] if matched_dept_id else []
+            default_subj = dept_subjects[0] if dept_subjects else (all_subjects[0] if all_subjects else None)
+
+            subjects_analysis.append({
+                'key': key,
+                'subject_code': s_code,
+                'subject_name': s_info['subject_name'],
+                'branch_code': b_code,
+                'branch_name': b_name,
+                'mapped_department_id': matched_dept_id,
+                'is_found': is_found,
+                'mapped_subject_id': matched_subj['id'] if matched_subj else (default_subj['id'] if default_subj else None),
+                'matched_subject_code': matched_subj['subject_code'] if matched_subj else None,
+                'matched_subject_name': matched_subj['subject_name'] if matched_subj else None,
+                'matched_regulation_code': matched_subj['regulation_code'] if matched_subj else None,
+                'student_count': s_info['student_count']
+            })
+
+        # 3. Students Analysis (Found vs Not Found)
+        reg_numbers = [r['register_no'] for r in parsed_rows if r.get('register_no')]
+        existing_students = Student.objects.filter(register_number__in=reg_numbers).select_related(
+            'department', 'application', 'application__candidate'
+        )
+        student_map = {}
+        for s in existing_students:
+            s_name = ''
+            if s.application and s.application.form_data:
+                s_name = s.application.form_data.get('personal_info', {}).get('full_name', '')
+            if not s_name and s.application and getattr(s.application, 'candidate', None):
+                s_name = s.application.candidate.name
+            student_map[s.register_number] = {
+                'id': s.id,
+                'name': s_name,
+                'department_id': s.department_id,
+                'department_code': s.department.department_code if s.department else '',
+                'department_name': s.department.department_name if s.department else '',
+            }
+
+        students_analysis = []
+        found_student_count = 0
+        not_found_student_count = 0
+
+        for idx, row in enumerate(parsed_rows, start=1):
+            r_no = (row.get('register_no') or '').strip()
+            db_s = student_map.get(r_no)
+            is_found = db_s is not None
+
+            if is_found:
+                found_student_count += 1
+            else:
+                not_found_student_count += 1
+
+            b_code = (row.get('branch_code') or '').strip()
+            b_name = (row.get('branch_name') or '').strip()
+            matched_dept_for_row = dept_code_map.get(b_code.lower())
+            if not matched_dept_for_row and b_name:
+                for d in all_departments:
+                    if b_name.lower() in d['department_name'].lower() or d['department_name'].lower() in b_name.lower():
+                        matched_dept_for_row = d
+                        break
+
+            students_analysis.append({
+                'key': f"{idx}_{r_no}",
+                'register_no': r_no,
+                'student_name': row.get('student_name') or '',
+                'branch_code': b_code,
+                'branch_name': b_name,
+                'subject_code': row.get('subject_code') or '',
+                'subject_name': row.get('subject_name') or '',
+                'exam_date': row.get('exam_date').strftime('%Y-%m-%d') if row.get('exam_date') else '',
+                'session': row.get('session') or 'FN',
+                'source_page': row.get('source_page', 1),
+                'is_found': is_found,
+                'student_id': db_s['id'] if db_s else None,
+                'db_student_name': db_s['name'] if db_s else '',
+                'db_department_code': db_s['department_code'] if db_s else '',
+                'mapped_department_id': db_s['department_id'] if db_s else (matched_dept_for_row['id'] if matched_dept_for_row else None),
+                'selected': True,
+            })
+
+        # 4. Detected Schedule Slots in the PDF
+        slots_map = {}
+        for row in parsed_rows:
+            s_date = row.get('exam_date').strftime('%Y-%m-%d') if row.get('exam_date') else ''
+            s_session = row.get('session') or 'FN'
+            b_code = row.get('branch_code') or ''
+            s_code = row.get('subject_code') or ''
+            slot_key = f"{b_code}__{s_code}__{s_date}__{s_session}"
+            if slot_key not in slots_map:
+                slots_map[slot_key] = {
+                    'slot_key': slot_key,
+                    'branch_code': b_code,
+                    'subject_code': s_code,
+                    'exam_date': s_date,
+                    'session': s_session,
+                    'student_count': 0
+                }
+            slots_map[slot_key]['student_count'] += 1
+
+        detected_schedules = list(slots_map.values())
+
+        first_row = parsed_rows[0]
+        header_date = first_row.get('exam_date').strftime('%Y-%m-%d') if first_row.get('exam_date') else ''
+        header_session = first_row.get('session') or 'FN'
+
+        return Response({
+            'summary': {
+                'total_candidates': len(students_analysis),
+                'students_found': found_student_count,
+                'students_not_found': not_found_student_count,
+                'total_departments': len(departments_analysis),
+                'departments_found': sum(1 for d in departments_analysis if d['is_found']),
+                'departments_not_found': sum(1 for d in departments_analysis if not d['is_found']),
+                'total_subjects': len(subjects_analysis),
+                'subjects_found': sum(1 for s in subjects_analysis if s['is_found']),
+                'subjects_not_found': sum(1 for s in subjects_analysis if not s['is_found']),
+                'source_file': file_obj.name,
+                'default_exam_date': header_date,
+                'default_session': header_session,
+            },
+            'departments_analysis': departments_analysis,
+            'subjects_analysis': subjects_analysis,
+            'students_analysis': students_analysis,
+            'detected_schedules': detected_schedules,
+            'available_departments': all_departments,
+            'available_subjects': all_subjects,
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='quick-add-dept')
+    def quick_add_dept(self, request):
+        """Quick add missing department from preview slide-over."""
+        from institution.models import Department, Program
+        b_code = (request.data.get('department_code') or '').strip()
+        b_name = (request.data.get('department_name') or '').strip()
+        short_name = (request.data.get('short_name') or '').strip() or b_code
+
+        if not b_code:
+            return Response({'error': 'Department code is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        program = Program.objects.first()
+        if not program:
+            program = Program.objects.create(program_name='Under Graduate Engineering', program_level='UG', duration=4)
+
+        dept, created = Department.objects.get_or_create(
+            department_code=b_code,
+            defaults={
+                'department_name': b_name or b_code,
+                'short_name': short_name,
+                'program': program,
+            }
+        )
+        return Response({
+            'id': dept.id,
+            'department_code': dept.department_code,
+            'department_name': dept.department_name,
+            'created': created
+        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='quick-add-subject')
+    def quick_add_subject(self, request):
+        """Quick add missing subject from preview slide-over."""
+        from institution.models import Department, Regulation, Semester
+        from subject.models import Subject
+
+        s_code = (request.data.get('subject_code') or '').strip()
+        s_name = (request.data.get('subject_name') or '').strip()
+        dept_id = request.data.get('department_id')
+        credits = float(request.data.get('credits') or 3)
+
+        if not s_code:
+            return Response({'error': 'Subject code is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        dept = Department.objects.filter(id=dept_id).first() if dept_id else Department.objects.first()
+        reg = Regulation.objects.first()
+        if not reg:
+            reg = Regulation.objects.create(regulation_code='2021', effective_from_year=2021)
+        sem = Semester.objects.first()
+        if not sem:
+            sem = Semester.objects.create(semester_no=1, semester_name='Semester 1')
+
+        subj, created = Subject.objects.get_or_create(
+            subject_code=s_code,
+            regulation=reg,
+            department=dept,
+            semester=sem,
+            defaults={
+                'subject_name': s_name or s_code,
+                'credits': credits,
+                'is_theory': True,
+            }
+        )
+        return Response({
+            'id': subj.id,
+            'subject_code': subj.subject_code,
+            'subject_name': subj.subject_name,
+            'department_id': subj.department_id,
+            'regulation_id': subj.regulation_id,
+            'regulation_code': subj.regulation.regulation_code if subj.regulation else '2021',
+            'created': created
+        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='quick-add-student')
+    def quick_add_student(self, request):
+        """Quick add missing student directly to students table."""
+        from institution.models import Department, Batch, Section, Quota
+        from student.models import Student, StudentStatus
+
+        reg_no = (request.data.get('register_number') or request.data.get('register_no') or '').strip()
+        roll_no = (request.data.get('roll_number') or '').strip() or None
+        s_name = (request.data.get('student_name') or '').strip() or reg_no
+        dept_id = request.data.get('department_id')
+        branch_code = (request.data.get('branch_code') or request.data.get('department_code') or '').strip()
+        branch_name = (request.data.get('branch_name') or request.data.get('department_name') or '').strip()
+        batch_id = request.data.get('batch_id')
+        section_id = request.data.get('section_id')
+        quota_id = request.data.get('quota_id')
+        status_id = request.data.get('status_id')
+
+        if not reg_no:
+            return Response({'error': 'Register number is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        dept = None
+        if dept_id:
+            dept = Department.objects.filter(id=dept_id).first()
+        if not dept and branch_code:
+            dept = Department.objects.filter(department_code__iexact=branch_code).first()
+        if not dept and branch_name:
+            dept = Department.objects.filter(department_name__icontains=branch_name).first()
+        if not dept:
+            dept = Department.objects.first()
+        batch = None
+        if batch_id:
+            if str(batch_id).isdigit():
+                found_b = Batch.objects.filter(id=int(batch_id)).first()
+                if found_b:
+                    if dept and found_b.department_id != dept.id:
+                        batch, _ = Batch.objects.get_or_create(department=dept, batch=found_b.batch)
+                    else:
+                        batch = found_b
+            else:
+                batch_str = str(batch_id).strip()
+                if dept and batch_str:
+                    batch, _ = Batch.objects.get_or_create(department=dept, batch=batch_str)
+
+        if not batch and dept and reg_no:
+            clean_reg = reg_no.replace(' ', '')
+            year_cand = None
+            if len(clean_reg) >= 10 and clean_reg[4:6].isdigit():
+                year_cand = int(clean_reg[4:6])
+            elif len(clean_reg) >= 8 and clean_reg[:2].isdigit():
+                year_cand = int(clean_reg[:2])
+
+            if year_cand and 15 <= year_cand <= 35:
+                est_batch_name = f"{2000 + year_cand}-{2000 + year_cand + 4}"
+                batch, _ = Batch.objects.get_or_create(department=dept, batch=est_batch_name)
+
+        if not batch and dept:
+            batch = Batch.objects.filter(department=dept).first()
+        if not batch and dept:
+            batch, _ = Batch.objects.get_or_create(department=dept, batch='REGULAR')
+
+        section = Section.objects.filter(id=section_id).first() if section_id else None
+        quota = Quota.objects.filter(id=quota_id).first() if quota_id else None
+        
+        student_status_obj = None
+        if status_id:
+            student_status_obj = StudentStatus.objects.filter(id=status_id).first()
+        if not student_status_obj:
+            student_status_obj, _ = StudentStatus.objects.get_or_create(status_name='ACTIVE')
+
+        student, created = Student.objects.get_or_create(
+            register_number=reg_no,
+            defaults={
+                'student_name': s_name,
+                'roll_number': roll_no,
+                'department': dept,
+                'batch': batch,
+                'section': section,
+                'quota': quota,
+                'status': student_status_obj,
+            }
+        )
+        if not created and s_name and not student.student_name:
+            student.student_name = s_name
+            student.save(update_fields=['student_name'])
+
+        return Response({
+            'id': student.id,
+            'register_number': student.register_number,
+            'student_name': student.student_name or student.name,
+            'department_code': dept.department_code if dept else '',
+            'created': created
+        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='confirm-save')
+    def confirm_save(self, request):
+        """
+        Save the verified preview data, schedule, and attendance roster.
+        Only runs when the user explicitly clicks the confirm button.
+        """
+        data = request.data
+        department_mappings = data.get('department_mappings', {}) # { branch_code: dept_id }
+        subject_mappings = data.get('subject_mappings', {}) # { subject_code or branch_code__subject_code: subj_id }
+        default_dept_id = data.get('department_id')
+        default_subj_id = data.get('subject_id')
+        exam_date_str = data.get('exam_date')
+        session = (data.get('session') or 'FN').upper()
+        qp_code = data.get('qp_code') or ''
+        source_file = data.get('source_file') or 'attendance_upload.pdf'
+        create_missing_students = data.get('create_missing_students', True)
+        records = data.get('records', [])
+
+        if not records:
+            return Response({'error': 'No student records provided to save.'}, status=status.HTTP_400_BAD_REQUEST)
 
         from institution.models import Department, Batch, Program
         from subject.models import Subject
         from student.models import Student, StudentStatus
-        from dynamic_forms.models import Application, ApplicationUser, ApplicationStatus
-        import random
-        import string
 
-        created_records = []
-        for row in parsed_rows:
-            try:
-                dept = Department.objects.filter(department_code=row.get('branch_code')).first()
-                if not dept and row.get('branch_code'):
-                    dept = Department.objects.create(department_code=row.get('branch_code'), department_name=row.get('branch_name'))
-                elif not dept:
-                    dept = Department.objects.first()
+        # Pre-cache mapped departments and subjects
+        dept_cache = {}
+        for b_code, d_id in department_mappings.items():
+            if d_id:
+                dept_obj = Department.objects.filter(id=d_id).first()
+                if dept_obj:
+                    dept_cache[b_code] = dept_obj
 
-                subject = Subject.objects.filter(subject_code=row.get('subject_code')).first()
-                if not subject and row.get('subject_code'):
-                    from institution.models import Regulation, Semester
-                    reg = Regulation.objects.first()
-                    sem = Semester.objects.first()
-                    subject = Subject.objects.create(
-                        subject_code=row.get('subject_code'), 
-                        subject_name=row.get('subject_name'), 
+        subj_cache = {}
+        for s_key, s_id in subject_mappings.items():
+            if s_id:
+                subj_obj = Subject.objects.filter(id=s_id).first()
+                if subj_obj:
+                    subj_cache[s_key] = subj_obj
+
+        # Fallbacks
+        fallback_dept = Department.objects.filter(id=default_dept_id).first() if default_dept_id else Department.objects.first()
+        fallback_subj = Subject.objects.filter(id=default_subj_id).first() if default_subj_id else Subject.objects.first()
+
+        saved_attendance_count = 0
+        new_students_created = 0
+        schedules_created = 0
+
+        with transaction.atomic():
+            schedule_cache = {}
+
+            for row in records:
+                if not row.get('selected', True):
+                    continue
+
+                reg_no = (row.get('register_no') or '').strip()
+                if not reg_no:
+                    continue
+
+                row_b_code = row.get('branch_code') or ''
+                row_s_code = row.get('subject_code') or ''
+                row_s_key = f"{row_b_code}__{row_s_code}"
+                row_date_str = row.get('exam_date') or exam_date_str
+                row_session = (row.get('session') or session).upper()
+
+                dept = dept_cache.get(row_b_code) or fallback_dept
+                subj = subj_cache.get(row_s_key) or subj_cache.get(row_s_code) or fallback_subj
+
+                if not dept or not subj:
+                    continue
+
+                try:
+                    row_date = datetime.datetime.strptime(row_date_str, '%Y-%m-%d').date()
+                except Exception:
+                    row_date = datetime.date.today()
+
+                # Get or create schedule for this specific slot
+                sched_key = f"{dept.id}_{subj.id}_{row_date}_{row_session}"
+                if sched_key not in schedule_cache:
+                    sched_obj, created = UniversityExamSchedule.objects.get_or_create(
                         department=dept,
-                        credits=3,
-                        regulation=reg,
-                        semester=sem
+                        exam_date=row_date,
+                        session=row_session,
+                        subject=subj,
+                        defaults={
+                            'qp_code': qp_code,
+                            'exam_type': 'UNIVERSITY',
+                            'status': 'DRAFT',
+                        }
                     )
+                    if created:
+                        schedules_created += 1
+                    schedule_cache[sched_key] = sched_obj
 
-                student = Student.objects.filter(register_number=row.get('register_no')).first()
-                if not student and row.get('register_no'):
-                    batch, _ = Batch.objects.get_or_create(department=dept, batch='AUTO_IMPORT')
-                    program = Program.objects.first()
-                    status_obj, _ = ApplicationStatus.objects.get_or_create(status_name='APPROVED')
+                schedule = schedule_cache[sched_key]
+
+                # Resolve or Create Student
+                student_id = row.get('student_id')
+                student = None
+                if student_id:
+                    student = Student.objects.filter(id=student_id).first()
+                if not student:
+                    student = Student.objects.filter(register_number=reg_no).first()
+
+                if not student and create_missing_students:
+                    batch = None
+                    clean_reg = reg_no.replace(' ', '')
+                    year_cand = None
+                    if len(clean_reg) >= 10 and clean_reg[4:6].isdigit():
+                        year_cand = int(clean_reg[4:6])
+                    elif len(clean_reg) >= 8 and clean_reg[:2].isdigit():
+                        year_cand = int(clean_reg[:2])
+
+                    if year_cand and 15 <= year_cand <= 35:
+                        est_batch_name = f"{2000 + year_cand}-{2000 + year_cand + 4}"
+                        batch, _ = Batch.objects.get_or_create(department=dept, batch=est_batch_name)
+
+                    if not batch:
+                        batch = Batch.objects.filter(department=dept).first()
+                    if not batch:
+                        batch, _ = Batch.objects.get_or_create(department=dept, batch='REGULAR')
+
+                    s_name = row.get('student_name') or reg_no
                     student_status_obj, _ = StudentStatus.objects.get_or_create(status_name='ACTIVE')
-                    
-                    email = f"dummy_{row.get('register_no')}@example.com"
-                    pwd = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
-                    user, _ = ApplicationUser.objects.get_or_create(
-                        email=email,
-                        defaults={
-                            'name': row.get('student_name') or row.get('register_no'),
-                            'phone_number': '0000000000',
-                            'password': pwd
-                        }
-                    )
-                    
-                    app, _ = Application.objects.get_or_create(
-                        application_no=f"APP-{row.get('register_no')}",
-                        defaults={
-                            'candidate': user,
-                            'program': program,
-                            'status': status_obj,
-                            'form_data': {'personal_info': {'full_name': row.get('student_name') or row.get('register_no')}}
-                        }
-                    )
-                    
+
                     student = Student.objects.create(
-                        register_number=row.get('register_no'),
+                        register_number=reg_no,
+                        student_name=s_name,
                         department=dept,
                         batch=batch,
-                        application=app,
                         status=student_status_obj
                     )
+                    new_students_created += 1
 
-                obj = ExamAttendanceImport.objects.create(
-                    department=dept,
-                    student=student,
-                    subject=subject,
-                    exam_date=row.get('exam_date'),
-                    session=row.get('session'),
-                    source_file=file_obj.name,
-                    source_page=row.get('source_page'),
-                    import_status='PENDING',
-                )
-            except Exception as e:
-                obj = ExamAttendanceImport.objects.create(
-                    exam_date=row.get('exam_date'),
-                    session=row.get('session'),
-                    source_file=file_obj.name,
-                    source_page=row.get('source_page'),
-                    import_status='ERROR',
-                    error_message=str(e)
-                )
-            created_records.append(obj.id)
+                if student:
+                    att_obj, created = UniversityExamAttendance.objects.get_or_create(
+                        exam_schedule=schedule,
+                        student=student,
+                        defaults={
+                            'department': dept,
+                            'qp_code': qp_code,
+                        }
+                    )
+                    if created:
+                        saved_attendance_count += 1
+
+                    # Log to ExamAttendanceImport for history
+                    ExamAttendanceImport.objects.create(
+                        department=dept,
+                        student=student,
+                        subject=subj,
+                        exam_date=row_date,
+                        session=row_session,
+                        source_file=source_file,
+                        source_page=row.get('source_page', 1),
+                        import_status='IMPORTED',
+                    )
 
         return Response({
-            'message': f'Successfully imported {len(created_records)} records',
-            'imported_count': len(created_records),
-            'ids': created_records,
+            'message': f'Successfully created/updated {len(schedule_cache)} exam schedules and saved {saved_attendance_count} attendance records.',
+            'schedules_count': len(schedule_cache),
+            'attendance_count': saved_attendance_count,
+            'new_students_created': new_students_created,
         }, status=status.HTTP_201_CREATED)
+
+
 
     @action(detail=False, methods=['delete'], url_path='clear-pending')
     def clear_pending(self, request):
@@ -331,7 +861,7 @@ class ExamAttendanceImportViewSet(viewsets.ModelViewSet):
             try:
                 if not record.student or not record.subject or not record.department:
                     record.import_status = 'ERROR'
-                    record.error_message = f"Missing student, subject, or department references."
+                    record.error_message = "Missing student, subject, or department references."
                     record.save()
                     errors += 1
                     continue

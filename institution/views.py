@@ -172,7 +172,11 @@ class BatchViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelView
     model_label = "Batch"
 
     def get_queryset(self):
-        return super().get_queryset()
+        qs = super().get_queryset()
+        dept_id = self.request.query_params.get('department_id') or self.request.query_params.get('department')
+        if dept_id:
+            qs = qs.filter(department_id=dept_id)
+        return qs
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
