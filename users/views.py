@@ -147,6 +147,13 @@ class UserViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
     permission_classes = [UserPermission]
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        role_param = self.request.query_params.get('role', None) or self.request.query_params.get('role_name', None)
+        if role_param:
+            qs = qs.filter(role__role_name__icontains=role_param.strip())
+        return qs
+
     def perform_create(self, serializer):
         user = self.request.user if self.request.user and self.request.user.is_authenticated else None
         serializer.save(created_by=user, updated_by=user)

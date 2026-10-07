@@ -61,6 +61,10 @@ class AssetSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
     condition_display = serializers.CharField(source='get_condition_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    current_allocation = serializers.SerializerMethodField(read_only=True)
+    assigned_to_name = serializers.SerializerMethodField(read_only=True)
+    department_name = serializers.SerializerMethodField(read_only=True)
+    allocation_location = serializers.SerializerMethodField(read_only=True)
 
     category = serializers.PrimaryKeyRelatedField(
         queryset=AssetCategory.objects.all(),
@@ -109,12 +113,72 @@ class AssetSerializer(serializers.ModelSerializer):
             'condition_display',
             'status',
             'status_display',
-            'location',
             'description',
+            'current_allocation',
+            'assigned_to_name',
+            'department_name',
+            'allocation_location',
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id',
+            'current_allocation',
+            'assigned_to_name',
+            'department_name',
+            'allocation_location',
+            'created_at',
+            'updated_at'
+        ]
+
+    def _get_active_alloc(self, obj):
+        if hasattr(obj, 'allocations'):
+            all_allocs = obj.allocations.all()
+            for a in all_allocs:
+                if a.is_current:
+                    return a
+            if all_allocs:
+                return all_allocs[0]
+        return obj.allocations.filter(is_current=True).select_related('assigned_to', 'department__program').order_by('-assigned_date', '-id').first()
+
+    def get_current_allocation(self, obj):
+        alloc = self._get_active_alloc(obj)
+        if not alloc:
+            return None
+        dept_label = ''
+        if alloc.department:
+            d_name = (alloc.department.department_name or '').strip()
+            prog_level = (alloc.department.program.program_level if getattr(alloc.department, 'program', None) and getattr(alloc.department.program, 'program_level', None) else '').strip()
+            dept_label = f"{d_name} ({prog_level})" if prog_level else d_name
+
+        user_name = (alloc.assigned_to.name or alloc.assigned_to.username) if alloc.assigned_to else ''
+
+        return {
+            'id': alloc.id,
+            'assigned_to': alloc.assigned_to_id,
+            'assigned_to_name': user_name,
+            'department': alloc.department_id,
+            'department_name': dept_label,
+            'location': alloc.location or '',
+            'assigned_date': alloc.assigned_date,
+            'remarks': alloc.remarks or '',
+        }
+
+    def get_assigned_to_name(self, obj):
+        alloc = self._get_active_alloc(obj)
+        return (alloc.assigned_to.name or alloc.assigned_to.username) if (alloc and alloc.assigned_to) else ''
+
+    def get_department_name(self, obj):
+        alloc = self._get_active_alloc(obj)
+        if not alloc or not alloc.department:
+            return ''
+        d_name = (alloc.department.department_name or '').strip()
+        prog_level = (alloc.department.program.program_level if getattr(alloc.department, 'program', None) and getattr(alloc.department.program, 'program_level', None) else '').strip()
+        return f"{d_name} ({prog_level})" if prog_level else d_name
+
+    def get_allocation_location(self, obj):
+        alloc = self._get_active_alloc(obj)
+        return alloc.location if alloc else ''
 
     def validate_asset_code(self, value):
         if value is None:
@@ -202,14 +266,6 @@ class AssetSerializer(serializers.ModelSerializer):
             trimmed = str(value).strip()
             if len(trimmed) > 100:
                 raise serializers.ValidationError("Invoice number must not exceed 100 characters.")
-            return trimmed or None
-        return value
-
-    def validate_location(self, value):
-        if value is not None:
-            trimmed = str(value).strip()
-            if len(trimmed) > 200:
-                raise serializers.ValidationError("Location must not exceed 200 characters.")
             return trimmed or None
         return value
 
@@ -318,12 +374,6 @@ class AssetAllocationSerializer(serializers.ModelSerializer):
             trimmed = str(value).strip()
             return trimmed or None
         return value
-
-    def to_representation(self, instance):
-        ret = super().to_representation(instance)
-        if not ret.get('location') and getattr(instance, 'asset', None) and getattr(instance.asset, 'location', None):
-            ret['location'] = instance.asset.location
-        return ret
 
 
 class AssetTransferSerializer(serializers.ModelSerializer):

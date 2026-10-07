@@ -11,7 +11,7 @@ from asgiref.sync import async_to_sync
 
 from common.pagination import CustomPageNumberPagination
 from .models import (
-    AssetCategory, Asset, AssetAllocation, AssetStatus, AssetTransfer,
+    AssetCategory, Asset, AssetCondition, AssetAllocation, AssetStatus, AssetTransfer,
     AssetMaintenance, MaintenanceStatus, PreviousAssetStatus,
     AssetDisposal, DisposalStatus, DisposalType
 )
@@ -161,7 +161,7 @@ class AssetCategoryViewSet(viewsets.ModelViewSet):
 
 
 class AssetViewSet(viewsets.ModelViewSet):
-    queryset = Asset.objects.select_related('category').all().order_by('-created_at')
+    queryset = Asset.objects.select_related('category').prefetch_related('allocations__assigned_to', 'allocations__department__program').all().order_by('-created_at')
     serializer_class = AssetSerializer
     permission_classes = [AssetPermission]
     pagination_class = CustomPageNumberPagination
@@ -173,7 +173,6 @@ class AssetViewSet(viewsets.ModelViewSet):
         'model_number',
         'serial_number',
         'vendor_name',
-        'location'
     ]
     filterset_fields = ['category', 'status', 'condition']
 
@@ -255,6 +254,477 @@ class AssetViewSet(viewsets.ModelViewSet):
             "message": "Asset deleted successfully."
         }, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=['post'], url_path='bulk-import')
+    def bulk_import(self, request):
+        import datetime
+        from decimal import Decimal
+        from users.models import User
+        from institution.models import Department
+
+        assets_data = (
+            request.data.get('assets') or
+            request.data.get('data') or
+            request.data.get('rows') or
+            request.data.get('users') or
+            []
+        )
+        if isinstance(request.data, list):
+            assets_data = request.data
+
+        if not assets_data or not isinstance(assets_data, list):
+            return Response({
+                "code": 400,
+                "message": "No asset data provided."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Cache category lookups
+        categories = list(AssetCategory.objects.all())
+        cat_name_map = {c.name.strip().upper(): c for c in categories}
+        cat_id_map = {str(c.id): c for c in categories}
+
+        # Cache User (HOD / Staff) lookups with Roles
+        all_users = list(User.objects.select_related('role').all())
+        user_name_map = {}
+        user_username_map = {}
+        user_id_map = {}
+        user_label_map = {}
+        for u in all_users:
+            r_name = (u.role.role_name if getattr(u, 'role', None) and getattr(u.role, 'role_name', None) else '').strip()
+            if u.name:
+                u_name_clean = u.name.strip().upper()
+                user_name_map[u_name_clean] = u
+                if r_name:
+                    user_label_map[f"{u_name_clean} ({r_name.upper()})"] = u
+            if u.username:
+                u_uname_clean = u.username.strip().upper()
+                user_username_map[u_uname_clean] = u
+                if r_name:
+                    user_label_map[f"{u_uname_clean} ({r_name.upper()})"] = u
+            user_id_map[str(u.id)] = u
+
+        # Cache Department lookups with Program Levels (UG/PG)
+        all_depts = list(Department.objects.select_related('program').all())
+        dept_name_map = {}
+        dept_code_map = {}
+        dept_id_map = {}
+        dept_level_map = {}
+        for d in all_depts:
+            d_name_clean = (d.department_name or '').strip().upper()
+            prog_level = (d.program.program_level if getattr(d, 'program', None) and getattr(d.program, 'program_level', None) else '').strip().upper()
+            if d_name_clean:
+                dept_name_map[d_name_clean] = d
+                if prog_level:
+                    dept_level_map[f"{d_name_clean} ({prog_level})"] = d
+            if d.department_code:
+                dept_code_map[d.department_code.strip().upper()] = d
+            dept_id_map[str(d.id)] = d
+
+        seen_codes = set()
+        seen_serials = set()
+        existing_codes = set(Asset.objects.values_list('asset_code', flat=True))
+        existing_codes_upper = {c.upper() for c in existing_codes if c}
+        existing_serials = set(Asset.objects.exclude(serial_number__isnull=True).exclude(serial_number='').values_list('serial_number', flat=True))
+        existing_serials_upper = {s.upper() for s in existing_serials if s}
+
+        errors = []
+        validated_assets = []
+
+        def parse_date_val(raw_val):
+            if raw_val is None:
+                return None
+            val_str = str(raw_val).strip()
+            if not val_str or val_str.lower() in ('none', 'null', '—', '-', 'n/a', 'na'):
+                return None
+            if isinstance(raw_val, datetime.datetime):
+                return raw_val.date()
+            if isinstance(raw_val, datetime.date):
+                return raw_val
+
+            # 1. Handle numeric Excel serial date numbers (e.g. 45332 for 2024-02-10)
+            try:
+                numeric_val = float(val_str)
+                if 1000 <= numeric_val <= 100000:
+                    excel_base = datetime.date(1899, 12, 30)
+                    return excel_base + datetime.timedelta(days=int(numeric_val))
+            except (ValueError, TypeError):
+                pass
+
+            # 2. Standard string format parsing
+            for fmt in ('%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%Y/%m/%d', '%m/%d/%Y', '%d.%m.%Y', '%Y.%m.%d'):
+                try:
+                    clean_str = val_str.split('T')[0].split(' ')[0]
+                    return datetime.datetime.strptime(clean_str, fmt).date()
+                except ValueError:
+                    pass
+
+            # 3. Fallback dateutil parser
+            try:
+                from dateutil import parser
+                return parser.parse(val_str, dayfirst=True).date()
+            except Exception:
+                return 'INVALID_DATE'
+
+        def normalize_condition(val):
+            if not val:
+                return AssetCondition.NEW
+            clean = str(val).strip().lower()
+            if 'new' in clean:
+                return AssetCondition.NEW
+            if 'good' in clean:
+                return AssetCondition.GOOD
+            if 'fair' in clean:
+                return AssetCondition.FAIR
+            if 'poor' in clean:
+                return AssetCondition.POOR
+            if 'damag' in clean:
+                return AssetCondition.DAMAGED
+            for code, label in AssetCondition.choices:
+                if clean == code.lower() or clean == label.lower():
+                    return code
+            return AssetCondition.NEW
+
+        def normalize_status(val):
+            if not val:
+                return None
+            clean = str(val).strip().lower()
+            if 'avail' in clean:
+                return AssetStatus.AVAILABLE
+            if 'assign' in clean or 'allocat' in clean:
+                return AssetStatus.ASSIGNED
+            if 'maint' in clean:
+                return AssetStatus.MAINTENANCE
+            if 'damag' in clean:
+                return AssetStatus.DAMAGED
+            if 'lost' in clean or 'miss' in clean:
+                return AssetStatus.LOST
+            if 'dispos' in clean or 'scrap' in clean:
+                return AssetStatus.DISPOSED
+            for code, label in AssetStatus.choices:
+                if clean == code.lower() or clean == label.lower():
+                    return code
+            return None
+
+        for idx, a in enumerate(assets_data):
+            row_num = a.get('s_no', idx + 1)
+            asset_code = str(a.get('asset_code', '') or a.get('code', '')).strip()
+            asset_name = str(a.get('asset_name', '') or a.get('name', '')).strip()
+            category_raw = str(a.get('category', '') or a.get('category_name', '') or a.get('category_id', '')).strip()
+            brand = str(a.get('brand', '') or '').strip() or None
+            model_number = str(a.get('model_number', '') or a.get('model', '')).strip() or None
+            serial_number = str(a.get('serial_number', '') or a.get('serial', '') or a.get('serial_no', '')).strip() or None
+            purchase_date_raw = a.get('purchase_date')
+            purchase_price_raw = a.get('purchase_price') or a.get('price')
+            vendor_name = str(a.get('vendor_name', '') or a.get('vendor', '')).strip() or None
+            invoice_number = str(a.get('invoice_number', '') or a.get('invoice', '') or a.get('invoice_no', '')).strip() or None
+            warranty_expiry_raw = a.get('warranty_expiry') or a.get('warranty_date')
+            condition_raw = a.get('condition')
+            status_raw = a.get('status')
+            
+            # Allocation fields
+            assigned_hod_raw = str(
+                a.get('assigned_hod', '') or
+                a.get('assigned_to', '') or
+                a.get('hod', '') or
+                a.get('staff', '') or
+                a.get('assigned_user', '') or
+                ''
+            ).strip()
+            dept_raw = str(
+                a.get('assigned_department', '') or
+                a.get('department', '') or
+                a.get('dept', '') or
+                a.get('department_name', '') or
+                a.get('department_code', '') or
+                ''
+            ).strip()
+            alloc_loc_raw = str(
+                a.get('allocation_location', '') or
+                a.get('location', '') or
+                a.get('room', '') or
+                a.get('lab', '') or
+                ''
+            ).strip() or None
+            
+            description = str(a.get('description', '') or a.get('remarks', '')).strip() or None
+
+            # Skip completely empty rows
+            has_content = any([
+                asset_code, asset_name, category_raw, brand, model_number,
+                serial_number, purchase_date_raw, purchase_price_raw,
+                vendor_name, invoice_number, warranty_expiry_raw,
+                assigned_hod_raw, dept_raw, alloc_loc_raw, description
+            ])
+            if not has_content:
+                continue
+
+            row_errors = []
+
+            # Asset Code Validation
+            if not asset_code:
+                row_errors.append("Asset code is required.")
+            else:
+                if len(asset_code) > 50:
+                    row_errors.append("Asset code must not exceed 50 characters.")
+                code_upper = asset_code.upper()
+                if code_upper in seen_codes:
+                    row_errors.append(f"Duplicate asset code '{asset_code}' in sheet.")
+                else:
+                    seen_codes.add(code_upper)
+                    if code_upper in existing_codes_upper:
+                        row_errors.append(f"Asset code '{asset_code}' already exists in database.")
+
+            # Asset Name Validation
+            if not asset_name:
+                row_errors.append("Asset name is required.")
+            elif len(asset_name) > 200:
+                row_errors.append("Asset name must not exceed 200 characters.")
+
+            # Category Resolution (Optional - defaults to 'General')
+            category_obj = None
+            cat_raw_to_use = category_raw.strip() if category_raw and category_raw.strip() else "General"
+            cat_upper = cat_raw_to_use.upper()
+
+            if cat_upper in cat_name_map:
+                category_obj = cat_name_map[cat_upper]
+            elif cat_raw_to_use in cat_id_map:
+                category_obj = cat_id_map[cat_raw_to_use]
+            else:
+                try:
+                    category_obj, _ = AssetCategory.objects.get_or_create(
+                        name=cat_raw_to_use,
+                        defaults={'is_active': True, 'description': f'Auto-created category on {timezone.now().strftime("%Y-%m-%d")}'}
+                    )
+                    cat_name_map[cat_upper] = category_obj
+                    cat_id_map[str(category_obj.id)] = category_obj
+                except Exception as cat_err:
+                    row_errors.append(f"Failed to resolve category '{cat_raw_to_use}': {str(cat_err)}")
+
+            # Serial Number Validation
+            if serial_number:
+                if len(serial_number) > 150:
+                    row_errors.append("Serial number must not exceed 150 characters.")
+                serial_upper = serial_number.upper()
+                if serial_upper in seen_serials:
+                    row_errors.append(f"Duplicate serial number '{serial_number}' in sheet.")
+                else:
+                    seen_serials.add(serial_upper)
+                    if serial_upper in existing_serials_upper:
+                        row_errors.append(f"Serial number '{serial_number}' already exists in database.")
+
+            # Purchase Date Validation
+            purchase_date = None
+            if purchase_date_raw:
+                res_pdate = parse_date_val(purchase_date_raw)
+                if res_pdate == 'INVALID_DATE':
+                    row_errors.append(f"Invalid purchase date format: '{purchase_date_raw}'. Expected YYYY-MM-DD.")
+                else:
+                    purchase_date = res_pdate
+
+            # Warranty Expiry Validation
+            warranty_expiry = None
+            if warranty_expiry_raw:
+                res_wdate = parse_date_val(warranty_expiry_raw)
+                if res_wdate == 'INVALID_DATE':
+                    row_errors.append(f"Invalid warranty expiry format: '{warranty_expiry_raw}'. Expected YYYY-MM-DD.")
+                else:
+                    warranty_expiry = res_wdate
+
+            # Purchase Price Validation
+            purchase_price = None
+            if purchase_price_raw is not None and str(purchase_price_raw).strip() not in ('', 'None', 'null', '—', '-'):
+                clean_price = str(purchase_price_raw).replace(',', '').replace('$', '').replace('₹', '').strip()
+                try:
+                    price_val = Decimal(clean_price)
+                    if price_val < 0:
+                        row_errors.append("Purchase price cannot be negative.")
+                    else:
+                        purchase_price = price_val
+                except Exception:
+                    row_errors.append(f"Invalid purchase price: '{purchase_price_raw}'. Must be a valid number.")
+
+            # Strings Length Check
+            if brand and len(brand) > 100:
+                row_errors.append("Brand name must not exceed 100 characters.")
+            if model_number and len(model_number) > 100:
+                row_errors.append("Model number must not exceed 100 characters.")
+            if vendor_name and len(vendor_name) > 200:
+                row_errors.append("Vendor name must not exceed 200 characters.")
+            if invoice_number and len(invoice_number) > 100:
+                row_errors.append("Invoice number must not exceed 100 characters.")
+            if alloc_loc_raw and len(alloc_loc_raw) > 200:
+                row_errors.append("Allocation location must not exceed 200 characters.")
+
+            condition = normalize_condition(condition_raw)
+            status_val = normalize_status(status_raw)
+
+            # Resolve Assigned HOD User
+            import re
+            assigned_user_obj = None
+            if assigned_hod_raw and assigned_hod_raw.lower() not in ('none', 'null', '—', '-', 'unassigned'):
+                hod_clean = assigned_hod_raw.strip()
+                hod_upper = hod_clean.upper()
+                hod_stripped = re.sub(r'\(.*?\)', '', hod_clean).strip().upper()
+
+                if hod_upper in user_label_map:
+                    assigned_user_obj = user_label_map[hod_upper]
+                elif hod_upper in user_name_map:
+                    assigned_user_obj = user_name_map[hod_upper]
+                elif hod_upper in user_username_map:
+                    assigned_user_obj = user_username_map[hod_upper]
+                elif hod_stripped in user_name_map:
+                    assigned_user_obj = user_name_map[hod_stripped]
+                elif hod_stripped in user_username_map:
+                    assigned_user_obj = user_username_map[hod_stripped]
+                elif hod_clean in user_id_map:
+                    assigned_user_obj = user_id_map[hod_clean]
+                else:
+                    # Fuzzy match
+                    matched_user = None
+                    for uname, uobj in user_name_map.items():
+                        if uname in hod_upper or hod_upper in uname or (hod_stripped and (uname in hod_stripped or hod_stripped in uname)):
+                            matched_user = uobj
+                            break
+                    if matched_user:
+                        assigned_user_obj = matched_user
+                    else:
+                        row_errors.append(f"Assigned user / HOD '{assigned_hod_raw}' not found.")
+
+            # Resolve Assigned Department (with UG/PG support)
+            dept_obj = None
+            if dept_raw and dept_raw.lower() not in ('none', 'null', '—', '-', 'unassigned'):
+                dept_clean = dept_raw.strip()
+                dept_upper = dept_clean.upper()
+                dept_stripped = re.sub(r'\(.*?\)', '', dept_clean).strip().upper()
+
+                if dept_upper in dept_level_map:
+                    dept_obj = dept_level_map[dept_upper]
+                elif dept_upper in dept_name_map:
+                    dept_obj = dept_name_map[dept_upper]
+                elif dept_upper in dept_code_map:
+                    dept_obj = dept_code_map[dept_upper]
+                elif dept_stripped in dept_name_map:
+                    dept_obj = dept_name_map[dept_stripped]
+                elif dept_stripped in dept_code_map:
+                    dept_obj = dept_code_map[dept_stripped]
+                elif dept_clean in dept_id_map:
+                    dept_obj = dept_id_map[dept_clean]
+                else:
+                    # Fuzzy match
+                    matched_dept = None
+                    for dname, dobj in dept_name_map.items():
+                        if dname in dept_upper or dept_upper in dname or (dept_stripped and (dname in dept_stripped or dept_stripped in dname)):
+                            matched_dept = dobj
+                            break
+                    if matched_dept:
+                        dept_obj = matched_dept
+                    else:
+                        row_errors.append(f"Department '{dept_raw}' not found.")
+
+            # Final status resolution
+            if assigned_user_obj or dept_obj:
+                status_val = AssetStatus.ASSIGNED
+            elif not status_val:
+                status_val = AssetStatus.AVAILABLE
+
+            if row_errors:
+                errors.append({
+                    "row": row_num,
+                    "asset_code": asset_code or "Unknown",
+                    "errors": row_errors
+                })
+            else:
+                validated_assets.append({
+                    "asset_code": asset_code,
+                    "asset_name": asset_name,
+                    "category": category_obj,
+                    "brand": brand,
+                    "model_number": model_number,
+                    "serial_number": serial_number,
+                    "purchase_date": purchase_date,
+                    "purchase_price": purchase_price,
+                    "vendor_name": vendor_name,
+                    "invoice_number": invoice_number,
+                    "warranty_expiry": warranty_expiry,
+                    "condition": condition,
+                    "status": status_val,
+                    "assigned_to": assigned_user_obj,
+                    "department": dept_obj,
+                    "allocation_location": alloc_loc_raw,
+                    "description": description
+                })
+
+        if errors:
+            return Response({
+                "code": 400,
+                "message": "Validation failed for some rows.",
+                "errors": errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Atomic Save
+        created_assets = []
+        try:
+            with transaction.atomic():
+                for item in validated_assets:
+                    asset = Asset.objects.create(
+                        asset_code=item["asset_code"],
+                        asset_name=item["asset_name"],
+                        category=item["category"],
+                        brand=item["brand"],
+                        model_number=item["model_number"],
+                        serial_number=item["serial_number"],
+                        purchase_date=item["purchase_date"],
+                        purchase_price=item["purchase_price"],
+                        vendor_name=item["vendor_name"],
+                        invoice_number=item["invoice_number"],
+                        warranty_expiry=item["warranty_expiry"],
+                        condition=item["condition"],
+                        status=item["status"],
+                        description=item["description"]
+                    )
+                    created_assets.append(asset)
+
+                    # Create Allocation if assigned to user / department / location
+                    if item["assigned_to"] or item["department"] or item["allocation_location"] or item["status"] == AssetStatus.ASSIGNED:
+                        AssetAllocation.objects.create(
+                            asset=asset,
+                            assigned_to=item["assigned_to"],
+                            department=item["department"],
+                            location=item["allocation_location"],
+                            is_current=True,
+                            remarks="Allocated via bulk Excel import"
+                        )
+
+                    # Real-time WebSocket event
+                    try:
+                        channel_layer = get_channel_layer()
+                        if channel_layer:
+                            async_to_sync(channel_layer.group_send)(
+                                'realtime_updates',
+                                {
+                                    'type': 'broadcast_update',
+                                    'data': {
+                                        'model': 'Asset',
+                                        'event': 'asset_created',
+                                        'data': AssetSerializer(asset).data
+                                    }
+                                }
+                            )
+                    except Exception:
+                        pass
+        except Exception as e:
+            return Response({
+                "code": 500,
+                "message": f"Database save failed: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({
+            "code": 201,
+            "message": f"Successfully imported {len(created_assets)} assets.",
+            "data": {
+                "count": len(created_assets)
+            }
+        }, status=status.HTTP_201_CREATED)
+
 
 class AssetAllocationViewSet(viewsets.ModelViewSet):
     queryset = AssetAllocation.objects.select_related(
@@ -269,7 +739,6 @@ class AssetAllocationViewSet(viewsets.ModelViewSet):
         'asset__asset_name',
         'asset__serial_number',
         'location',
-        'asset__location',
         'assigned_to__name',
         'assigned_to__username',
         'department__department_name',
@@ -394,12 +863,7 @@ class AssetAllocationViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             allocation = serializer.save(is_current=True)
             asset.status = AssetStatus.ASSIGNED
-            location_input = request.data.get('location')
-            if location_input is not None:
-                asset.location = str(location_input).strip() or None
-                asset.save(update_fields=['status', 'location', 'updated_at'])
-            else:
-                asset.save(update_fields=['status', 'updated_at'])
+            asset.save(update_fields=['status', 'updated_at'])
 
         broadcast_custom_ws_event('asset_assigned', serializer.data)
 
@@ -620,7 +1084,7 @@ class AssetTransferViewSet(viewsets.ModelViewSet):
 
         from_user = active_alloc.assigned_to
         from_department = active_alloc.department
-        from_location = asset.location
+        from_location = active_alloc.location
 
         to_user_id = request.data.get('to_user') or None
         to_dept_id = request.data.get('to_department') or None
@@ -677,10 +1141,6 @@ class AssetTransferViewSet(viewsets.ModelViewSet):
                 is_current=True,
                 remarks=f"Transferred from previous allocation" + (f": {remarks}" if remarks else ""),
             )
-
-            if new_loc:
-                asset.location = new_loc
-                asset.save(update_fields=['location', 'updated_at'])
 
         serializer = self.get_serializer(transfer)
         broadcast_custom_ws_event('asset_transferred', serializer.data)

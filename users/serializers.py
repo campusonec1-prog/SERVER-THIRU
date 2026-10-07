@@ -12,11 +12,12 @@ class UserSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
         queryset=Role.objects.all(),
         error_messages={'does_not_exist': 'Role does not exist.'}
     )
+    role_name = serializers.CharField(source='role.role_name', read_only=True)
 
     class Meta:
         model = User
         fields = [
-            'id', 'name', 'username', 'password', 'mobile_number', 'mail', 'role_id', 'status',
+            'id', 'name', 'username', 'password', 'mobile_number', 'mail', 'role_id', 'role_name', 'status',
             'created_at', 'updated_at', 'created_by', 'updated_by',
             'created_by_name', 'created_by_username', 'created_by_role',
             'updated_by_name', 'updated_by_username', 'updated_by_role',
