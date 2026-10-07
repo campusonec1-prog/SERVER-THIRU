@@ -41,12 +41,21 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         query = self.request.query_params.get('search')
+        category = self.request.query_params.get('category')
+        status_val = self.request.query_params.get('status')
+        department = self.request.query_params.get('department')
         if query:
             queryset = queryset.filter(
                 Q(title__icontains=query) | Q(author__icontains=query)
                 | Q(author1__icontains=query) | Q(call_no__icontains=query)
                 | Q(acc_no__icontains=query) | Q(isbn__icontains=query)
             )
+        if category:
+            queryset = queryset.filter(category__iexact=category)
+        if status_val:
+            queryset = queryset.filter(status__iexact=status_val)
+        if department:
+            queryset = queryset.filter(department__iexact=department)
         return queryset.order_by('title', 'author')
 
     def perform_create(self, serializer):
@@ -63,10 +72,17 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         response = super().create(request, *args, **kwargs)
         return self._success('Book added successfully', response.data, status.HTTP_201_CREATED)
 
-    @transaction.atomic
     @action(detail=False, methods=['post'], url_path='bulk-import')
     def bulk_import(self, request):
-        books_data = request.data.get('books', [])
+        books_data = (
+            request.data.get('books') or
+            request.data.get('data') or
+            request.data.get('rows') or
+            []
+        )
+        if isinstance(request.data, list):
+            books_data = request.data
+
         if not books_data:
             return Response({'code': 400, 'message': 'No book data provided.'}, status=400)
 
@@ -82,7 +98,6 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
             if value is None:
                 return ''
             cleaned = str(value).strip()
-            # If Excel exported numeric string with .0 (e.g. "123.0" -> "123")
             if cleaned.endswith('.0') and cleaned[:-2].replace('-', '').replace('/', '').isdigit():
                 cleaned = cleaned[:-2]
             return '' if cleaned.lower() in {'-', '—', 'n/a', 'na', 'null', 'none'} else cleaned
@@ -92,9 +107,23 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
                 return None
             if isinstance(value, datetime):
                 return value.date()
-            for date_format in ('%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%m/%d/%Y'):
+            if hasattr(value, 'year') and hasattr(value, 'month') and hasattr(value, 'day'):
+                return value
+            val_str = str(value).strip()
+            # Numeric Excel serial date number
+            try:
+                num_val = float(val_str)
+                if 1000 <= num_val <= 100000:
+                    excel_base = datetime(1899, 12, 30).date()
+                    import timedelta as td
+                    from datetime import timedelta
+                    return excel_base + timedelta(days=int(num_val))
+            except (ValueError, TypeError):
+                pass
+
+            for date_format in ('%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%m/%d/%Y', '%Y/%m/%d', '%d.%m.%Y'):
                 try:
-                    return datetime.strptime(str(value).strip(), date_format).date()
+                    return datetime.strptime(val_str.split('T')[0].split(' ')[0], date_format).date()
                 except ValueError:
                     continue
             return None
@@ -127,27 +156,33 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
             except (TypeError, ValueError, InvalidOperation):
                 return None
 
-        core_fields = {
-            'call_no', 'acc_no', 'title', 'author', 'author1', 'author2', 'author3',
-            'language', 'subject', 'sub_header', 'isbn', 'category', 'publisher', 'shelf_location',
-            'price', 'date_of_purchase', 'location', 'status', 'max_times_issued',
-            'pub_id', 'ven_id', 'department', 'pages', 'year_of_pub', 'curr_name',
-            'remarks', 'total_copies', 'is_active',
-        }
         detail_fields = {'sub_title', 'sub_header', 'sub_header2', 'series', 'notes', 'keyword', 'type', 'pono', 'price_of_curr', 'conver_rate', 'list_price', 'discount', 'vpp'}
 
         for index, row in enumerate(books_data, start=1):
             row_number = row.get('s_no', index)
-            title = clean_value(row.get('title'))
-            author = clean_value(row.get('author') or row.get('author1'))
+            title = clean_value(row.get('title') or row.get('book_title') or row.get('name'))
+            author = clean_value(row.get('author') or row.get('author1') or row.get('author_name'))
             isbn = clean_value(row.get('isbn')) or None
-            row_errors = []
+            acc_no = clean_value(row.get('acc_no') or row.get('accession_no') or row.get('accession_number'))
+            call_no = clean_value(row.get('call_no') or row.get('call_number'))
+            category = clean_value(row.get('category') or row.get('category_name') or row.get('book_category'))
+            department = clean_value(row.get('department') or row.get('dept') or row.get('department_name'))
 
+            # Check if row has any actual content (skip completely blank rows)
+            has_content = any([
+                title, author, isbn, acc_no, call_no, category, department,
+                row.get('subject'), row.get('publisher'), row.get('shelf_location'),
+                row.get('price'), row.get('date_of_purchase')
+            ])
+            if not has_content:
+                continue
+
+            row_errors = []
             if not title:
                 row_errors.append('Title is required.')
 
-            raw_copies = clean_value(row.get('total_copies'))
-            parsed_copies = parse_int(raw_copies, min_val=1, max_val=10000)
+            raw_copies = clean_value(row.get('total_copies') or row.get('copies') or row.get('quantity'))
+            parsed_copies = parse_int(raw_copies, min_val=1, max_val=100000)
             total_copies = parsed_copies if parsed_copies is not None else 1
 
             if row_errors:
@@ -156,32 +191,32 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
 
             details = {key: row.get(key) for key in detail_fields if row.get(key) not in (None, '')}
             validated_books.append({
-                'call_no': clean_value(row.get('call_no')),
-                'acc_no': clean_value(row.get('acc_no')),
+                'call_no': call_no,
+                'acc_no': acc_no,
                 'title': title,
                 'author': author,
                 'author1': clean_value(row.get('author1')),
                 'author2': clean_value(row.get('author2')),
                 'author3': clean_value(row.get('author3')),
-                'language': clean_value(row.get('language')),
+                'language': clean_value(row.get('language') or row.get('lang')),
                 'subject': clean_value(row.get('subject')),
                 'sub_header': clean_value(row.get('sub_header')),
                 'isbn': isbn,
-                'category': clean_value(row.get('category')),
+                'category': category,
                 'publisher': clean_value(row.get('publisher')),
-                'shelf_location': clean_value(row.get('shelf_location')),
-                'price': parse_decimal(row.get('price')),
-                'date_of_purchase': parse_date(row.get('date_of_purchase')),
+                'shelf_location': clean_value(row.get('shelf_location') or row.get('shelf') or row.get('rack')),
+                'price': parse_decimal(row.get('price') or row.get('cost') or row.get('amount')),
+                'date_of_purchase': parse_date(row.get('date_of_purchase') or row.get('purchase_date')),
                 'location': clean_value(row.get('location')),
-                'status': clean_value(row.get('status')) or 'AVAILABLE',
+                'status': clean_value(row.get('status')).upper() or 'AVAILABLE',
                 'max_times_issued': parse_int(row.get('max_times_issued'), min_val=0, max_val=100) or 2,
                 'pub_id': clean_value(row.get('pub_id')),
                 'ven_id': clean_value(row.get('ven_id')),
-                'department': clean_value(row.get('department')),
+                'department': department,
                 'pages': parse_int(row.get('pages'), min_val=1, max_val=100000),
-                'year_of_pub': parse_int(row.get('year_of_pub'), min_val=1000, max_val=2100),
-                'curr_name': clean_value(row.get('curr_name')),
-                'remarks': clean_value(row.get('remarks') or row.get('notes')),
+                'year_of_pub': parse_int(row.get('year_of_pub') or row.get('publication_year') or row.get('year'), min_val=1000, max_val=2100),
+                'curr_name': clean_value(row.get('curr_name')) or 'INR',
+                'remarks': clean_value(row.get('remarks') or row.get('notes') or row.get('description')),
                 'catalog_details': details,
                 'total_copies': total_copies,
                 'available_copies': total_copies,
@@ -195,64 +230,86 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
                 'errors': errors,
             }, status=400)
 
+        if not validated_books:
+            return Response({
+                'code': 400,
+                'message': 'No valid book records found to import.',
+            }, status=400)
+
         tracking_user = self._tracking_user()
-        created_count = 0
-        updated_count = 0
-        model_fields = {
-            field.name for field in LibraryBook._meta.fields
-            if field.name not in {'id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'available_copies'}
-        }
 
+        # High-speed pre-caching for 25,000+ records
+        all_existing = list(LibraryBook.objects.all())
+        existing_by_acc_no = {}
+
+        for b in all_existing:
+            if b.acc_no:
+                existing_by_acc_no[b.acc_no.strip().upper()] = b
+
+        books_to_create = []
+        books_to_update = []
+        seen_keys_in_batch = set()
+
+        updatable_fields = [
+            'call_no', 'acc_no', 'title', 'author', 'author1', 'author2', 'author3',
+            'language', 'subject', 'sub_header', 'isbn', 'category', 'publisher',
+            'shelf_location', 'price', 'date_of_purchase', 'location', 'status',
+            'max_times_issued', 'pub_id', 'ven_id', 'department', 'pages', 'year_of_pub',
+            'curr_name', 'remarks', 'catalog_details', 'total_copies', 'available_copies',
+            'is_active', 'updated_by'
+        ]
+
+        for bdata in validated_books:
+            acc_key = bdata['acc_no'].strip().upper() if bdata['acc_no'] else None
+
+            # In library systems, each row represents a distinct physical book / accession record.
+            # Match ONLY if an explicit Accession Number is provided and matches an existing record.
+            existing = None
+            if acc_key and acc_key in existing_by_acc_no:
+                existing = existing_by_acc_no[acc_key]
+
+            if existing:
+                issued_copies = max(0, existing.total_copies - existing.available_copies)
+                if bdata['total_copies'] < issued_copies:
+                    bdata['total_copies'] = issued_copies
+                bdata['available_copies'] = bdata['total_copies'] - issued_copies
+
+                for f in updatable_fields:
+                    if f in bdata and bdata[f] not in (None, ''):
+                        setattr(existing, f, bdata[f])
+
+                if bdata.get('catalog_details'):
+                    curr_cat = getattr(existing, 'catalog_details', {}) or {}
+                    curr_cat.update(bdata['catalog_details'])
+                    existing.catalog_details = curr_cat
+
+                existing.updated_by = tracking_user
+                if getattr(existing, 'id', None):
+                    if existing.id not in seen_keys_in_batch:
+                        seen_keys_in_batch.add(existing.id)
+                        books_to_update.append(existing)
+            else:
+                new_book = LibraryBook(
+                    **bdata,
+                    created_by=tracking_user,
+                    updated_by=tracking_user
+                )
+                books_to_create.append(new_book)
+                # Register accession number in memory so subsequent rows in the same sheet with the exact same acc_no update
+                if acc_key:
+                    existing_by_acc_no[acc_key] = new_book
+
+        # Execute high-speed chunked database transactions
         with transaction.atomic():
-            for book_data in validated_books:
-                # Find existing book to update:
-                matching_qs = None
-                if book_data['acc_no']:
-                    matching_qs = LibraryBook.objects.filter(acc_no__iexact=book_data['acc_no'])
-                if (not matching_qs or not matching_qs.exists()) and book_data['isbn']:
-                    matching_qs = LibraryBook.objects.filter(isbn__iexact=book_data['isbn'])
-                if (not matching_qs or not matching_qs.exists()) and book_data['call_no'] and book_data['title']:
-                    matching_qs = LibraryBook.objects.filter(call_no__iexact=book_data['call_no'], title__iexact=book_data['title'])
-                if (not matching_qs or not matching_qs.exists()) and book_data['title'] and book_data['author']:
-                    matching_qs = LibraryBook.objects.filter(title__iexact=book_data['title'], author__iexact=book_data['author'])
-                if (not matching_qs or not matching_qs.exists()) and book_data['title'] and not book_data['author']:
-                    matching_qs = LibraryBook.objects.filter(title__iexact=book_data['title'], author='')
-
-                existing = matching_qs.first() if matching_qs and matching_qs.exists() else None
-                if existing:
-                    # Clean up any leftover duplicate rows in DB if they don't have active transactions
-                    if matching_qs.count() > 1:
-                        for dup in matching_qs.exclude(id=existing.id):
-                            if not dup.transactions.filter(returned_on__isnull=True).exists():
-                                dup.delete()
-
-                    issued_copies = max(0, existing.total_copies - existing.available_copies)
-                    if book_data['total_copies'] < issued_copies:
-                        book_data['total_copies'] = issued_copies
-                    book_data['available_copies'] = book_data['total_copies'] - issued_copies
-
-                    for field_name in model_fields:
-                        new_val = book_data.get(field_name)
-                        if new_val not in (None, ''):
-                            setattr(existing, field_name, new_val)
-
-                    if book_data.get('catalog_details'):
-                        current_catalog = getattr(existing, 'catalog_details', {}) or {}
-                        current_catalog.update(book_data['catalog_details'])
-                        existing.catalog_details = current_catalog
-
-                    existing.available_copies = book_data['available_copies']
-                    existing.updated_by = tracking_user
-                    existing.save()
-                    updated_count += 1
-                else:
-                    LibraryBook.objects.create(**book_data, created_by=tracking_user, updated_by=tracking_user)
-                    created_count += 1
+            if books_to_update:
+                LibraryBook.objects.bulk_update(books_to_update, fields=updatable_fields, batch_size=2000)
+            if books_to_create:
+                LibraryBook.objects.bulk_create(books_to_create, batch_size=2000)
 
         return self._success('Books imported successfully', {
-            'count': created_count + updated_count,
-            'created': created_count,
-            'updated': updated_count,
+            'count': len(books_to_create) + len(books_to_update),
+            'created': len(books_to_create),
+            'updated': len(books_to_update),
         }, status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
@@ -273,6 +330,7 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         query = self.request.query_params.get('search')
+        is_active = self.request.query_params.get('is_active')
         if query:
             queryset = queryset.filter(
                 Q(membership_number__icontains=query)
@@ -280,6 +338,9 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
                 | Q(student__register_number__icontains=query)
                 | Q(student__application__candidate__name__icontains=query)
             )
+        if is_active is not None and is_active != '' and is_active != 'ALL':
+            val = is_active.lower() in ('true', '1', 'yes', 'active')
+            queryset = queryset.filter(is_active=val)
         return queryset.order_by('membership_number')
 
     def perform_create(self, serializer):
@@ -316,9 +377,22 @@ class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         query = self.request.query_params.get('search')
         status_filter = self.request.query_params.get('status')
         if query:
-            queryset = queryset.filter(Q(book__title__icontains=query) | Q(member__membership_number__icontains=query) | Q(member__student__roll_number__icontains=query))
-        if status_filter:
-            queryset = queryset.filter(status=status_filter)
+            queryset = queryset.filter(
+                Q(book__title__icontains=query)
+                | Q(member__membership_number__icontains=query)
+                | Q(member__student__roll_number__icontains=query)
+                | Q(member__student__application__candidate__name__icontains=query)
+            )
+        if status_filter and status_filter != 'ALL':
+            today = timezone.localdate()
+            if status_filter == 'ACTIVE':
+                queryset = queryset.filter(returned_on__isnull=True)
+            elif status_filter == 'OVERDUE':
+                queryset = queryset.filter(returned_on__isnull=True, due_on__lt=today)
+            elif status_filter == 'RETURNED':
+                queryset = queryset.filter(returned_on__isnull=False)
+            else:
+                queryset = queryset.filter(status=status_filter)
         return queryset.order_by('-issued_on', '-id')
 
     @transaction.atomic
