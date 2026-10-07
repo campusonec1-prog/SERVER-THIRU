@@ -341,6 +341,12 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         if is_active is not None and is_active != '' and is_active != 'ALL':
             val = is_active.lower() in ('true', '1', 'yes', 'active')
             queryset = queryset.filter(is_active=val)
+        department = self.request.query_params.get('department')
+        if department and department != 'ALL':
+            if str(department).isdigit():
+                queryset = queryset.filter(student__department_id=department)
+            else:
+                queryset = queryset.filter(student__department__department_name__iexact=department)
         return queryset.order_by('membership_number')
 
     def perform_create(self, serializer):
@@ -376,6 +382,7 @@ class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         queryset = super().get_queryset()
         query = self.request.query_params.get('search')
         status_filter = self.request.query_params.get('status')
+        department = self.request.query_params.get('department')
         if query:
             queryset = queryset.filter(
                 Q(book__title__icontains=query)
@@ -393,6 +400,15 @@ class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
                 queryset = queryset.filter(returned_on__isnull=False)
             else:
                 queryset = queryset.filter(status=status_filter)
+        if department and department != 'ALL':
+            if str(department).isdigit():
+                queryset = queryset.filter(
+                    Q(member__student__department_id=department) | Q(book__department__iexact=department)
+                )
+            else:
+                queryset = queryset.filter(
+                    Q(member__student__department__department_name__iexact=department) | Q(book__department__iexact=department)
+                )
         return queryset.order_by('-issued_on', '-id')
 
     @transaction.atomic
