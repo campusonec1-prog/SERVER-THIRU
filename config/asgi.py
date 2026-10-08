@@ -17,14 +17,18 @@ django_asgi_app = get_asgi_application()
 
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
-from django.urls import path
-from common.consumers import RealTimeConsumer
+from django.urls import path, re_path
+from common.consumers import RealTimeConsumer, PresenceConsumer
+
+websocket_urlpatterns = [
+    re_path(r'^ws/realtime/?$', RealTimeConsumer.as_asgi()),
+    re_path(r'^ws/presence/?$', PresenceConsumer.as_asgi()),
+]
 
 application = ProtocolTypeRouter({
     "http": django_asgi_app,
     "websocket": AuthMiddlewareStack(
-        URLRouter([
-            path("ws/realtime/", RealTimeConsumer.as_asgi()),
-        ])
+        URLRouter(websocket_urlpatterns)
     ),
 })
+
