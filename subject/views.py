@@ -3,11 +3,37 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied
+from django.db.models import Q
 from common.caching import get_option_cache_version, invalidate_option_cache
 from django.core.cache import cache
+from institution.models import Regulation, Department, Semester
 from .models import Subject, SharedNotes
 from .serializers import SubjectSerializer, SharedNotesSerializer
 from .permissions import SubjectPermission
+import re
+
+def parse_semester_number(raw_val):
+    if raw_val is None or str(raw_val).strip() == "":
+        return None
+    val_str = str(raw_val).strip().upper()
+    roman_map = {
+        'I': 1, 'II': 2, 'III': 3, 'IV': 4, 'V': 5, 'VI': 6, 'VII': 7, 'VIII': 8,
+        'IX': 9, 'X': 10
+    }
+    clean_sem = re.sub(r'^(?:SEMESTER|SEM|S)[\s\-_.:]*', '', val_str).strip()
+    if clean_sem in roman_map:
+        return roman_map[clean_sem]
+    if val_str in roman_map:
+        return roman_map[val_str]
+    if clean_sem.isdigit():
+        return int(clean_sem)
+    digit_match = re.search(r'\d+', val_str)
+    if digit_match:
+        try:
+            return int(digit_match.group(0))
+        except (ValueError, TypeError):
+            pass
+    return None
 
 
 class SubjectViewSet(viewsets.ModelViewSet):
@@ -134,9 +160,8 @@ class SubjectViewSet(viewsets.ModelViewSet):
         queryset = self.get_queryset()
         
         # Filtering parameters
-        department_id = request.query_params.get('department_id')
-        regulation_id = request.query_params.get('regulation_id')
-        semester_id = request.query_params.get('semester_id')
+        department_id = request.query_params.get('department_id') or request.query_params.get('department')
+        regulation_id = request.query_params.get('regulation_id') or request.query_params.get('regulation')
         is_theory = request.query_params.get('is_theory')
         is_lab = request.query_params.get('is_lab')
         is_active = request.query_params.get('is_active')
@@ -146,8 +171,13 @@ class SubjectViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(department_id=department_id)
         if regulation_id:
             queryset = queryset.filter(regulation_id=regulation_id)
-        if semester_id:
-            queryset = queryset.filter(semester_id=semester_id)
+        semester_val = request.query_params.get('semester_id') or request.query_params.get('semester_number') or request.query_params.get('semester')
+        if semester_val and str(semester_val).isdigit():
+            sem_int = int(semester_val)
+            if sem_int <= 10:
+                queryset = queryset.filter(Q(semester__semester_number=sem_int) | Q(semester_id=sem_int))
+            else:
+                queryset = queryset.filter(semester_id=sem_int)
         if is_theory:
             queryset = queryset.filter(is_theory=is_theory.lower() in ['true', 'yes', '1'])
         if is_lab:
@@ -155,11 +185,11 @@ class SubjectViewSet(viewsets.ModelViewSet):
         if is_active:
             queryset = queryset.filter(is_active=is_active.lower() in ['true', 'yes', '1'])
         if search:
-            from django.db.models import Q
             queryset = queryset.filter(
                 Q(subject_code__icontains=search) |
                 Q(subject_name__icontains=search)
             )
+
 
         if is_unpaginated:
             serializer = self.get_serializer(queryset, many=True)
@@ -328,57 +358,19 @@ class SubjectViewSet(viewsets.ModelViewSet):
 
             # Validate semester
             semester_obj = None
-            semester_num = None
+            semester_num = parse_semester_number(semester_raw)
             if semester_raw is None or str(semester_raw).strip() == "":
                 row_errors.append("Semester is required.")
+            elif semester_num is None or semester_num <= 0:
+                row_errors.append(f"Invalid semester number: '{semester_raw}'. Must be an integer or Roman numeral (I, II, etc.).")
             else:
-                import re
-                val_str = str(semester_raw).strip().upper()
-                roman_map = {
-                    'I': 1, 'II': 2, 'III': 3, 'IV': 4, 'V': 5, 'VI': 6, 'VII': 7, 'VIII': 8,
-                    'IX': 9, 'X': 10
-                }
-                
-                # Strip prefix like "SEMESTER", "SEM", "S"
-                clean_sem = re.sub(r'^(?:SEMESTER|SEM|S)[\s\-_.:]*', '', val_str).strip()
-                
-                if clean_sem in roman_map:
-                    semester_num = roman_map[clean_sem]
-                elif val_str in roman_map:
-                    semester_num = roman_map[val_str]
-                elif clean_sem.isdigit():
-                    semester_num = int(clean_sem)
+                if department_obj:
+                    semester_obj = Semester.objects.filter(department=department_obj, semester_number=semester_num).first()
+                    if not semester_obj:
+                        row_errors.append(f"Semester '{semester_num}' is not configured for department '{department_raw}'.")
                 else:
-                    digit_match = re.search(r'\d+', val_str)
-                    if digit_match:
-                        try:
-                            semester_num = int(digit_match.group(0))
-                        except (ValueError, TypeError):
-                            pass
+                    row_errors.append("Department must be valid to map semester.")
 
-                if semester_num is None or semester_num <= 0:
-                    row_errors.append(f"Invalid semester number: '{semester_raw}'. Must be an integer or Roman numeral (I, II, etc.).")
-                else:
-                    if department_obj:
-                        semester_objs = Semester.objects.filter(department=department_obj)
-                        is_valid_sem = False
-                        for sem_rec in semester_objs:
-                            if isinstance(sem_rec.semesters, list):
-                                configured_nums = []
-                                for s in sem_rec.semesters:
-                                    try:
-                                        configured_nums.append(int(s))
-                                    except (ValueError, TypeError):
-                                        pass
-                                if semester_num in configured_nums:
-                                    is_valid_sem = True
-                                    semester_obj = sem_rec
-                                    break
-                        
-                        if not is_valid_sem:
-                            row_errors.append(f"Semester '{semester_num}' is not configured for department '{department_raw}'.")
-                    else:
-                        row_errors.append("Department must be valid to map semester.")
 
             # In-Sheet Deduplication: If the exact same subject appears multiple times in the uploaded sheet, skip redundant repetitions
             if regulation_obj and department_obj and semester_obj:
@@ -517,7 +509,7 @@ class SharedNotesViewSet(viewsets.ModelViewSet):
         
         department_id = request.query_params.get('department_id')
         batch_id = request.query_params.get('batch_id')
-        semester_id = request.query_params.get('semester_id')
+        semester_param = request.query_params.get('semester_id') or request.query_params.get('semester') or request.query_params.get('semester_number')
         section_id = request.query_params.get('section_id')
         subject_id = request.query_params.get('subject_id')
         folder_name = request.query_params.get('folder_name')
@@ -527,8 +519,12 @@ class SharedNotesViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(department_id=department_id)
         if batch_id:
             queryset = queryset.filter(batch_id=batch_id)
-        if semester_id:
-            queryset = queryset.filter(semester_id=semester_id)
+        if semester_param:
+            if str(semester_param).isdigit():
+                queryset = queryset.filter(Q(semester_id=semester_param) | Q(semester__semester_number=int(semester_param)))
+            else:
+                queryset = queryset.filter(semester_id=semester_param)
+
         if section_id:
             queryset = queryset.filter(section_id=section_id)
         if subject_id:

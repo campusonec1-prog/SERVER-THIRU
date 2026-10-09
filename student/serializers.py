@@ -521,7 +521,12 @@ class CounsellingReportSerializer(TrackingModelSerializerMixin, serializers.Mode
             
         semester = instance.semester
         if semester:
-            ret['semester_name'] = f"Semester JSON ({semester.id})"
+            ret['semester_number'] = semester.semester_number
+            ret['semester_name'] = semester.semester_name or f"Semester {semester.semester_number}"
+        else:
+            ret['semester_number'] = None
+            ret['semester_name'] = ''
+
             
         if instance.created_by:
             ret['counselor_name'] = instance.created_by.name

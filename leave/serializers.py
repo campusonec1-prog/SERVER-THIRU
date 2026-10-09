@@ -59,6 +59,8 @@ class ClassSubstitutionSerializer(TrackingModelSerializerMixin, serializers.Mode
     subject_code = serializers.CharField(source='subject.subject_code', read_only=True)
     subject_name = serializers.CharField(source='subject.subject_name', read_only=True)
     leave_status = serializers.CharField(source='leave_application.status', read_only=True)
+    semester_name = serializers.CharField(source='semester.semester_name', read_only=True, default='')
+    semester_number = serializers.IntegerField(source='semester.semester_number', read_only=True, default=None)
 
     class Meta:
         model = ClassSubstitution
@@ -67,11 +69,12 @@ class ClassSubstitutionSerializer(TrackingModelSerializerMixin, serializers.Mode
             'day', 'day_code', 'original_faculty', 'original_faculty_name',
             'substitute_faculty', 'substitute_faculty_name', 'class_timetable',
             'department', 'department_code', 'batch', 'batch_name',
-            'semester', 'section', 'section_name', 'subject', 'subject_code', 'subject_name',
+            'semester', 'semester_number', 'semester_name', 'section', 'section_name', 'subject', 'subject_code', 'subject_name',
             'status', 'rejection_reason', 'created_at', 'updated_at',
             *TrackingModelSerializerMixin.TRACKING_FIELDS,
         ]
         read_only_fields = ['created_at', 'updated_at']
+
 
     def get_period_time(self, obj):
         if obj.period:

@@ -81,6 +81,7 @@ INSTALLED_APPS = [
     'placement',
     'infrastructure',
     'university_exam',
+    'sms',
 ]
 
 MIDDLEWARE = [
@@ -246,3 +247,13 @@ else:
 RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '').strip()
 RAZORPAY_SECRET_KEY = os.getenv('RAZORPAY_SECRET_KEY', '').strip()
 RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', '').strip()
+
+# Dial4SMS Configuration
+DIAL4SMS_BASE_URL = os.getenv('DIAL4SMS_BASE_URL', 'https://smsssl.dial4sms.com/api/v2/SendSMS').strip()
+DIAL4SMS_API_KEY = os.getenv('DIAL4SMS_API_KEY', '').strip()
+DIAL4SMS_CLIENT_ID = os.getenv('DIAL4SMS_CLIENT_ID', '').strip()
+DIAL4SMS_SENDER_ID = os.getenv('DIAL4SMS_SENDER_ID', '').strip()
+DIAL4SMS_FULLDAY_ABSENT_TEMPLATE_ID = os.getenv('DIAL4SMS_FULLDAY_ABSENT_TEMPLATE_ID', '').strip()
+DIAL4SMS_AFTERNOON_ABSENT_TEMPLATE_ID = os.getenv('DIAL4SMS_AFTERNOON_ABSENT_TEMPLATE_ID', '').strip()
+DIAL4SMS_FEES_TEMPLATE_ID = os.getenv('DIAL4SMS_FEES_TEMPLATE_ID', '').strip()
+DIAL4SMS_MARKS_TEMPLATE_ID = os.getenv('DIAL4SMS_MARKS_TEMPLATE_ID', '').strip()

@@ -43,6 +43,7 @@ urlpatterns = [
     path('api/placement/', include('placement.urls')),
     path('api/infrastructure/', include('infrastructure.urls')),
     path('api/university-exam/', include('university_exam.urls')),
+    path('api/sms/', include('sms.urls')),
     path('api/documents/upload', DocumentUploadView.as_view(), name='document-upload'),
 ]
 

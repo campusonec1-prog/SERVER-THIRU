@@ -299,47 +299,54 @@ class SemesterSerializer(TrackingModelSerializerMixin, serializers.ModelSerializ
         queryset=Department.objects.all(),
         error_messages={'does_not_exist': 'Department does not exist.'}
     )
+    department_name = serializers.CharField(source='department.department_name', read_only=True, default='')
+    department_code = serializers.CharField(source='department.department_code', read_only=True, default='')
+    semester_number = serializers.IntegerField(required=True)
+    semester_name = serializers.CharField(required=False, default='')
 
     class Meta:
         model = Semester
         fields = [
-            'id', 'department_id', 'semesters',
+            'id', 'department_id', 'department_name', 'department_code',
+            'semester_number', 'semester_name',
             'created_at', 'updated_at', 'created_by', 'updated_by',
             'created_by_name', 'created_by_username', 'created_by_role',
             'updated_by_name', 'updated_by_username', 'updated_by_role',
         ]
         read_only_fields = [
+            'department_name', 'department_code',
             'created_at', 'updated_at', 'created_by', 'updated_by',
             'created_by_name', 'created_by_username', 'created_by_role',
             'updated_by_name', 'updated_by_username', 'updated_by_role',
         ]
-        extra_kwargs = {
-            'department_id': {'required': True},
-            'semesters': {'required': True},
-        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         apply_default_error_messages(self.fields)
 
-    def validate_semesters(self, value):
-        """Validate that semesters is a non-empty list of positive integers."""
-        if not isinstance(value, list):
-            raise serializers.ValidationError("Semesters must be an array, e.g. [1, 2, 3].")
-        if len(value) == 0:
-            raise serializers.ValidationError("Semesters array cannot be empty.")
-        for item in value:
-            if not isinstance(item, int):
-                raise serializers.ValidationError(
-                    f"Each semester must be an integer. Got '{item}' which is not valid."
-                )
-            if item <= 0:
-                raise serializers.ValidationError(
-                    f"Each semester number must be greater than 0. Got '{item}'."
-                )
-        if len(value) != len(set(value)):
-            raise serializers.ValidationError("Duplicate semester numbers are not allowed.")
-        return sorted(value)
+    def validate_semester_number(self, value):
+        if value is None or value <= 0:
+            raise serializers.ValidationError("Semester number must be greater than 0.")
+        return value
+
+    def validate(self, data):
+        department = data.get('department', getattr(self.instance, 'department', None))
+        semester_number = data.get('semester_number', getattr(self.instance, 'semester_number', None))
+        
+        if department and semester_number:
+            qs = Semester.objects.filter(department=department, semester_number=semester_number)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({
+                    "semester_number": f"Semester {semester_number} already exists for this department."
+                })
+        
+        if not data.get('semester_name') and semester_number:
+            data['semester_name'] = f"Semester {semester_number}"
+            
+        return data
+
 
 
 # ─── Section ──────────────────────────────────────────────────

@@ -90,6 +90,13 @@ class ExamTimetableSerializer(TrackingModelSerializerMixin, serializers.ModelSer
                 "academic_year_id": "Academic year must be active."
             })
             
+        department = data.get('department')
+        semester = data.get('semester')
+        if department and semester and semester.department_id != department.id:
+            raise serializers.ValidationError({
+                "semester_id": f"Selected semester belongs to department '{semester.department.department_name}', not '{department.department_name}'."
+            })
+            
         return data
 
     def to_representation(self, instance):
@@ -128,9 +135,12 @@ class ExamTimetableSerializer(TrackingModelSerializerMixin, serializers.ModelSer
             
         # 5. semester details
         if instance.semester:
-            ret['semester_name'] = f"Semester {instance.semester_id}"
+            ret['semester_number'] = instance.semester.semester_number
+            ret['semester_name'] = instance.semester.semester_name or f"Semester {instance.semester.semester_number}"
         else:
+            ret['semester_number'] = None
             ret['semester_name'] = ''
+
             
         # 6. exam details
         if instance.exam:
@@ -281,6 +291,13 @@ class ClassTimetableSerializer(TrackingModelSerializerMixin, serializers.ModelSe
                 })
             elif not activity_type.display_subject:
                 data['subject'] = None
+        department = data.get('department')
+        semester = data.get('semester')
+        if department and semester and semester.department_id != department.id:
+            raise serializers.ValidationError({
+                "semester_id": f"Selected semester belongs to department '{semester.department.department_name}', not '{department.department_name}'."
+            })
+
         return data
 
     def to_representation(self, instance):
@@ -339,9 +356,12 @@ class ClassTimetableSerializer(TrackingModelSerializerMixin, serializers.ModelSe
             
         # 7. semester details
         if instance.semester:
-            ret['semester_name'] = f"Semester {instance.semester_id}"
+            ret['semester_number'] = instance.semester.semester_number
+            ret['semester_name'] = instance.semester.semester_name or f"Semester {instance.semester.semester_number}"
         else:
+            ret['semester_number'] = None
             ret['semester_name'] = ''
+
             
         # 8. subject details
         if instance.subject:

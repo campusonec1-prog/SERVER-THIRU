@@ -150,13 +150,23 @@ class Semester(TrackingModel):
         db_column='department_id',
         related_name='semesters'
     )
-    semesters = models.JSONField(default=list)
+    semester_number = models.PositiveSmallIntegerField(default=1)
+    semester_name = models.CharField(max_length=50, default='Semester 1')
 
     class Meta:
         db_table = 'semesters'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['department', 'semester_number'],
+                name='unique_department_semester_number'
+            )
+        ]
+        ordering = ['department', 'semester_number']
 
     def __str__(self):
-        return f"Semesters for {self.department.department_name}"
+        dept_name = getattr(self.department, 'department_name', getattr(self.department, 'name', 'Dept'))
+        return f"{dept_name} - {self.semester_name}"
+
 
 
 class Section(TrackingModel):

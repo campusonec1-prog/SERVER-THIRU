@@ -306,8 +306,9 @@ class LMSAssessmentSerializer(TrackingModelSerializerMixin, serializers.ModelSer
 
     def get_semester_name(self, obj):
         if obj.semester:
-            return f"Semester {obj.semester.id}"
+            return obj.semester.semester_name or f"Semester {obj.semester.semester_number}"
         return None
+
 
     def get_created_by_name(self, obj):
         if obj.created_by:

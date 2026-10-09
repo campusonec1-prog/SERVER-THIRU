@@ -274,10 +274,20 @@ class RegulationViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.Mode
 # ─── Semester ───────────────────────────────────────────────────
 
 class SemesterViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = Semester.objects.select_related('department', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('id')
+    queryset = Semester.objects.select_related('department', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('department_id', 'semester_number')
     serializer_class = SemesterSerializer
     permission_classes = [SemesterPermission]
     model_label = "Semester"
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        dept_id = self.request.query_params.get('department_id') or self.request.query_params.get('department')
+        if dept_id:
+            qs = qs.filter(department_id=dept_id)
+        sem_num = self.request.query_params.get('semester_number') or self.request.query_params.get('semester')
+        if sem_num and str(sem_num).isdigit():
+            qs = qs.filter(semester_number=int(sem_num))
+        return qs.order_by('department_id', 'semester_number')
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
@@ -287,17 +297,103 @@ class SemesterViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelV
         response = super().retrieve(request, *args, **kwargs)
         return Response({"code": 200, "message": "Semester retrieved successfully", "data": response.data}, status=status.HTTP_200_OK)
 
+    def _sync_department_semesters(self, request, dept_id, semesters_data, status_code=status.HTTP_200_OK):
+        from django.db import transaction
+        try:
+            dept = Department.objects.get(id=dept_id)
+        except Department.DoesNotExist:
+            return Response({"code": 404, "message": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        valid_nums = []
+        for s in semesters_data:
+            try:
+                num = int(s)
+                if num > 0:
+                    valid_nums.append(num)
+            except (ValueError, TypeError):
+                pass
+        valid_nums = sorted(list(set(valid_nums)))
+
+        if not valid_nums:
+            return Response({"code": 400, "message": "At least one valid semester number must be provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user if request.user and request.user.is_authenticated else None
+        from users.models import User as StandardUser
+        tracking_user = user if isinstance(user, StandardUser) else None
+
+        with transaction.atomic():
+            existing = Semester.objects.filter(department=dept)
+            existing_map = {s.semester_number: s for s in existing}
+
+            # Delete semesters no longer selected
+            for num, inst in list(existing_map.items()):
+                if num not in valid_nums:
+                    inst.delete()
+
+            # Create missing semesters
+            for num in valid_nums:
+                if num not in existing_map:
+                    Semester.objects.create(
+                        department=dept,
+                        semester_number=num,
+                        semester_name=f"Semester {num}",
+                        created_by=tracking_user,
+                        updated_by=tracking_user
+                    )
+
+            invalidate_option_cache("Semester")
+            all_dept_sems = Semester.objects.filter(department=dept).order_by('semester_number')
+            serializer = SemesterSerializer(all_dept_sems, many=True)
+            return Response({
+                "code": status_code,
+                "message": "Semesters configured successfully",
+                "data": serializer.data
+            }, status=status_code)
+
     def create(self, request, *args, **kwargs):
+        data = request.data
+        department_id = data.get('department_id')
+        semesters_data = data.get('semesters')
+
+        # Scenario A: Bulk sync by department (e.g. from ManageSemesters form: { department_id: 1, semesters: [1, 2, 3, 4] })
+        if department_id and isinstance(semesters_data, list):
+            return self._sync_department_semesters(request, department_id, semesters_data, status_code=status.HTTP_201_CREATED)
+
+        # Scenario B: Standard single record creation
         response = super().create(request, *args, **kwargs)
+        invalidate_option_cache("Semester")
         return Response({"code": 201, "message": "Semester created successfully", "data": response.data}, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
+        data = request.data
+        semesters_data = data.get('semesters')
+        department_id = data.get('department_id')
+
+        # Scenario A: Bulk sync by department (e.g. from ManageSemesters edit form: { department_id: 15, semesters: [1, 2] })
+        if isinstance(semesters_data, list):
+            if not department_id:
+                instance = self.get_object()
+                department_id = instance.department_id
+            return self._sync_department_semesters(request, department_id, semesters_data, status_code=status.HTTP_200_OK)
+
+        # Scenario B: Standard single record update
         response = super().update(request, *args, **kwargs)
+        invalidate_option_cache("Semester")
         return Response({"code": 200, "message": "Semester updated successfully", "data": response.data}, status=status.HTTP_200_OK)
 
     def destroy(self, request, *args, **kwargs):
-        super().destroy(request, *args, **kwargs)
+        dept_id = request.query_params.get('department_id')
+        if dept_id:
+            Semester.objects.filter(department_id=dept_id).delete()
+            invalidate_option_cache("Semester")
+            return Response({"code": 200, "message": "Department semesters deleted successfully"}, status=status.HTTP_200_OK)
+
+        instance = self.get_object()
+        # Delete all semesters for the department when deleting from department-grouped table
+        Semester.objects.filter(department=instance.department).delete()
+        invalidate_option_cache("Semester")
         return Response({"code": 200, "message": "Semester deleted successfully"}, status=status.HTTP_200_OK)
+
 
 
 # ─── Section ───────────────────────────────────────────────────────
