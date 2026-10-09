@@ -2,29 +2,9 @@ from django.db import models
 from common.models import TrackingModel
 
 class Subject(TrackingModel):
-    COURSE_TYPE_CHOICES = [
-        ('PCC', 'Professional Core Course (PCC)'),
-        ('PEC', 'Professional Elective Course (PEC)'),
-        ('OEC', 'Open Elective Course (OEC)'),
-        ('MC', 'Mandatory Course (MC)'),
-        ('EEC', 'Employability Enhancement / Skill Development (EEC)'),
-        ('HSMC', 'Humanities, Social Sciences & Management (HSMC)'),
-        ('BSC', 'Basic Science Course (BSC)'),
-        ('ESC', 'Engineering Science Course (ESC)'),
-        ('AC', 'Audit Course (AC)'),
-        ('VAC', 'Value Added Course (VAC)'),
-    ]
-
     subject_code = models.CharField(max_length=50, blank=True, null=True)
     subject_name = models.CharField(max_length=150)
     credits = models.FloatField(default=0.0)
-    course_type = models.CharField(
-        max_length=50,
-        choices=COURSE_TYPE_CHOICES,
-        default=None,
-        blank=True,
-        null=True
-    )
     regulation = models.ForeignKey(
         'institution.Regulation',
         on_delete=models.CASCADE,
@@ -51,7 +31,7 @@ class Subject(TrackingModel):
         db_table = 'subjects'
         constraints = [
             models.UniqueConstraint(
-                fields=['subject_code', 'regulation', 'department', 'semester'],
+                fields=['subject_code', 'subject_name', 'regulation', 'department', 'semester'],
                 name='unique_subject_curriculum'
             )
         ]

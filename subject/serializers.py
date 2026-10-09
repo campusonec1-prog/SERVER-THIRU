@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.db.models import Q
 from common.serializers import TrackingModelSerializerMixin
 from .models import Subject, SharedNotes
 from institution.models import Regulation, Department, Semester, Batch, Section
@@ -26,18 +27,23 @@ class SubjectSerializer(TrackingModelSerializerMixin, serializers.ModelSerialize
         queryset=Semester.objects.all(),
         error_messages={'does_not_exist': 'Semester does not exist.'}
     )
+    regulation_code = serializers.CharField(source='regulation.regulation_code', read_only=True, default='')
+    department_name = serializers.CharField(source='department.department_name', read_only=True, default='')
+    department_code = serializers.CharField(source='department.department_code', read_only=True, default='')
 
     class Meta:
         model = Subject
         fields = [
-            'id', 'subject_code', 'subject_name', 'credits', 'course_type',
+            'id', 'subject_code', 'subject_name', 'credits',
             'regulation_id', 'department_id', 'semester_id', 
+            'regulation_code', 'department_name', 'department_code',
             'is_theory', 'is_lab', 'is_active',
             'created_at', 'updated_at', 'created_by', 'updated_by',
             'created_by_name', 'created_by_username', 'created_by_role',
             'updated_by_name', 'updated_by_username', 'updated_by_role',
         ]
         read_only_fields = [
+            'regulation_code', 'department_name', 'department_code',
             'created_at', 'updated_at', 'created_by', 'updated_by',
             'created_by_name', 'created_by_username', 'created_by_role',
             'updated_by_name', 'updated_by_username', 'updated_by_role',
@@ -46,7 +52,6 @@ class SubjectSerializer(TrackingModelSerializerMixin, serializers.ModelSerialize
             'subject_code': {'required': False, 'allow_null': True, 'allow_blank': True},
             'subject_name': {'required': True},
             'credits': {'required': False},
-            'course_type': {'required': False, 'allow_null': True, 'allow_blank': True},
             'semester_id': {'required': True},
             'is_theory': {'required': False},
             'is_lab': {'required': False},
@@ -74,29 +79,30 @@ class SubjectSerializer(TrackingModelSerializerMixin, serializers.ModelSerialize
             raise serializers.ValidationError("Credits cannot be negative.")
         return value
 
-    def validate_course_type(self, value):
-        if value and str(value).strip():
-            return str(value).strip()
-        return None
-
     def validate(self, attrs):
         subject_code = attrs.get('subject_code', getattr(self.instance, 'subject_code', None))
+        subject_name = attrs.get('subject_name', getattr(self.instance, 'subject_name', None))
         regulation = attrs.get('regulation', getattr(self.instance, 'regulation', None))
         department = attrs.get('department', getattr(self.instance, 'department', None))
         semester = attrs.get('semester', getattr(self.instance, 'semester', None))
 
-        if subject_code and str(subject_code).strip() and regulation and department and semester:
+        if subject_name and str(subject_name).strip() and regulation and department and semester:
             qs = Subject.objects.filter(
-                subject_code__iexact=str(subject_code).strip(),
+                subject_name__iexact=str(subject_name).strip(),
                 regulation=regulation,
                 department=department,
                 semester=semester
             )
+            if subject_code and str(subject_code).strip():
+                qs = qs.filter(subject_code__iexact=str(subject_code).strip())
+            else:
+                qs = qs.filter(Q(subject_code__isnull=True) | Q(subject_code=''))
+                
             if self.instance:
                 qs = qs.exclude(pk=self.instance.pk)
             if qs.exists():
                 raise serializers.ValidationError({
-                    "subject_code": "A subject with this code already exists for the selected regulation, department, and semester."
+                    "subject_name": f"Subject '{subject_code + ' - ' if subject_code else ''}{subject_name}' already exists for the selected regulation, department, and semester."
                 })
         return attrs
 
@@ -105,7 +111,6 @@ class SubjectSerializer(TrackingModelSerializerMixin, serializers.ModelSerialize
         ret['regulation_code'] = instance.regulation.regulation_code if instance.regulation else None
         ret['department_name'] = instance.department.department_name if instance.department else None
         ret['department_code'] = instance.department.department_code if instance.department else None
-        ret['course_type_display'] = instance.get_course_type_display() if (hasattr(instance, 'get_course_type_display') and instance.course_type) else (instance.course_type or None)
         
         sec_str = ""
         if instance.semester:

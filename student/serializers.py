@@ -444,7 +444,6 @@ class MarksSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer)
             ret['subject_name'] = subject.subject_name
             ret['subject_code'] = subject.subject_code
             ret['credits'] = float(subject.credits) if subject.credits is not None else 0.0
-            ret['course_type'] = subject.course_type or ''
             
             sem_num = 1
             if hasattr(subject, 'semester_id') and subject.semester_id:

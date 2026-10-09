@@ -1324,7 +1324,6 @@ class StudentViewSet(viewsets.ModelViewSet):
                 is_univ_exam = True
 
             credits_val = float(m.subject.credits) if (m.subject and m.subject.credits is not None) else 0.0
-            course_type_val = m.subject.course_type if m.subject else ''
             gp, is_pass_val, grade_letter = get_grade_point_and_pass(m.marks_obtained)
             credit_points = round(credits_val * gp, 2)
 
@@ -1339,7 +1338,6 @@ class StudentViewSet(viewsets.ModelViewSet):
                 'subject_name': m.subject.subject_name if m.subject else '',
                 'subject_category': m.subject_category or 'THEORY',
                 'credits': credits_val,
-                'course_type': course_type_val,
                 'semester_name': sem_name,
                 'semester_num': sem_num,
                 'marks_obtained': m.marks_obtained,

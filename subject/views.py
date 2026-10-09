@@ -121,14 +121,15 @@ class SubjectViewSet(viewsets.ModelViewSet):
             pass
 
     def list(self, request, *args, **kwargs):
-        if request.query_params.get('no_cache') != 'true':
+        is_unpaginated = request.query_params.get('pagination') == 'false'
+        cache_key = None
+
+        if is_unpaginated and request.query_params.get('no_cache') != 'true':
             version = get_option_cache_version("Subject")
             cache_key = f"opt_cache:Subject:v{version}:{request.get_full_path()}"
             cached = cache.get(cache_key)
             if cached is not None:
                 return Response(cached, status=status.HTTP_200_OK)
-        else:
-            cache_key = None
 
         queryset = self.get_queryset()
         
@@ -136,7 +137,6 @@ class SubjectViewSet(viewsets.ModelViewSet):
         department_id = request.query_params.get('department_id')
         regulation_id = request.query_params.get('regulation_id')
         semester_id = request.query_params.get('semester_id')
-        course_type = request.query_params.get('course_type')
         is_theory = request.query_params.get('is_theory')
         is_lab = request.query_params.get('is_lab')
         is_active = request.query_params.get('is_active')
@@ -148,8 +148,6 @@ class SubjectViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(regulation_id=regulation_id)
         if semester_id:
             queryset = queryset.filter(semester_id=semester_id)
-        if course_type:
-            queryset = queryset.filter(course_type__iexact=course_type)
         if is_theory:
             queryset = queryset.filter(is_theory=is_theory.lower() in ['true', 'yes', '1'])
         if is_lab:
@@ -163,28 +161,33 @@ class SubjectViewSet(viewsets.ModelViewSet):
                 Q(subject_name__icontains=search)
             )
 
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            paginated_response = self.get_paginated_response(serializer.data)
+        if is_unpaginated:
+            serializer = self.get_serializer(queryset, many=True)
             resp_dict = {
                 "code": 200,
                 "message": "Subjects listed successfully",
-                "data": paginated_response.data
+                "data": serializer.data
             }
             if cache_key:
                 cache.set(cache_key, resp_dict, timeout=3600)
             return Response(resp_dict, status=status.HTTP_200_OK)
 
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            paginated_response = self.get_paginated_response(serializer.data)
+            return Response({
+                "code": 200,
+                "message": "Subjects listed successfully",
+                "data": paginated_response.data
+            }, status=status.HTTP_200_OK)
+
         serializer = self.get_serializer(queryset, many=True)
-        resp_dict = {
+        return Response({
             "code": 200,
             "message": "Subjects listed successfully",
             "data": serializer.data
-        }
-        if cache_key:
-            cache.set(cache_key, resp_dict, timeout=3600)
-        return Response(resp_dict, status=status.HTTP_200_OK)
+        }, status=status.HTTP_200_OK)
 
     def retrieve(self, request, *args, **kwargs):
         response = super().retrieve(request, *args, **kwargs)
@@ -235,65 +238,60 @@ class SubjectViewSet(viewsets.ModelViewSet):
         depts_short_map = {d.short_name.upper(): d for d in Department.objects.all()}
         depts_name_map = {d.department_name.upper(): d for d in Department.objects.all()}
         
-        seen_codes = set()
+        seen_combinations = set()
         errors = []
         validated_subjects = []
 
+        import re
+        def is_non_subject_or_placeholder(text):
+            if not text:
+                return False
+            clean = str(text).strip()
+            if not clean:
+                return False
+            compact = re.sub(r'[\s\-_–—:./\\]+', '', clean.lower())
+            prefixes = [
+                'skilldevelopment', 'industryoriented', 'minorelective',
+                'honourselective', 'honourselective', 'openelective',
+                'programmeelective', 'programelective', 'professionalelective',
+                'departmentelective', 'departmentalelective', 'genericelective',
+                'freeelective', 'valueadded', 'auditcourse', 'mandatorycourse',
+                'noncreditcourse', 'bridgecourse', 'employabilityenhancement',
+                'eec', 'capstonedesign', 'capstoneproject', 'designproject',
+                'selfstudy', 'onlinecourse', 'semester', 'regulation',
+                'theory', 'practical', 'practicals', 'laboratory',
+                'totalcredits', 'grandtotal'
+            ]
+            for p in prefixes:
+                if compact == p:
+                    return True
+                if compact.startswith(p):
+                    rest = compact[len(p):]
+                    if re.match(r'^(course|courses|subject|subjects|level|phase|part|basket|group|[ivx\d]+)*$', rest, re.IGNORECASE):
+                        return True
+            return False
+
         for idx, s in enumerate(subjects_data):
             row_num = s.get('s_no', idx + 1)
-            subject_code = str(s.get('subject_code', '')).strip().upper()
+            raw_code = s.get('subject_code')
+            subject_code = str(raw_code).strip().upper() if raw_code is not None and str(raw_code).strip() != '' else None
             subject_name = str(s.get('subject_name', '')).strip()
             credits_raw = s.get('credits')
             regulation_raw = str(s.get('regulation', '')).strip().upper()
             department_raw = str(s.get('department', '')).strip().upper()
             semester_raw = s.get('semester')
             
+            # Skip empty, section divider, banner, or placeholder elective rows
+            if is_non_subject_or_placeholder(subject_name):
+                continue
+            if not subject_name and not subject_code and not regulation_raw and not department_raw:
+                continue
+
             is_theory_raw = s.get('is_theory', True)
             is_lab_raw = s.get('is_lab', False)
             is_active_raw = s.get('is_active', True)
-            course_type_raw = str(s.get('course_type', '') or s.get('type', '')).strip()
 
             row_errors = []
-
-            # Normalize Course Type (Anna University course categories)
-            def normalize_course_type(raw_val):
-                if not raw_val:
-                    return 'PCC'
-                clean = str(raw_val).strip().upper()
-                if clean in ['PCC', 'PC', 'PROFESSIONAL CORE', 'PROFESSIONAL CORE COURSE', 'CORE', 'CORE COURSE']:
-                    return 'PCC'
-                if clean in ['PEC', 'PE', 'PROFESSIONAL ELECTIVE', 'PROFESSIONAL ELECTIVE COURSE', 'ELECTIVE', 'ELECTIVE COURSE']:
-                    return 'PEC'
-                if clean in ['OEC', 'OE', 'OPEN ELECTIVE', 'OPEN ELECTIVE COURSE']:
-                    return 'OEC'
-                if clean in ['MC', 'MANDATORY', 'MANDATORY COURSE', 'MANDATORY COURSES']:
-                    return 'MC'
-                if clean in ['EEC', 'SDC', 'SKILL DEVELOPMENT', 'SKILL DEVELOPMENT COURSE', 'EMPLOYABILITY ENHANCEMENT', 'EMPLOYABILITY ENHANCEMENT / SKILL DEVELOPMENT', 'EMPLOYABILITY ENHANCEMENT COURSE']:
-                    return 'EEC'
-                if clean in ['HSMC', 'HS', 'HUMANITIES', 'HUMANITIES AND SOCIAL SCIENCES', 'HUMANITIES, SOCIAL SCIENCES & MANAGEMENT', 'HUMANITIES, SOCIAL SCIENCES & MANAGEMENT (HSMC)']:
-                    return 'HSMC'
-                if clean in ['BSC', 'BS', 'BASIC SCIENCE', 'BASIC SCIENCE COURSE', 'BASIC SCIENCES', 'BASIC SCIENCE COURSE (BSC)']:
-                    return 'BSC'
-                if clean in ['ESC', 'ES', 'ENGINEERING SCIENCE', 'ENGINEERING SCIENCE COURSE', 'ENGINEERING SCIENCES', 'ENGINEERING SCIENCE COURSE (ESC)']:
-                    return 'ESC'
-                if clean in ['AC', 'AUDIT', 'AUDIT COURSE']:
-                    return 'AC'
-                if clean in ['VAC', 'VALUE ADDED', 'VALUE ADDED COURSE']:
-                    return 'VAC'
-                for code, label in Subject.COURSE_TYPE_CHOICES:
-                    if clean == code or clean in label.upper():
-                        return code
-                return 'PCC'
-
-            course_type_val = normalize_course_type(course_type_raw) if course_type_raw else None
-
-            if subject_code:
-                if subject_code in seen_codes:
-                    row_errors.append(f"Duplicate subject code '{subject_code}' in sheet.")
-                else:
-                    seen_codes.add(subject_code)
-                    if Subject.objects.filter(subject_code__iexact=subject_code).exists():
-                        row_errors.append(f"Subject code '{subject_code}' already exists in database.")
 
             if not subject_name:
                 row_errors.append("Subject name is required.")
@@ -330,23 +328,34 @@ class SubjectViewSet(viewsets.ModelViewSet):
 
             # Validate semester
             semester_obj = None
+            semester_num = None
             if semester_raw is None or str(semester_raw).strip() == "":
                 row_errors.append("Semester is required.")
             else:
+                import re
                 val_str = str(semester_raw).strip().upper()
                 roman_map = {
                     'I': 1, 'II': 2, 'III': 3, 'IV': 4, 'V': 5, 'VI': 6, 'VII': 7, 'VIII': 8,
                     'IX': 9, 'X': 10
                 }
-                semester_num = None
-                if val_str in roman_map:
-                    semester_num = roman_map[val_str]
-                else:
-                    try:
-                        semester_num = int(float(val_str))
-                    except (ValueError, TypeError):
-                        pass
                 
+                # Strip prefix like "SEMESTER", "SEM", "S"
+                clean_sem = re.sub(r'^(?:SEMESTER|SEM|S)[\s\-_.:]*', '', val_str).strip()
+                
+                if clean_sem in roman_map:
+                    semester_num = roman_map[clean_sem]
+                elif val_str in roman_map:
+                    semester_num = roman_map[val_str]
+                elif clean_sem.isdigit():
+                    semester_num = int(clean_sem)
+                else:
+                    digit_match = re.search(r'\d+', val_str)
+                    if digit_match:
+                        try:
+                            semester_num = int(digit_match.group(0))
+                        except (ValueError, TypeError):
+                            pass
+
                 if semester_num is None or semester_num <= 0:
                     row_errors.append(f"Invalid semester number: '{semester_raw}'. Must be an integer or Roman numeral (I, II, etc.).")
                 else:
@@ -354,19 +363,31 @@ class SubjectViewSet(viewsets.ModelViewSet):
                         semester_objs = Semester.objects.filter(department=department_obj)
                         is_valid_sem = False
                         for sem_rec in semester_objs:
-                            if isinstance(sem_rec.semesters, list) and (semester_num in sem_rec.semesters or str(semester_num) in sem_rec.semesters):
-                                is_valid_sem = True
-                                break
+                            if isinstance(sem_rec.semesters, list):
+                                configured_nums = []
+                                for s in sem_rec.semesters:
+                                    try:
+                                        configured_nums.append(int(s))
+                                    except (ValueError, TypeError):
+                                        pass
+                                if semester_num in configured_nums:
+                                    is_valid_sem = True
+                                    semester_obj = sem_rec
+                                    break
                         
-                        if is_valid_sem:
-                            try:
-                                semester_obj = Semester.objects.get(id=semester_num)
-                            except Semester.DoesNotExist:
-                                row_errors.append(f"Semester '{semester_num}' is not configured in the system.")
-                        else:
+                        if not is_valid_sem:
                             row_errors.append(f"Semester '{semester_num}' is not configured for department '{department_raw}'.")
                     else:
                         row_errors.append("Department must be valid to map semester.")
+
+            # In-Sheet Deduplication: If the exact same subject appears multiple times in the uploaded sheet, skip redundant repetitions
+            if regulation_obj and department_obj and semester_obj:
+                code_norm = (subject_code or '').strip().upper()
+                name_norm = (subject_name or '').strip().upper()
+                comb_key = (code_norm, name_norm, regulation_obj.id, department_obj.id)
+                if comb_key in seen_combinations:
+                    continue
+                seen_combinations.add(comb_key)
 
             # Handle booleans
             def parse_bool(val, default):
@@ -394,7 +415,6 @@ class SubjectViewSet(viewsets.ModelViewSet):
                     "subject_code": subject_code,
                     "subject_name": subject_name,
                     "credits": credits_val,
-                    "course_type": course_type_val,
                     "regulation": regulation_obj,
                     "department": department_obj,
                     "semester": semester_obj,
@@ -419,20 +439,24 @@ class SubjectViewSet(viewsets.ModelViewSet):
         try:
             with transaction.atomic():
                 for s_data in validated_subjects:
-                    subject = Subject.objects.create(
+                    subject, created = Subject.objects.update_or_create(
                         subject_code=s_data["subject_code"],
                         subject_name=s_data["subject_name"],
-                        credits=s_data["credits"],
-                        course_type=s_data["course_type"],
                         regulation=s_data["regulation"],
                         department=s_data["department"],
                         semester=s_data["semester"],
-                        is_theory=s_data["is_theory"],
-                        is_lab=s_data["is_lab"],
-                        is_active=s_data["is_active"],
-                        created_by=tracking_user,
-                        updated_by=tracking_user
+                        defaults={
+                            "credits": s_data["credits"],
+                            "is_theory": s_data["is_theory"],
+                            "is_lab": s_data["is_lab"],
+                            "is_active": s_data["is_active"],
+                            "updated_by": tracking_user,
+                        }
                     )
+                    if created and tracking_user:
+                        subject.created_by = tracking_user
+                        subject.save(update_fields=['created_by'])
+
                     created_subjects.append(subject)
                     
                     # Broadcast create event
