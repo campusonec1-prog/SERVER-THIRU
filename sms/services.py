@@ -3,6 +3,7 @@ import re
 import json
 import logging
 import datetime
+import urllib.parse
 import requests
 from django.conf import settings
 from .models import SMSLog
@@ -11,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Dial4SMS Configuration (Loaded dynamically from settings/.env)
 DEFAULT_DIAL4SMS_BASE_URL = getattr(settings, 'DIAL4SMS_BASE_URL', os.getenv('DIAL4SMS_BASE_URL', 'https://smsssl.dial4sms.com/api/v2/SendSMS'))
+DEFAULT_BALANCE_URL = getattr(settings, 'DIAL4SMS_BALANCE_URL', os.getenv('DIAL4SMS_BALANCE_URL', 'https://smsssl.dial4sms.com/api/v2/Balance'))
 DEFAULT_API_KEY = getattr(settings, 'DIAL4SMS_API_KEY', os.getenv('DIAL4SMS_API_KEY', ''))
 DEFAULT_CLIENT_ID = getattr(settings, 'DIAL4SMS_CLIENT_ID', os.getenv('DIAL4SMS_CLIENT_ID', ''))
 DEFAULT_SENDER_ID = getattr(settings, 'DIAL4SMS_SENDER_ID', os.getenv('DIAL4SMS_SENDER_ID', ''))
@@ -422,3 +424,92 @@ def send_afternoon_absent_sms_to_student(student, absent_date, user=None, recipi
         'log_id': log_entry.id,
         'gateway_response': gw_result['gateway_response']
     }
+
+
+def get_dial4sms_balance(api_key=None, client_id=None):
+    """
+    Fetches live SMS credit balance from Dial4SMS Gateway API:
+    GET http://smsssl.dial4sms.com/api/v2/Balance?ApiKey={ApiKey}&ClientId={ClientId}
+    """
+    api_key = api_key or DEFAULT_API_KEY
+    client_id = client_id or DEFAULT_CLIENT_ID
+
+    if not api_key or not client_id:
+        return {
+            'success': False,
+            'error': 'Dial4SMS API Key or Client ID is not configured.',
+            'credits_raw': '0',
+            'credits': 0.0,
+            'plugin_type': 'SMS',
+            'currency_or_unit': 'Credits',
+        }
+
+    try:
+        base_url = DEFAULT_BALANCE_URL or 'https://smsssl.dial4sms.com/api/v2/Balance'
+        encoded_key = urllib.parse.quote_plus(str(api_key).strip())
+        encoded_client = urllib.parse.quote_plus(str(client_id).strip())
+        url = f"{base_url}?ApiKey={encoded_key}&ClientId={encoded_client}"
+
+        headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+        }
+        resp = requests.get(url, headers=headers, timeout=10)
+
+        if resp.status_code != 200:
+            return {
+                'success': False,
+                'error': f'Dial4SMS balance API returned HTTP {resp.status_code}',
+                'credits_raw': '0',
+                'credits': 0.0,
+                'plugin_type': 'SMS',
+                'currency_or_unit': 'Credits',
+            }
+
+        data = resp.json()
+        error_code = data.get('ErrorCode', 0)
+        error_desc = data.get('ErrorDescription', 'Success')
+        data_list = data.get('Data', [])
+
+        if error_code != 0:
+            return {
+                'success': False,
+                'error': f"Dial4SMS Error ({error_code}): {error_desc}",
+                'credits_raw': '0',
+                'credits': 0.0,
+                'plugin_type': 'SMS',
+                'currency_or_unit': 'Credits',
+            }
+
+        first_item = data_list[0] if isinstance(data_list, list) and len(data_list) > 0 else {}
+        raw_credits = str(first_item.get('Credits', '0'))
+        plugin_type = first_item.get('PluginType', 'SMS')
+
+        # Clean numeric credits from string like "CREDITS100005.000000" or "€0.6991"
+        cleaned_num = re.sub(r'[^\d.]', '', raw_credits)
+        try:
+            numeric_credits = float(cleaned_num) if cleaned_num else 0.0
+        except ValueError:
+            numeric_credits = 0.0
+
+        return {
+            'success': True,
+            'error': None,
+            'error_description': error_desc,
+            'credits_raw': raw_credits,
+            'credits': numeric_credits,
+            'plugin_type': plugin_type,
+            'currency_or_unit': 'Credits',
+            'is_low_balance': numeric_credits < 500,
+        }
+    except Exception as e:
+        logger.exception("Failed to query Dial4SMS balance")
+        return {
+            'success': False,
+            'error': str(e),
+            'credits_raw': '0',
+            'credits': 0.0,
+            'plugin_type': 'SMS',
+            'currency_or_unit': 'Credits',
+        }
+

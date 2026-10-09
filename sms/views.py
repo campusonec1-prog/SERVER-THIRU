@@ -1,5 +1,6 @@
 import datetime
 import logging
+from django.conf import settings
 from django.db.models import Q, Max
 from rest_framework import status, permissions
 from rest_framework.views import APIView
@@ -20,6 +21,7 @@ from .services import (
     get_student_sms_info,
     send_full_day_absent_sms_to_student,
     send_afternoon_absent_sms_to_student,
+    get_dial4sms_balance,
 )
 
 logger = logging.getLogger(__name__)
@@ -582,3 +584,145 @@ class SMSLogViewSet(ReadOnlyModelViewSet):
             qs = qs.filter(status=status_filter)
 
         return qs
+
+
+class SMSBalanceView(APIView):
+    """
+    Returns the real-time SMS credit balance from Dial4SMS Gateway API:
+    GET http://smsssl.dial4sms.com/api/v2/Balance?ApiKey={ApiKey}&ClientId={ClientId}
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        balance_info = get_dial4sms_balance()
+        status_code = status.HTTP_200_OK if balance_info.get('success') else status.HTTP_200_OK
+        return Response({
+            "code": 200 if balance_info.get('success') else 502,
+            "message": "SMS credit balance retrieved successfully" if balance_info.get('success') else (balance_info.get('error') or "Failed to retrieve balance"),
+            "data": balance_info
+        }, status=status_code)
+
+
+class SMSDashboardStatsView(APIView):
+    """
+    Returns aggregated real-time metrics for the SMS Dashboard:
+    - Live Dial4SMS credit balance
+    - Today's dispatch metrics & absentee counts
+    - Overall delivery metrics & success rate
+    - Recent activity logs
+    - Approved DLT template info
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        today = datetime.date.today()
+        today_str = today.strftime('%Y-%m-%d')
+
+        # 1. Live Dial4SMS credit balance
+        balance_info = get_dial4sms_balance()
+
+        # 2. Today's Dispatches from SMSLog
+        today_logs_qs = SMSLog.objects.filter(created_at__date=today)
+        total_sent_today = today_logs_qs.count()
+        success_today = today_logs_qs.filter(status='SUCCESS').count()
+        failed_today = today_logs_qs.filter(status='FAILED').count()
+
+        # 3. Overall lifetime SMSLog stats
+        total_lifetime = SMSLog.objects.count()
+        success_lifetime = SMSLog.objects.filter(status='SUCCESS').count()
+        failed_lifetime = SMSLog.objects.filter(status='FAILED').count()
+        delivery_rate = round((success_lifetime / total_lifetime * 100), 1) if total_lifetime > 0 else 100.0
+
+        # 4. Forenoon and Afternoon absentee counts for today
+        # Forenoon (Period 1 absentees)
+        fn_absentee_count = 0
+        try:
+            fn_activities = FacultyActivity.objects.filter(date=today, timetable__period__period_number=1)
+            if fn_activities.exists():
+                fn_absentee_count = StudentAttendance.objects.filter(
+                    faculty_activity__in=fn_activities,
+                    status='AB'
+                ).values('student_id').distinct().count()
+        except Exception:
+            pass
+
+        # Afternoon (AN 1st period absentees, excluding FN absentees)
+        an_absentee_count = 0
+        try:
+            an_activities = FacultyActivity.objects.filter(
+                date=today,
+                timetable__period__session__name__icontains='afternoon'
+            ).order_by('timetable__period__period_number')
+            if an_activities.exists():
+                first_an_act = an_activities.first()
+                # Exclude students absent in FN
+                fn_absent_ids = StudentAttendance.objects.filter(
+                    faculty_activity__date=today,
+                    faculty_activity__timetable__period__period_number=1,
+                    status='AB'
+                ).values_list('student_id', flat=True)
+
+                an_absentee_count = StudentAttendance.objects.filter(
+                    faculty_activity=first_an_act,
+                    status='AB'
+                ).exclude(student_id__in=fn_absent_ids).values('student_id').distinct().count()
+        except Exception:
+            pass
+
+        # 5. Recent 8 SMS logs
+        recent_logs_qs = SMSLog.objects.select_related('student').order_by('-created_at')[:8]
+        recent_logs = []
+        for log in recent_logs_qs:
+            recent_logs.append({
+                'id': log.id,
+                'student_name': log.student_name or (log.student.name if log.student else 'Unknown'),
+                'register_number': log.register_number,
+                'phone_number': log.phone_number,
+                'sms_type': log.sms_type,
+                'status': log.status,
+                'sent_date': log.sent_date.strftime('%Y-%m-%d') if log.sent_date else '',
+                'created_at': log.created_at.strftime('%Y-%m-%d %H:%M:%S') if log.created_at else '',
+            })
+
+        # 6. Approved Templates Config
+        templates = [
+            {
+                'type': 'FULL_DAY_ABSENT',
+                'title': 'Forenoon / Full Day Absent',
+                'template_id': getattr(settings, 'DIAL4SMS_FULLDAY_ABSENT_TEMPLATE_ID', '1177179058643015435'),
+                'sender_id': getattr(settings, 'DIAL4SMS_SENDER_ID', 'TECKPM'),
+                'template_text': 'Dear Parent, {#var#} is absent today {#var#}. Principal - Thirumalai Engineering Collge'
+            },
+            {
+                'type': 'AFTERNOON_ABSENT',
+                'title': 'Afternoon Absent',
+                'template_id': getattr(settings, 'DIAL4SMS_AFTERNOON_ABSENT_TEMPLATE_ID', '1177179058643015435'),
+                'sender_id': getattr(settings, 'DIAL4SMS_SENDER_ID', 'TECKPM'),
+                'template_text': 'Dear Parent, {#var#} is absent today Afternoon {#var#}. Principal - Thirumalai Engineering Collge'
+            }
+        ]
+
+        return Response({
+            "code": 200,
+            "message": "SMS dashboard metrics retrieved successfully",
+            "data": {
+                "balance": balance_info,
+                "today": {
+                    "date": today_str,
+                    "total_sent": total_sent_today,
+                    "success_count": success_today,
+                    "failed_count": failed_today,
+                    "fullday_absentees": fn_absentee_count,
+                    "afternoon_absentees": an_absentee_count,
+                },
+                "overall": {
+                    "total_dispatched": total_lifetime,
+                    "total_success": success_lifetime,
+                    "total_failed": failed_lifetime,
+                    "delivery_rate": delivery_rate,
+                },
+                "recent_logs": recent_logs,
+                "templates": templates
+            }
+        }, status=status.HTTP_200_OK)
+
