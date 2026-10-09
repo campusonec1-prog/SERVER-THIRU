@@ -198,12 +198,13 @@ class BatchSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer)
     department_code = serializers.CharField(source='department.department_code', read_only=True)
     department_name = serializers.CharField(source='department.department_name', read_only=True)
     department_short_name = serializers.CharField(source='department.short_name', read_only=True)
+    student_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Batch
         fields = [
             'id', 'department_id', 'department_code', 'department_name', 'department_short_name',
-            'batch', 'is_active',
+            'batch', 'is_active', 'student_count',
             'created_at', 'updated_at', 'created_by', 'updated_by',
             'created_by_name', 'created_by_username', 'created_by_role',
             'updated_by_name', 'updated_by_username', 'updated_by_role',
@@ -212,12 +213,18 @@ class BatchSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer)
             'created_at', 'updated_at', 'created_by', 'updated_by',
             'created_by_name', 'created_by_username', 'created_by_role',
             'updated_by_name', 'updated_by_username', 'updated_by_role',
+            'student_count',
         ]
         extra_kwargs = {
             'department_id': {'required': True},
             'batch': {'required': True},
             'is_active': {'required': True},
         }
+
+    def get_student_count(self, obj):
+        if hasattr(obj, 'student_count'):
+            return obj.student_count
+        return obj.students.count()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

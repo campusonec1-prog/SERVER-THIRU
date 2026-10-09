@@ -1,3 +1,4 @@
+
 from django.urls import path, re_path
 from .views import UserViewSet, UserDetailsViewSet
 
@@ -11,6 +12,7 @@ urlpatterns = [
     re_path(r'^heartbeat/?$', UserViewSet.as_view({'post': 'heartbeat'}), name='user-heartbeat'),
     re_path(r'^online-users/?$', UserViewSet.as_view({'get': 'online_users'}), name='user-online-users'),
     re_path(r'^change-password/?$', UserViewSet.as_view({'post': 'change_password'}), name='user-change-password'),
+    re_path(r'^dashboard-analytics/?$', UserViewSet.as_view({'get': 'dashboard_analytics'}), name='user-dashboard-analytics'),
     re_path(r'^bulk-import/?$', UserViewSet.as_view({'post': 'bulk_import'}), name='user-bulk-import'),
 
     # User Details endpoints

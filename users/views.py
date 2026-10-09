@@ -162,6 +162,210 @@ class UserViewSet(viewsets.ModelViewSet):
         user = self.request.user if self.request.user and self.request.user.is_authenticated else None
         serializer.save(updated_by=user)
 
+    @action(detail=False, methods=['get'], url_path='dashboard-analytics')
+    def dashboard_analytics(self, request, *args, **kwargs):
+        from student.models import Student
+        from institution.models import Department
+        from django.db.models import Count, Q
+        from collections import Counter
+
+        try:
+            # 1. Base querysets for strictly ACTIVE entities
+            active_students_qs = Student.objects.filter(
+                Q(status__is_active=True) & ~Q(status__status_name__in=['INACTIVE', 'LEFT', 'SUSPENDED', 'DISCONTINUED', 'DROPPED']),
+                department__is_active=True,
+                batch__is_active=True
+            )
+            active_users_qs = User.objects.filter(status='ACTIVE')
+            active_depts_qs = Department.objects.filter(is_active=True)
+            active_details_qs = UserDetails.objects.filter(user__status='ACTIVE', department__is_active=True)
+
+            total_students = active_students_qs.count()
+            teaching_faculty_count = active_users_qs.filter(role__role_name__in=['FACULTY', 'HOD']).count()
+            total_users = active_users_qs.count()
+            total_hods = active_users_qs.filter(role__role_name='HOD').count()
+            active_depts_count = active_depts_qs.count()
+
+            # 2. Roles breakdown (for ACTIVE users only)
+            roles_data = list(active_users_qs.values('role__role_name').annotate(count=Count('id')).order_by('-count'))
+            roles_list = []
+            for r in roles_data:
+                r_name = r['role__role_name'] or 'UNASSIGNED'
+                cnt = r['count']
+                pct = round((cnt / total_users * 100), 1) if total_users else 0
+                roles_list.append({'role': r_name, 'count': cnt, 'percentage': pct})
+
+            # 3. Designations breakdown (for ACTIVE faculty only)
+            desigs_map = Counter()
+            raw_desigs = UserDetails.objects.filter(user__status='ACTIVE').values_list('designation', flat=True)
+            for d in raw_desigs:
+                val = (d or '').strip().upper()
+                if not val:
+                    norm = 'Not Specified'
+                elif 'ASST' in val or 'ASSISTANT' in val:
+                    norm = 'Assistant Professor'
+                elif 'ASSOC' in val or 'ASSOCIATE' in val:
+                    norm = 'Associate Professor'
+                elif 'PRINCIPAL' in val:
+                    norm = 'Principal'
+                elif 'PROF' in val:
+                    norm = 'Professor'
+                elif 'LECTURER' in val:
+                    norm = 'Lecturer'
+                elif 'LAB' in val:
+                    norm = 'Lab Instructor'
+                else:
+                    norm = d.strip().title()
+                desigs_map[norm] += 1
+
+            total_details = sum(desigs_map.values())
+            designations_list = [
+                {'designation': k, 'count': v, 'percentage': round(v / total_details * 100, 1) if total_details else 0}
+                for k, v in desigs_map.most_common()
+            ]
+
+            # 4. Department-wise students, faculty, active batches & sections
+            dept_students = {d['department_id']: d['count'] for d in active_students_qs.values('department_id').annotate(count=Count('id'))}
+            dept_faculty = {d['department_id']: d['count'] for d in active_details_qs.filter(department_id__isnull=False).values('department_id').annotate(count=Count('id'))}
+
+            from institution.models import Batch, Section
+            total_active_batches = Batch.objects.filter(is_active=True, department__is_active=True).count()
+            total_active_sections = Section.objects.filter(department__is_active=True).count()
+
+            departments_list = []
+            for dept in active_depts_qs.select_related('program', 'hod', 'hod__role').order_by('department_name'):
+                s_cnt = dept_students.get(dept.id, 0)
+                f_cnt = dept_faculty.get(dept.id, 0)
+                s_pct = round(s_cnt / total_students * 100, 1) if total_students else 0
+                ratio = f"{round(s_cnt / f_cnt, 1)}:1" if f_cnt > 0 else f"{s_cnt}:0"
+
+                # Active HOD info
+                hod_info = None
+                if dept.hod and dept.hod.status == 'ACTIVE':
+                    hod_user = dept.hod
+                    hod_detail = UserDetails.objects.filter(user=hod_user).first()
+                    hod_info = {
+                        'id': hod_user.id,
+                        'name': hod_user.name,
+                        'email': hod_user.mail,
+                        'mobile': hod_user.mobile_number,
+                        'role_name': getattr(hod_user.role, 'role_name', 'HOD') if hod_user.role else 'HOD',
+                        'faculty_code': getattr(hod_detail, 'faculty_code', '') if hod_detail else '',
+                        'designation': getattr(hod_detail, 'designation', 'Head of Department') if hod_detail else 'Head of Department',
+                        'qualification': getattr(hod_detail, 'qualification', '') if hod_detail else '',
+                        'user_image': getattr(hod_detail, 'user_image', '') if hod_detail else '',
+                    }
+
+                # All configured Active Batches for this department
+                dept_batches = Batch.objects.filter(department=dept, is_active=True).order_by('-batch')
+                batches = [
+                    {
+                        'id': b.id,
+                        'batch': b.batch,
+                        'is_active': b.is_active,
+                        'count': active_students_qs.filter(department=dept, batch=b).count()
+                    }
+                    for b in dept_batches
+                ]
+
+                # All configured Sections for this department
+                dept_sections = Section.objects.filter(department=dept).order_by('sections')
+                sections = [
+                    {
+                        'id': s.id,
+                        'section': s.sections,
+                        'count': active_students_qs.filter(department=dept, section=s).count()
+                    }
+                    for s in dept_sections
+                ]
+
+                departments_list.append({
+                    'id': dept.id,
+                    'department_name': dept.department_name,
+                    'department_code': dept.department_code,
+                    'short_name': dept.short_name or dept.department_code,
+                    'program_name': dept.program.program_name if dept.program else 'Under Graduate',
+                    'program_level': dept.program.program_level if dept.program else 'UG',
+                    'is_active': True,
+                    'student_count': s_cnt,
+                    'faculty_count': f_cnt,
+                    'active_batches_count': len(batches),
+                    'active_sections_count': len(sections),
+                    'student_percentage': s_pct,
+                    'ratio': ratio,
+                    'hod': hod_info,
+                    'batches': batches,
+                    'sections': sections,
+                })
+
+            # 5. HODs list (ACTIVE departments & ACTIVE HOD users only)
+            hods_list = []
+            for dept in active_depts_qs.select_related('hod', 'hod__role').filter(hod__isnull=False, hod__status='ACTIVE').order_by('short_name'):
+                hod_user = dept.hod
+                if hod_user:
+                    hod_detail = UserDetails.objects.filter(user=hod_user).first()
+                    hods_list.append({
+                        'department_id': dept.id,
+                        'department_name': dept.department_name,
+                        'department_code': dept.department_code,
+                        'short_name': dept.short_name or dept.department_code,
+                        'hod_id': hod_user.id,
+                        'hod_name': hod_user.name,
+                        'hod_email': hod_user.mail,
+                        'hod_mobile': hod_user.mobile_number,
+                        'role_name': getattr(hod_user.role, 'role_name', 'HOD') if hod_user.role else 'HOD',
+                        'faculty_code': getattr(hod_detail, 'faculty_code', '') if hod_detail else '',
+                        'designation': getattr(hod_detail, 'designation', 'Head of Department') if hod_detail else 'Head of Department',
+                        'qualification': getattr(hod_detail, 'qualification', '') if hod_detail else '',
+                        'user_image': getattr(hod_detail, 'user_image', '') if hod_detail else '',
+                    })
+
+            # Department student distribution sorted by student count descending
+            dept_distribution = sorted(
+                [
+                    {
+                        'id': d['id'],
+                        'name': d['short_name'],
+                        'full_name': d['department_name'],
+                        'code': d['department_code'],
+                        'count': d['student_count'],
+                        'faculty_count': d['faculty_count'],
+                        'percentage': d['student_percentage']
+                    }
+                    for d in departments_list if d['student_count'] > 0
+                ],
+                key=lambda x: x['count'],
+                reverse=True
+            )
+
+            return Response({
+                "code": 200,
+                "message": "Active dashboard analytics retrieved successfully",
+                "data": {
+                    "summary": {
+                        "total_students": total_students,
+                        "total_faculty": teaching_faculty_count,
+                        "total_users": total_users,
+                        "total_hods": total_hods,
+                        "total_departments": active_depts_count,
+                        "active_departments": active_depts_count,
+                        "total_active_batches": total_active_batches,
+                        "total_active_sections": total_active_sections,
+                        "student_faculty_ratio": f"{round(total_students / teaching_faculty_count, 1)}:1" if teaching_faculty_count else "0:1",
+                    },
+                    "departments": departments_list,
+                    "dept_distribution": dept_distribution,
+                    "faculty_roles_breakdown": roles_list,
+                    "faculty_designation_breakdown": designations_list,
+                    "hods_list": hods_list,
+                }
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({
+                "code": 500,
+                "message": f"Failed to compute dashboard analytics: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
         return Response({

@@ -191,7 +191,50 @@ class BatchViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelView
         return Response({"code": 201, "message": "Batch created successfully", "data": response.data}, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        was_inactive = not instance.is_active
+        is_now_active = request.data.get('is_active')
+        if isinstance(is_now_active, str):
+            is_now_active = is_now_active.lower() in ('true', '1')
+
+        student_status_id = request.data.get('student_status_id')
         response = super().update(request, *args, **kwargs)
+        
+        # Scenario 1: Batch re-activated (is_active changed from False to True)
+        # Automatically update all students belonging to this batch to ACTIVE status!
+        if was_inactive and is_now_active is True:
+            try:
+                from student.models import Student, StudentStatus
+                active_status = StudentStatus.objects.filter(status_name__iexact='ACTIVE').first()
+                if not active_status:
+                    active_status = StudentStatus.objects.filter(is_active=True).order_by('id').first()
+                if active_status:
+                    user = request.user if request.user and request.user.is_authenticated else None
+                    Student.objects.filter(batch=instance).update(
+                        status=active_status,
+                        updated_by=user
+                    )
+                    invalidate_option_cache('Student')
+                    invalidate_option_cache('StudentStatus')
+            except Exception:
+                pass
+
+        # Scenario 2: Batch deactivation with explicit student_status_id provided
+        elif student_status_id is not None:
+            try:
+                from student.models import Student, StudentStatus
+                status_obj = StudentStatus.objects.filter(id=student_status_id).first()
+                if status_obj:
+                    user = request.user if request.user and request.user.is_authenticated else None
+                    Student.objects.filter(batch=instance).update(
+                        status=status_obj,
+                        updated_by=user
+                    )
+                    invalidate_option_cache('Student')
+                    invalidate_option_cache('StudentStatus')
+            except Exception:
+                pass
+
         return Response({"code": 200, "message": "Batch updated successfully", "data": response.data}, status=status.HTTP_200_OK)
 
     def destroy(self, request, *args, **kwargs):
