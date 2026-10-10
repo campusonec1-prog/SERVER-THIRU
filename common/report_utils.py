@@ -8,6 +8,51 @@ from reportlab.lib import colors
 
 _cached_logo_bytes = {}
 
+def register_unicode_fonts():
+    """
+    Registers Unicode fonts (e.g. Nirmala UI) supporting Tamil and other Indic scripts.
+    """
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+
+        if 'Nirmala' in pdfmetrics.getRegisteredFontNames():
+            return True
+
+        font_path = None
+        local_p = os.path.join(os.path.dirname(__file__), 'fonts', 'Nirmala.ttc')
+        if os.path.exists(local_p):
+            font_path = local_p
+        elif os.path.exists('C:/Windows/Fonts/Nirmala.ttc'):
+            font_path = 'C:/Windows/Fonts/Nirmala.ttc'
+
+        if font_path:
+            pdfmetrics.registerFont(TTFont('Nirmala', font_path, subfontIndex=0))
+            pdfmetrics.registerFont(TTFont('Nirmala-Bold', font_path, subfontIndex=1))
+            pdfmetrics.registerFontFamily('Nirmala', normal='Nirmala', bold='Nirmala-Bold')
+            return True
+    except Exception as e:
+        print("Error registering unicode fonts:", e)
+    return False
+
+# Initialize unicode fonts on import
+register_unicode_fonts()
+
+
+def format_unicode_text(text):
+    """
+    Wraps text containing Tamil or non-Latin Unicode characters in <font name="Nirmala">
+    so ReportLab does not render missing glyph rectangles (tofu) when using Times-Roman.
+    """
+    if not text:
+        return ""
+    str_val = str(text)
+    if any('\u0b80' <= ch <= '\u0bff' for ch in str_val):
+        register_unicode_fonts()
+        return f'<font name="Nirmala">{str_val}</font>'
+    return str_val
+
+
 def get_college_logo_bytes(college_header_obj=None):
     logo_url = college_header_obj.primary_logo if college_header_obj else None
     if logo_url and logo_url in _cached_logo_bytes:

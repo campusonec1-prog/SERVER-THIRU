@@ -28,7 +28,7 @@ from institution.models import Department, Batch, Section, Semester, Regulation,
 from subject.models import Subject
 from timetable.models import ClassTimetable
 from .marks_views import generate_report_filename
-from common.report_utils import build_standard_college_header, build_centered_report_title
+from common.report_utils import build_standard_college_header, build_centered_report_title, format_unicode_text
 
 logger = logging.getLogger(__name__)
 
@@ -825,7 +825,7 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
                 Paragraph("<b>Regulation:</b>", lbl_bold), Paragraph(regulation_str, val_norm),
             ],
             [
-                Paragraph("<b>Subject:</b>", lbl_bold), Paragraph(subject_name_str, val_norm),
+                Paragraph("<b>Subject:</b>", lbl_bold), Paragraph(format_unicode_text(subject_name_str), val_norm),
                 Paragraph("<b>Subject Handler:</b>", lbl_bold), Paragraph(subject_handler_str, val_norm),
             ],
             [

@@ -72,7 +72,7 @@ from ..permissions import MarksPermission
 from institution.models import Department, Batch, Section, Semester, Regulation, CollegeHeader, ExamType, Exam
 from subject.models import Subject
 from timetable.models import ClassTimetable, ExamTimetable
-from common.report_utils import build_standard_college_header, build_centered_report_title
+from common.report_utils import build_standard_college_header, build_centered_report_title, format_unicode_text
 
 
 class MarksViewSet(viewsets.ViewSet):
@@ -116,8 +116,10 @@ class MarksViewSet(viewsets.ViewSet):
         exam_id = request.query_params.get('exam_id')
         subject_id = request.query_params.get('subject_id')
         subject_category = request.query_params.get('subject_category')
+        department_id = request.query_params.get('department_id')
         batch_id = request.query_params.get('batch_id')
-        section_id = request.query_params.get('section_id')
+        semester_id = request.query_params.get('semester_id')
+        section_id = request.query_params.get('section_id') or request.query_params.get('section_name')
 
         if role_name not in ['ADMIN', 'ADMINISTRATOR']:
             if not (exam_id or subject_id):
@@ -129,8 +131,13 @@ class MarksViewSet(viewsets.ViewSet):
             queryset = queryset.filter(subject_id=subject_id)
         if subject_category:
             queryset = queryset.filter(subject_category=subject_category)
+        if department_id:
+            queryset = queryset.filter(student__department_id=department_id)
         if batch_id:
             queryset = queryset.filter(student__batch_id=batch_id)
+        if semester_id:
+            if str(semester_id).isdigit():
+                queryset = queryset.filter(subject__semester_id=semester_id)
         if section_id:
             if str(section_id).isdigit():
                 queryset = queryset.filter(student__section_id=section_id)
@@ -705,7 +712,7 @@ class MarksViewSet(viewsets.ViewSet):
                 Paragraph("<b>Regulation:</b>", meta_lbl_style), Paragraph(regulation_str, meta_val_style)
             ],
             [
-                Paragraph("<b>Sub Code & Name:</b>", meta_lbl_style), Paragraph(sub_code_name, meta_val_style),
+                Paragraph("<b>Sub Code & Name:</b>", meta_lbl_style), Paragraph(format_unicode_text(sub_code_name), meta_val_style),
                 Paragraph("", meta_lbl_style), Paragraph("", meta_val_style)
             ]
         ]
@@ -1796,18 +1803,13 @@ class MarksViewSet(viewsets.ViewSet):
                 
                 if split_slash and '/' in val_str:
                     parts = [p.strip() for p in val_str.split('/')]
-                    cleaned_parts = []
-                    for p in parts:
-                        cp = "".join(c for c in p if ord(c) < 256).strip()
-                        if cp:
-                            cleaned_parts.append(cp)
+                    cleaned_parts = [format_unicode_text(p) for p in parts if p]
                     if len(cleaned_parts) > 1:
                         return "<br/>".join(cleaned_parts)
                     elif len(cleaned_parts) == 1:
                         return cleaned_parts[0]
 
-                res = "".join(c for c in val_str if ord(c) < 256).strip()
-                return res if res else val_str
+                return format_unicode_text(val_str)
 
             if len(exams) <= 1:
                 col_widths = [35, 75, 235, 105, 85]
@@ -2289,7 +2291,7 @@ class MarksViewSet(viewsets.ViewSet):
                 ],
                 [
                     Paragraph("Sub Code & Name:", lbl_bold),
-                    Paragraph(sub_code_name_str, val_norm),
+                    Paragraph(format_unicode_text(sub_code_name_str), val_norm),
                     Paragraph("", val_norm),
                     Paragraph("", val_norm)
                 ]
@@ -2806,28 +2808,33 @@ class MarksViewSet(viewsets.ViewSet):
             passed_cnt = 0
             failed_cnt = 0
 
-            for st in students:
-                raw_val = subj_marks_dict.get(st.id)
-                is_abs, is_pass, num_val, str_val = evaluate_mark(raw_val)
+            has_subj_marks = len(subj_marks) > 0
 
-                if not is_abs:
-                    appeared_cnt += 1
-                    if is_pass:
-                        passed_cnt += 1
+            if has_subj_marks:
+                for st in students:
+                    raw_val = subj_marks_dict.get(st.id)
+                    is_abs, is_pass, num_val, str_val = evaluate_mark(raw_val)
+
+                    if not is_abs:
+                        appeared_cnt += 1
+                        if is_pass:
+                            passed_cnt += 1
+                        else:
+                            failed_cnt += 1
+                            student_fail_counts[st.id] += 1
                     else:
                         failed_cnt += 1
                         student_fail_counts[st.id] += 1
-                else:
-                    failed_cnt += 1
-                    student_fail_counts[st.id] += 1
 
-            pass_pct = f"{round((passed_cnt / appeared_cnt * 100), 2):.2f}%" if appeared_cnt > 0 else "0.00%"
+                pass_pct = f"{round((passed_cnt / appeared_cnt * 100), 2):.2f}%" if appeared_cnt > 0 else "0.00%"
+            else:
+                pass_pct = "0.00%"
             
             raw_rows.append({
-                'exam_date': exam_date_str,
-                'code': subj.subject_code,
-                'name': subj.subject_name,
-                'faculty': faculty_name,
+                'exam_date': exam_date_str or "",
+                'code': subj.subject_code or "—",
+                'name': subj.subject_name or "—",
+                'faculty': faculty_name or "—",
                 'total': str(total_students_cnt),
                 'appear': str(appeared_cnt),
                 'pass': str(passed_cnt),
@@ -2850,10 +2857,10 @@ class MarksViewSet(viewsets.ViewSet):
             ])
             for r in raw_rows:
                 table_data.append([
-                    Paragraph(r['exam_date'], tbl_cell_center),
-                    Paragraph(r['code'], tbl_cell_center),
-                    Paragraph(r['name'], tbl_cell_left),
-                    Paragraph(r['faculty'], tbl_cell_left),
+                    Paragraph(r['exam_date'] or "", tbl_cell_center),
+                    Paragraph(r['code'] or "—", tbl_cell_center),
+                    Paragraph(format_unicode_text(r['name'] or "—"), tbl_cell_left),
+                    Paragraph(format_unicode_text(r['faculty'] or "—"), tbl_cell_left),
                     Paragraph(r['total'], tbl_cell_center),
                     Paragraph(r['appear'], tbl_cell_center),
                     Paragraph(r['pass'], tbl_cell_center),
@@ -2874,9 +2881,9 @@ class MarksViewSet(viewsets.ViewSet):
             ])
             for r in raw_rows:
                 table_data.append([
-                    Paragraph(r['code'], tbl_cell_center),
-                    Paragraph(r['name'], tbl_cell_left),
-                    Paragraph(r['faculty'], tbl_cell_left),
+                    Paragraph(r['code'] or "—", tbl_cell_center),
+                    Paragraph(format_unicode_text(r['name'] or "—"), tbl_cell_left),
+                    Paragraph(format_unicode_text(r['faculty'] or "—"), tbl_cell_left),
                     Paragraph(r['total'], tbl_cell_center),
                     Paragraph(r['appear'], tbl_cell_center),
                     Paragraph(r['pass'], tbl_cell_center),
@@ -2899,26 +2906,29 @@ class MarksViewSet(viewsets.ViewSet):
         story.append(main_table)
         story.append(Spacer(1, 20))
 
+        total_subjects_evaluated = sum(1 for subj in subjects if any(m.subject_id == subj.id for m in all_marks_list))
+
         fail_0 = 0
         fail_1 = 0
         fail_2 = 0
         fail_3 = 0
         fail_more = 0
 
-        for st_id, f_cnt in student_fail_counts.items():
-            if f_cnt == 0:
-                fail_0 += 1
-            elif f_cnt == 1:
-                fail_1 += 1
-            elif f_cnt == 2:
-                fail_2 += 1
-            elif f_cnt == 3:
-                fail_3 += 1
-            else:
-                fail_more += 1
+        if total_subjects_evaluated > 0:
+            for st_id, f_cnt in student_fail_counts.items():
+                if f_cnt == 0:
+                    fail_0 += 1
+                elif f_cnt == 1:
+                    fail_1 += 1
+                elif f_cnt == 2:
+                    fail_2 += 1
+                elif f_cnt == 3:
+                    fail_3 += 1
+                else:
+                    fail_more += 1
 
         total_students_val = len(students)
-        overall_pass_pct = f"{round((fail_0 / total_students_val * 100), 2):.2f}%" if total_students_val > 0 else "0.00%"
+        overall_pass_pct = f"{round((fail_0 / total_students_val * 100), 2):.2f}%" if (total_students_val > 0 and total_subjects_evaluated > 0) else "0.00%"
 
         is_university_exam = False
         if exam_type_id:
@@ -2932,124 +2942,75 @@ class MarksViewSet(viewsets.ViewSet):
                     is_university_exam = True
                     break
 
+        header_title_style = ParagraphStyle(
+            name='ConsolidatedOverallPerfTitle',
+            fontName='Times-Bold',
+            fontSize=11,
+            leading=14,
+            alignment=1,
+            textColor=colors.black
+        )
+
         story.append(Paragraph("<b>Overall Student Performance</b>", header_title_style))
-        story.append(Spacer(1, 6))
+        story.append(Spacer(1, 8))
 
-        if is_university_exam:
-            try:
-                current_sem_val = int(sem_num)
-            except (ValueError, TypeError):
-                current_sem_val = 1
+        perf_hdr_style = ParagraphStyle(
+            name='PerfHdrCons',
+            fontName='Times-Bold',
+            fontSize=9,
+            leading=11,
+            alignment=1,
+            textColor=colors.black
+        )
+        tbl_cell_left_perf = ParagraphStyle(
+            name='PerfLeftCons',
+            fontName='Times-Roman',
+            fontSize=8.5,
+            leading=11,
+            alignment=0,
+            textColor=colors.black
+        )
+        tbl_cell_center_perf = ParagraphStyle(
+            name='PerfCenterCons',
+            fontName='Times-Roman',
+            fontSize=8.5,
+            leading=11,
+            alignment=1,
+            textColor=colors.black
+        )
 
-            if current_sem_val <= 1:
-                cum_fail_0 = fail_0
-                cum_fail_1 = fail_1
-                cum_fail_2 = fail_2
-                cum_fail_3 = fail_3
-                cum_fail_more = fail_more
-                cum_overall_pass_pct = overall_pass_pct
-            else:
-                from django.db.models import Q
-                univ_marks_qs = Marks.objects.filter(
-                    student__in=students,
-                    exam__exam_type__exam_type_name__icontains='University'
-                ).select_related('exam', 'subject')
+        perf_data = [
+            [Paragraph("<b>Performance Category</b>", perf_hdr_style), Paragraph("<b>Number of Students</b>", perf_hdr_style)],
+            [Paragraph("Cleared All Subjects", tbl_cell_left_perf), Paragraph(str(fail_0), tbl_cell_center_perf)],
+            [Paragraph("Failed in One Subject", tbl_cell_left_perf), Paragraph(str(fail_1), tbl_cell_center_perf)],
+            [Paragraph("Failed in Two Subjects", tbl_cell_left_perf), Paragraph(str(fail_2), tbl_cell_center_perf)],
+            [Paragraph("Failed in Three Subjects", tbl_cell_left_perf), Paragraph(str(fail_3), tbl_cell_center_perf)],
+            [Paragraph("Failed in More Than Three Subjects", tbl_cell_left_perf), Paragraph(str(fail_more), tbl_cell_center_perf)],
+        ]
 
-                student_subject_cleared = {st.id: {} for st in students}
-                for m in univ_marks_qs:
-                    is_abs, is_pass, num_val, str_val = evaluate_mark(m.marks_obtained)
-                    if m.student_id in student_subject_cleared:
-                        current_status = student_subject_cleared[m.student_id].get(m.subject_id, False)
-                        student_subject_cleared[m.student_id][m.subject_id] = current_status or is_pass
+        perf_table = Table(perf_data, colWidths=[270, 140], hAlign='CENTER')
+        perf_table.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('TOPPADDING', (0,0), (-1,-1), 5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+            ('LEFTPADDING', (0,0), (0,-1), 8),
+            ('RIGHTPADDING', (0,0), (-1,-1), 6),
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#D4D4D8')),
+        ]))
+        story.append(perf_table)
+        story.append(Spacer(1, 10))
 
-                student_cum_fail_counts = {}
-                for st in students:
-                    subj_status = student_subject_cleared.get(st.id, {})
-                    standing_arrears = sum(1 for is_cleared in subj_status.values() if not is_cleared)
-                    student_cum_fail_counts[st.id] = standing_arrears
-
-                cum_fail_0 = sum(1 for f in student_cum_fail_counts.values() if f == 0)
-                cum_fail_1 = sum(1 for f in student_cum_fail_counts.values() if f == 1)
-                cum_fail_2 = sum(1 for f in student_cum_fail_counts.values() if f == 2)
-                cum_fail_3 = sum(1 for f in student_cum_fail_counts.values() if f == 3)
-                cum_fail_more = sum(1 for f in student_cum_fail_counts.values() if f > 3)
-                cum_overall_pass_pct = f"{round((cum_fail_0 / total_students_val * 100), 2):.2f}%" if total_students_val > 0 else "0.00%"
-
-            summary_hdr_style = ParagraphStyle(name='SumHdr', fontName='Times-Bold', fontSize=8, alignment=1)
-            summary_cell_center = ParagraphStyle(name='SumCellCenter', fontName='Times-Roman', fontSize=8, alignment=1)
-
-            summary_table_data = [
-                [
-                    Paragraph("<b>Description</b>", summary_hdr_style),
-                    Paragraph("<b>Total No. of Students</b>", summary_hdr_style),
-                    Paragraph("<b>All Cleared</b>", summary_hdr_style),
-                    Paragraph("<b>One</b>", summary_hdr_style),
-                    Paragraph("<b>Two</b>", summary_hdr_style),
-                    Paragraph("<b>Three</b>", summary_hdr_style),
-                    Paragraph("<b>>Three</b>", summary_hdr_style),
-                    Paragraph("<b>% of Pass</b>", summary_hdr_style)
-                ],
-                [
-                    Paragraph(f"Semester {sem_num}", summary_cell_center),
-                    Paragraph(str(total_students_val), summary_cell_center),
-                    Paragraph(str(fail_0), summary_cell_center),
-                    Paragraph(str(fail_1), summary_cell_center),
-                    Paragraph(str(fail_2), summary_cell_center),
-                    Paragraph(str(fail_3), summary_cell_center),
-                    Paragraph(str(fail_more), summary_cell_center),
-                    Paragraph(overall_pass_pct, summary_cell_center)
-                ],
-                [
-                    Paragraph("Cumulative", summary_cell_center),
-                    Paragraph(str(total_students_val), summary_cell_center),
-                    Paragraph(str(cum_fail_0), summary_cell_center),
-                    Paragraph(str(cum_fail_1), summary_cell_center),
-                    Paragraph(str(cum_fail_2), summary_cell_center),
-                    Paragraph(str(cum_fail_3), summary_cell_center),
-                    Paragraph(str(cum_fail_more), summary_cell_center),
-                    Paragraph(cum_overall_pass_pct, summary_cell_center)
-                ]
-            ]
-
-            summary_table = Table(summary_table_data, colWidths=[95, 75, 65, 50, 50, 50, 60, 90])
-            summary_table.setStyle(TableStyle([
-                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                ('TOPPADDING', (0,0), (-1,-1), 5),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 5),
-                ('LEFTPADDING', (0,0), (-1,-1), 4),
-                ('RIGHTPADDING', (0,0), (-1,-1), 4),
-                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#F8FAFC')),
-            ]))
-            story.append(summary_table)
-            story.append(Spacer(1, 40))
-
-        else:
-            perf_hdr_style = ParagraphStyle(name='PerfHdrInt', fontName='Times-Bold', fontSize=9, alignment=1)
-            tbl_cell_left_perf = ParagraphStyle(name='PerfLeftInt', fontName='Times-Roman', fontSize=8, alignment=0)
-
-            perf_data = [
-                [Paragraph("<b>Performance Category</b>", perf_hdr_style), Paragraph("<b>Number of Students</b>", perf_hdr_style)],
-                [Paragraph("Cleared All Subjects", tbl_cell_left_perf), Paragraph(str(fail_0), tbl_cell_center)],
-                [Paragraph("Failed in One Subject", tbl_cell_left_perf), Paragraph(str(fail_1), tbl_cell_center)],
-                [Paragraph("Failed in Two Subjects", tbl_cell_left_perf), Paragraph(str(fail_2), tbl_cell_center)],
-                [Paragraph("Failed in Three Subjects", tbl_cell_left_perf), Paragraph(str(fail_3), tbl_cell_center)],
-                [Paragraph("Failed in More Than Three Subjects", tbl_cell_left_perf), Paragraph(str(fail_more), tbl_cell_center)],
-            ]
-
-            perf_table = Table(perf_data, colWidths=[250, 150])
-            perf_table.setStyle(TableStyle([
-                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('TOPPADDING', (0,0), (-1,-1), 5),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 5),
-                ('LEFTPADDING', (0,0), (-1,-1), 6),
-                ('RIGHTPADDING', (0,0), (-1,-1), 6),
-                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#E2E8F0')),
-            ]))
-            story.append(perf_table)
-            story.append(Spacer(1, 40))
+        overall_pct_style = ParagraphStyle(
+            name='OverallPassPctStyle',
+            fontName='Times-Bold',
+            fontSize=10.5,
+            leading=13,
+            alignment=1,
+            textColor=colors.black
+        )
+        story.append(Paragraph(f"<b>Overall Pass Percentage: {overall_pass_pct}</b>", overall_pct_style))
+        story.append(Spacer(1, 40))
 
         sig_data = [[
             Paragraph("<b>Test Coordinator</b>", ParagraphStyle(name='Sig1', fontName='Times-Bold', fontSize=9, alignment=1)),
@@ -3599,7 +3560,7 @@ class MarksViewSet(viewsets.ViewSet):
                 Paragraph("<b>Date of Exam:</b>", lbl_bold), Paragraph(exam_date_str, val_norm)
             ],
             [
-                Paragraph("<b>Subject:</b>", lbl_bold), Paragraph(subj_full_str, val_norm),
+                Paragraph("<b>Subject:</b>", lbl_bold), Paragraph(format_unicode_text(subj_full_str), val_norm),
                 Paragraph("<b>Regulation:</b>", lbl_bold), Paragraph(regulation_str, val_norm)
             ],
             [
