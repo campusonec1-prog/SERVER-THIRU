@@ -72,6 +72,7 @@ from ..permissions import MarksPermission
 from institution.models import Department, Batch, Section, Semester, Regulation, CollegeHeader, ExamType, Exam
 from subject.models import Subject
 from timetable.models import ClassTimetable, ExamTimetable
+from common.report_utils import build_standard_college_header, build_centered_report_title
 
 
 class MarksViewSet(viewsets.ViewSet):
@@ -424,7 +425,11 @@ class MarksViewSet(viewsets.ViewSet):
             else:
                 section_obj = Section.objects.filter(sections__iexact=section_id).first()
 
-        semester_obj = Semester.objects.filter(id=semester_id).first() if semester_id else None
+        semester_obj = Semester.objects.filter(id=semester_id).first() if (semester_id and str(semester_id).isdigit()) else None
+        if department and (not semester_obj or semester_obj.department_id != department.id) and semester_id:
+            alt_sem = Semester.objects.filter(department=department, semester_number=semester_id).first()
+            if alt_sem:
+                semester_obj = alt_sem
         subject_obj = Subject.objects.filter(id=subject_id).first() if subject_id else None
         exam_type_obj = ExamType.objects.filter(id=exam_type_id).first() if exam_type_id else None
 
@@ -560,7 +565,9 @@ class MarksViewSet(viewsets.ViewSet):
                 return '<font color="#15803D"><b>PASS</b></font>'
 
         sem_num = 1
-        if semester_id and str(semester_id).isdigit():
+        if semester_obj and hasattr(semester_obj, 'semester_number') and semester_obj.semester_number:
+            sem_num = semester_obj.semester_number
+        elif semester_id and str(semester_id).isdigit():
             sem_num = int(semester_id)
         
         roman_map = {1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V', 6: 'VI', 7: 'VII', 8: 'VIII'}
@@ -621,7 +628,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         header_title_style = ParagraphStyle(
             name='HeaderTitleMarksheet',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=11,
             leading=13,
             alignment=1,
@@ -629,106 +636,52 @@ class MarksViewSet(viewsets.ViewSet):
         )
         meta_lbl_style = ParagraphStyle(
             name='MetaLblBoldMs',
-            fontName='Helvetica-Bold',
-            fontSize=8,
-            leading=10,
+            fontName='Times-Bold',
+            fontSize=8.5,
+            leading=11,
             textColor=colors.black
         )
         meta_val_style = ParagraphStyle(
             name='MetaValNormMs',
-            fontName='Helvetica',
-            fontSize=8,
-            leading=10,
+            fontName='Times-Roman',
+            fontSize=8.5,
+            leading=11,
             textColor=colors.black
         )
         tbl_header_style = ParagraphStyle(
             name='TblHeaderMs',
-            fontName='Helvetica-Bold',
-            fontSize=8,
-            leading=9,
+            fontName='Times-Bold',
+            fontSize=8.5,
+            leading=10,
             alignment=1,
             textColor=colors.black
         )
         tbl_cell_center = ParagraphStyle(
             name='TblCellCenterMs',
-            fontName='Helvetica',
-            fontSize=7.5,
-            leading=9,
+            fontName='Times-Roman',
+            fontSize=8,
+            leading=10,
             alignment=1,
             textColor=colors.black
         )
         tbl_cell_left = ParagraphStyle(
             name='TblCellLeftMs',
-            fontName='Helvetica',
-            fontSize=7.5,
-            leading=9,
+            fontName='Times-Roman',
+            fontSize=8,
+            leading=10,
             alignment=0,
             textColor=colors.black
         )
 
-        logo_url = college_header_obj.primary_logo if college_header_obj else None
-        logo_flowable = None
-        if logo_url:
-            try:
-                if isinstance(logo_url, str) and logo_url.startswith('http'):
-                    headers = {'User-Agent': 'Mozilla/5.0'}
-                    req = urllib.request.Request(logo_url, headers=headers)
-                    with urllib.request.urlopen(req, timeout=5) as response:
-                        img_data = response.read()
-                        pil_img = PILImage.open(BytesIO(img_data))
-                        out_io = BytesIO()
-                        pil_img.save(out_io, format='PNG')
-                        out_io.seek(0)
-                        logo_flowable = RLImage(out_io, width=45, height=45)
-                elif os.path.exists(logo_url):
-                    pil_img = PILImage.open(logo_url)
-                    out_io = BytesIO()
-                    pil_img.save(out_io, format='PNG')
-                    out_io.seek(0)
-                    logo_flowable = RLImage(out_io, width=45, height=45)
-            except Exception:
-                pass
-
-        if not logo_flowable:
-            fallback_logo_path = 'd:\\IMS-Thirumalai\\APP-THIRU\\src\\assets\\logo.webp'
-            try:
-                if os.path.exists(fallback_logo_path):
-                    pil_img = PILImage.open(fallback_logo_path)
-                    out_io = BytesIO()
-                    pil_img.save(out_io, format='PNG')
-                    out_io.seek(0)
-                    logo_flowable = RLImage(out_io, width=45, height=45)
-            except Exception:
-                pass
-
         story = []
-
-        college_name_str = college_header_obj.college_name.upper() if (college_header_obj and college_header_obj.college_name) else ""
-        college_header_parts = []
-        if college_name_str:
-            college_header_parts.append(college_name_str)
-        if exam_title_str:
-            college_header_parts.append(exam_title_str)
-        college_header_parts.append("EXAM MARK SHEET")
-        header_title_text = "<br/>".join(college_header_parts)
-        title_paragraph = Paragraph(header_title_text, header_title_style)
-
-        if logo_flowable:
-            header_table_data = [[logo_flowable, title_paragraph]]
-            header_table = Table(header_table_data, colWidths=[65, 470])
-        else:
-            header_table_data = [[title_paragraph]]
-            header_table = Table(header_table_data, colWidths=[535])
-
-        header_table.setStyle(TableStyle([
-            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('TOPPADDING', (0,0), (-1,-1), 6),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-        ]))
+        header_table = build_standard_college_header(college_header_obj, page_w=535, logo_size=55)
         story.append(header_table)
-        story.append(Spacer(1, 10))
+        story.append(Spacer(1, 6))
+
+        sheet_title = f"{exam_title_str} EXAM MARK SHEET" if exam_title_str else "EXAM MARK SHEET"
+        title_paragraph = build_centered_report_title(sheet_title, font_size=12, leading=15)
+        story.append(title_paragraph)
+        story.append(Spacer(1, 6))
 
         dept_name_str = department.department_name.title() if department else "Computer Science and Engineering"
         batch_str = batch.batch if batch else ""
@@ -877,7 +830,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         summ_tbl_hdr_style = ParagraphStyle(
             name='SummTblHdrMs',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=8,
             leading=10,
             alignment=1,
@@ -885,7 +838,7 @@ class MarksViewSet(viewsets.ViewSet):
         )
         summ_tbl_cell_style = ParagraphStyle(
             name='SummTblCellMs',
-            fontName='Helvetica',
+            fontName='Times-Roman',
             fontSize=8,
             leading=10,
             alignment=1,
@@ -893,7 +846,7 @@ class MarksViewSet(viewsets.ViewSet):
         )
         summ_tbl_pass_style = ParagraphStyle(
             name='SummTblPassMs',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=8,
             leading=10,
             alignment=1,
@@ -901,7 +854,7 @@ class MarksViewSet(viewsets.ViewSet):
         )
         summ_tbl_fail_style = ParagraphStyle(
             name='SummTblFailMs',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=8,
             leading=10,
             alignment=1,
@@ -944,7 +897,7 @@ class MarksViewSet(viewsets.ViewSet):
         story.append(Spacer(1, 35))
         sig_data = [[
             Paragraph("<b>Faculty In-Charge</b>", meta_val_style),
-            Paragraph("<b>HOD</b>", ParagraphStyle(name='SigHODMs', fontName='Helvetica-Bold', fontSize=8.5, alignment=2))
+            Paragraph("<b>HOD</b>", ParagraphStyle(name='SigHODMs', fontName='Times-Bold', fontSize=8.5, alignment=2))
         ]]
         sig_table = Table(sig_data, colWidths=[265, 270])
         sig_table.setStyle(TableStyle([
@@ -997,6 +950,10 @@ class MarksViewSet(viewsets.ViewSet):
                 section_obj = Section.objects.filter(sections__iexact=section_id).first()
 
         semester_obj = Semester.objects.filter(id=semester_id).first() if (semester_id and str(semester_id).isdigit()) else None
+        if department and (not semester_obj or semester_obj.department_id != department.id) and semester_id:
+            alt_sem = Semester.objects.filter(department=department, semester_number=semester_id).first()
+            if alt_sem:
+                semester_obj = alt_sem
         exam_type_obj = ExamType.objects.filter(id=exam_type_id).first() if exam_type_id else None
 
         college_header_obj = None
@@ -1072,13 +1029,10 @@ class MarksViewSet(viewsets.ViewSet):
                 exam_title_str = " / ".join(exam_names)
 
         sem_num = 1
-        if semester_id and str(semester_id).isdigit():
+        if semester_obj and hasattr(semester_obj, 'semester_number') and semester_obj.semester_number:
+            sem_num = semester_obj.semester_number
+        elif semester_id and str(semester_id).isdigit():
             sem_num = int(semester_id)
-        elif semester_obj:
-            try:
-                sem_num = int(semester_obj.semester_name or semester_obj.id)
-            except Exception:
-                sem_num = 1
 
         roman_map = {1: 'I', 2: 'I', 3: 'II', 4: 'II', 5: 'III', 6: 'III', 7: 'IV', 8: 'IV'}
         year_roman = roman_map.get(sem_num, 'I')
@@ -1146,7 +1100,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         title_style = ParagraphStyle(
             name='CollHeaderTitleCons',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=11.5,
             leading=13.5,
             alignment=1,
@@ -1154,7 +1108,7 @@ class MarksViewSet(viewsets.ViewSet):
         )
         heading_title_style = ParagraphStyle(
             name='ConsolidatedTitleCons',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=11,
             leading=13,
             alignment=1,
@@ -1162,7 +1116,7 @@ class MarksViewSet(viewsets.ViewSet):
         )
         heading_meta_style = ParagraphStyle(
             name='ConsolidatedMetaCons',
-            fontName='Helvetica',
+            fontName='Times-Roman',
             fontSize=9,
             leading=11,
             alignment=1,
@@ -1171,7 +1125,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         tbl_header_style = ParagraphStyle(
             name='TblHeaderStyleCons',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=7.5,
             leading=9,
             alignment=1,
@@ -1179,7 +1133,7 @@ class MarksViewSet(viewsets.ViewSet):
         )
         tbl_cell_center = ParagraphStyle(
             name='TblCellCenterStyleCons',
-            fontName='Helvetica',
+            fontName='Times-Roman',
             fontSize=7.5,
             leading=9,
             alignment=1,
@@ -1187,7 +1141,7 @@ class MarksViewSet(viewsets.ViewSet):
         )
         tbl_cell_left = ParagraphStyle(
             name='TblCellLeftStyleCons',
-            fontName='Helvetica',
+            fontName='Times-Roman',
             fontSize=7.5,
             leading=9,
             alignment=0,
@@ -1195,85 +1149,24 @@ class MarksViewSet(viewsets.ViewSet):
         )
         tbl_cell_fail = ParagraphStyle(
             name='TblCellFailStyleCons',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=7.5,
             leading=9,
             alignment=1,
             textColor=colors.HexColor('#CC0000')
         )
 
-        logo_url = college_header_obj.primary_logo if college_header_obj else None
-        logo_flowable = None
-        if logo_url:
-            try:
-                if isinstance(logo_url, str) and logo_url.startswith('http'):
-                    headers = {'User-Agent': 'Mozilla/5.0'}
-                    req = urllib.request.Request(logo_url, headers=headers)
-                    with urllib.request.urlopen(req, timeout=5) as response:
-                        img_data = response.read()
-                        pil_img = PILImage.open(BytesIO(img_data))
-                        out_io = BytesIO()
-                        pil_img.save(out_io, format='PNG')
-                        out_io.seek(0)
-                        logo_flowable = RLImage(out_io, width=50, height=50)
-                elif os.path.exists(logo_url):
-                    pil_img = PILImage.open(logo_url)
-                    out_io = BytesIO()
-                    pil_img.save(out_io, format='PNG')
-                    out_io.seek(0)
-                    logo_flowable = RLImage(out_io, width=50, height=50)
-            except Exception:
-                pass
-
-        if not logo_flowable:
-            fallback_logo_path = 'd:\\IMS-Thirumalai\\APP-THIRU\\src\\assets\\logo.webp'
-            try:
-                if os.path.exists(fallback_logo_path):
-                    pil_img = PILImage.open(fallback_logo_path)
-                    out_io = BytesIO()
-                    pil_img.save(out_io, format='PNG')
-                    out_io.seek(0)
-                    logo_flowable = RLImage(out_io, width=50, height=50)
-            except Exception:
-                pass
-
         story = []
 
-        header_title_style = ParagraphStyle(
-            name='ConsMarksheetHdrTitle',
-            fontName='Helvetica-Bold',
-            fontSize=11,
-            leading=14,
-            alignment=1,
-            textColor=colors.black
-        )
-
-        college_name_str = college_header_obj.college_name.upper() if (college_header_obj and college_header_obj.college_name) else ""
-        college_header_parts = []
-        if college_name_str:
-            college_header_parts.append(college_name_str)
-        if exam_title_str:
-            college_header_parts.append(exam_title_str)
-        college_header_parts.append("CONSOLIDATED MARKSHEET REPORT")
-        header_title_text = "<br/>".join(college_header_parts)
-        title_paragraph = Paragraph(f"<b>{header_title_text}</b>", header_title_style)
-
-        if logo_flowable:
-            header_table_data = [[logo_flowable, title_paragraph]]
-            header_table = Table(header_table_data, colWidths=[65, 460])
-        else:
-            header_table_data = [[title_paragraph]]
-            header_table = Table(header_table_data, colWidths=[525])
-
-        header_table.setStyle(TableStyle([
-            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('TOPPADDING', (0,0), (-1,-1), 6),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-        ]))
+        header_table = build_standard_college_header(college_header_obj, page_w=545, logo_size=55)
         story.append(header_table)
-        story.append(Spacer(1, 10))
+        story.append(Spacer(1, 6))
+
+        sheet_title = "CONSOLIDATED MARKSHEET REPORT"
+        if exam_title_str:
+            sheet_title = f"{exam_title_str} - CONSOLIDATED MARKSHEET REPORT"
+        story.append(build_centered_report_title(sheet_title, font_size=12, leading=15))
+        story.append(Spacer(1, 6))
 
         regulation_str = ""
         if regulation_id:
@@ -1283,7 +1176,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         lbl_bold = ParagraphStyle(
             name='CmsLblBold',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=8,
             leading=10,
             textColor=colors.black
@@ -1291,7 +1184,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         val_norm = ParagraphStyle(
             name='CmsValNorm',
-            fontName='Helvetica',
+            fontName='Times-Roman',
             fontSize=8,
             leading=10,
             textColor=colors.black
@@ -1479,7 +1372,7 @@ class MarksViewSet(viewsets.ViewSet):
         story.append(marks_table)
         story.append(Spacer(1, 15))
 
-        story.append(Paragraph("<b>Subject-wise Analysis</b>", ParagraphStyle(name='SecHead1Cons', fontName='Helvetica-Bold', fontSize=9.5, leading=12)))
+        story.append(Paragraph("<b>Subject-wise Analysis</b>", ParagraphStyle(name='SecHead1Cons', fontName='Times-Bold', fontSize=9.5, leading=12)))
         story.append(Spacer(1, 4))
 
         ana_header = [Paragraph("Subject Code", tbl_header_style)]
@@ -1538,7 +1431,7 @@ class MarksViewSet(viewsets.ViewSet):
         story.append(ana_table)
         story.append(Spacer(1, 15))
 
-        story.append(Paragraph("<b>Overall Student Performance</b>", ParagraphStyle(name='SecHead2Cons', fontName='Helvetica-Bold', fontSize=9.5, leading=12)))
+        story.append(Paragraph("<b>Overall Student Performance</b>", ParagraphStyle(name='SecHead2Cons', fontName='Times-Bold', fontSize=9.5, leading=12)))
         story.append(Spacer(1, 4))
 
         perf_data = [
@@ -1565,15 +1458,15 @@ class MarksViewSet(viewsets.ViewSet):
         total_students_cnt = len(students)
         overall_pct_val = f"{round((performance_counts['cleared_all'] / total_students_cnt * 100), 2)}%" if total_students_cnt > 0 else "0.0%"
 
-        story.append(Paragraph("<b>Overall Pass Percentage</b>", ParagraphStyle(name='SecHead3Cons', fontName='Helvetica-Bold', fontSize=9.5, leading=12)))
+        story.append(Paragraph("<b>Overall Pass Percentage</b>", ParagraphStyle(name='SecHead3Cons', fontName='Times-Bold', fontSize=9.5, leading=12)))
         story.append(Spacer(1, 6))
-        story.append(Paragraph(f"<b>{overall_pct_val}</b>", ParagraphStyle(name='OverallValCons', fontName='Helvetica', fontSize=9.5, leading=12, alignment=1)))
+        story.append(Paragraph(f"<b>{overall_pct_val}</b>", ParagraphStyle(name='OverallValCons', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=1)))
         story.append(Spacer(1, 35))
 
         sig_data = [[
-            Paragraph("<b>Test Coordinator</b>", ParagraphStyle(name='SigLeftCons', fontName='Helvetica-Bold', fontSize=8.5, alignment=0)),
-            Paragraph("<b>HOD</b>", ParagraphStyle(name='SigCenterCons', fontName='Helvetica-Bold', fontSize=8.5, alignment=1)),
-            Paragraph("<b>Principal</b>", ParagraphStyle(name='SigRightCons', fontName='Helvetica-Bold', fontSize=8.5, alignment=2))
+            Paragraph("<b>Test Coordinator</b>", ParagraphStyle(name='SigLeftCons', fontName='Times-Bold', fontSize=8.5, alignment=0)),
+            Paragraph("<b>HOD</b>", ParagraphStyle(name='SigCenterCons', fontName='Times-Bold', fontSize=8.5, alignment=1)),
+            Paragraph("<b>Principal</b>", ParagraphStyle(name='SigRightCons', fontName='Times-Bold', fontSize=8.5, alignment=2))
         ]]
         sig_table = Table(sig_data, colWidths=[175, 175, 175])
         sig_table.setStyle(TableStyle([
@@ -1625,6 +1518,10 @@ class MarksViewSet(viewsets.ViewSet):
                 section_obj = Section.objects.filter(sections__iexact=section_id).first()
 
         semester_obj = Semester.objects.filter(id=semester_id).first() if (semester_id and str(semester_id).isdigit()) else None
+        if department and (not semester_obj or semester_obj.department_id != department.id) and semester_id:
+            alt_sem = Semester.objects.filter(department=department, semester_number=semester_id).first()
+            if alt_sem:
+                semester_obj = alt_sem
 
         college_header_obj = None
         if str(header_type).isdigit():
@@ -1694,7 +1591,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         prog_title_style = ParagraphStyle(
             name='ProgTitle',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=12,
             leading=14,
             alignment=1,
@@ -1703,7 +1600,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         lbl_bold = ParagraphStyle(
             name='LblBold',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=8,
             leading=10,
             textColor=colors.black
@@ -1711,7 +1608,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         val_norm = ParagraphStyle(
             name='ValNorm',
-            fontName='Helvetica',
+            fontName='Times-Roman',
             fontSize=8,
             leading=10,
             textColor=colors.black
@@ -1719,7 +1616,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         tbl_hdr_style = ParagraphStyle(
             name='ProgTblHdr',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=8,
             leading=10,
             alignment=1,
@@ -1728,7 +1625,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         tbl_cell_center = ParagraphStyle(
             name='ProgCellCenter',
-            fontName='Helvetica',
+            fontName='Times-Roman',
             fontSize=8,
             leading=10,
             alignment=1,
@@ -1737,7 +1634,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         tbl_cell_left = ParagraphStyle(
             name='ProgCellLeft',
-            fontName='Helvetica',
+            fontName='Times-Roman',
             fontSize=8,
             leading=10,
             alignment=0,
@@ -1774,80 +1671,20 @@ class MarksViewSet(viewsets.ViewSet):
             if s_idx > 0:
                 story.append(PageBreak())
 
-            logo_url = college_header_obj.primary_logo if college_header_obj else None
-            logo_flowable = None
-            if logo_url:
-                try:
-                    if isinstance(logo_url, str) and logo_url.startswith('http'):
-                        headers = {'User-Agent': 'Mozilla/5.0'}
-                        req = urllib.request.Request(logo_url, headers=headers)
-                        with urllib.request.urlopen(req, timeout=5) as resp:
-                            img_data = resp.read()
-                            pil_img = PILImage.open(BytesIO(img_data))
-                            out_io = BytesIO()
-                            pil_img.save(out_io, format='PNG')
-                            out_io.seek(0)
-                            logo_flowable = RLImage(out_io, width=45, height=45)
-                    elif os.path.exists(logo_url):
-                        pil_img = PILImage.open(logo_url)
-                        out_io = BytesIO()
-                        pil_img.save(out_io, format='PNG')
-                        out_io.seek(0)
-                        logo_flowable = RLImage(out_io, width=45, height=45)
-                except Exception:
-                    pass
-
-            if not logo_flowable:
-                fallback_logo_path = 'd:\\IMS-Thirumalai\\APP-THIRU\\src\\assets\\logo.webp'
-                try:
-                    if os.path.exists(fallback_logo_path):
-                        pil_img = PILImage.open(fallback_logo_path)
-                        out_io = BytesIO()
-                        pil_img.save(out_io, format='PNG')
-                        out_io.seek(0)
-                        logo_flowable = RLImage(out_io, width=45, height=45)
-                except Exception:
-                    pass
+            if s_idx == 0:
+                header_table = build_standard_college_header(college_header_obj, page_w=535, logo_size=55)
+                story.append(header_table)
+                story.append(Spacer(1, 6))
 
             exam_title_str = "CAT-1 / CAT-2 / MODEL"
             if exams:
                 exam_title_str = " / ".join([e.exam_name.upper() for e in exams])
 
-            header_title_style = ParagraphStyle(
-                name='HdrTitleImage2',
-                fontName='Helvetica-Bold',
-                fontSize=11,
-                leading=14,
-                alignment=1,
-                textColor=colors.black
-            )
-
-            college_name_str = college_header_obj.college_name.upper() if (college_header_obj and college_header_obj.college_name) else ""
-            college_header_parts = []
-            if college_name_str:
-                college_header_parts.append(college_name_str)
+            sheet_title = "STUDENT PROGRESS REPORT"
             if exam_title_str:
-                college_header_parts.append(exam_title_str)
-            college_header_parts.append("STUDENT PROGRESS REPORT")
-            header_title_text = "<br/>".join(college_header_parts)
-            title_paragraph = Paragraph(f"<b>{header_title_text}</b>", header_title_style)
-
-            if logo_flowable:
-                header_table_data = [[logo_flowable, title_paragraph]]
-                header_table = Table(header_table_data, colWidths=[65, 470])
-            else:
-                header_table_data = [[title_paragraph]]
-                header_table = Table(header_table_data, colWidths=[535])
-
-            header_table.setStyle(TableStyle([
-                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                ('TOPPADDING', (0,0), (-1,-1), 6),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-            ]))
-            story.append(header_table)
-            story.append(Spacer(1, 10))
+                sheet_title = f"{exam_title_str} - STUDENT PROGRESS REPORT"
+            story.append(build_centered_report_title(sheet_title, font_size=12, leading=15))
+            story.append(Spacer(1, 6))
 
             exam_date_str = ""
             if exams:
@@ -1907,7 +1744,7 @@ class MarksViewSet(viewsets.ViewSet):
             roll_no = st.roll_number or "—"
             dept_name = department.department_name if department else "—"
             sec_name = section_obj.sections if section_obj else "A"
-            sem_val = semester_id or "—"
+            sem_val = (semester_obj.semester_name or f"Semester {semester_obj.semester_number}") if (semester_obj and hasattr(semester_obj, 'semester_number')) else (f"Semester {semester_id}" if semester_id else "—")
             batch_val = batch.batch if batch else "—"
 
             regulation_str = "—"
@@ -2098,9 +1935,9 @@ class MarksViewSet(viewsets.ViewSet):
             story.append(Spacer(1, 35))
 
             sig_data = [[
-                Paragraph("<b>Class In-Charge</b>", ParagraphStyle(name='Sig1', fontName='Helvetica-Bold', fontSize=8.5, alignment=0)),
-                Paragraph("<b>HOD</b>", ParagraphStyle(name='Sig2', fontName='Helvetica-Bold', fontSize=8.5, alignment=1)),
-                Paragraph("<b>Parent Signature</b>", ParagraphStyle(name='Sig3', fontName='Helvetica-Bold', fontSize=8.5, alignment=2))
+                Paragraph("<b>Class In-Charge</b>", ParagraphStyle(name='Sig1', fontName='Times-Bold', fontSize=8.5, alignment=0)),
+                Paragraph("<b>HOD</b>", ParagraphStyle(name='Sig2', fontName='Times-Bold', fontSize=8.5, alignment=1)),
+                Paragraph("<b>Parent Signature</b>", ParagraphStyle(name='Sig3', fontName='Times-Bold', fontSize=8.5, alignment=2))
             ]]
             sig_table = Table(sig_data, colWidths=[178, 178, 179])
             sig_table.setStyle(TableStyle([
@@ -2159,6 +1996,10 @@ class MarksViewSet(viewsets.ViewSet):
                 section_obj = Section.objects.filter(sections__iexact=section_id).first()
 
         semester_obj = Semester.objects.filter(id=semester_id).first() if (semester_id and str(semester_id).isdigit()) else None
+        if department and (not semester_obj or semester_obj.department_id != department.id) and semester_id:
+            alt_sem = Semester.objects.filter(department=department, semester_number=semester_id).first()
+            if alt_sem:
+                semester_obj = alt_sem
 
         college_header_obj = None
         if str(header_type).isdigit():
@@ -2259,7 +2100,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         title_style = ParagraphStyle(
             name='InternalAnalysisHeaderTitle',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=12,
             leading=14,
             alignment=1,
@@ -2267,7 +2108,7 @@ class MarksViewSet(viewsets.ViewSet):
         )
         report_title_style = ParagraphStyle(
             name='InternalAnalysisReportTitle',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=11,
             leading=13,
             alignment=1,
@@ -2275,7 +2116,7 @@ class MarksViewSet(viewsets.ViewSet):
         )
         meta_label_style = ParagraphStyle(
             name='InternalAnalysisMetaLabel',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=9,
             leading=12,
             alignment=0,
@@ -2283,7 +2124,7 @@ class MarksViewSet(viewsets.ViewSet):
         )
         meta_val_style = ParagraphStyle(
             name='InternalAnalysisMetaVal',
-            fontName='Helvetica',
+            fontName='Times-Roman',
             fontSize=9,
             leading=12,
             alignment=0,
@@ -2291,7 +2132,7 @@ class MarksViewSet(viewsets.ViewSet):
         )
         tbl_hdr_style = ParagraphStyle(
             name='InternalAnalysisTblHdr',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=8.5,
             leading=11,
             alignment=1,
@@ -2299,47 +2140,12 @@ class MarksViewSet(viewsets.ViewSet):
         )
         tbl_cell_center = ParagraphStyle(
             name='InternalAnalysisTblCellCenter',
-            fontName='Helvetica',
+            fontName='Times-Roman',
             fontSize=8.5,
             leading=11,
             alignment=1,
             textColor=colors.black
         )
-
-        logo_url = college_header_obj.primary_logo if college_header_obj else None
-        logo_flowable = None
-        if logo_url:
-            try:
-                if isinstance(logo_url, str) and logo_url.startswith('http'):
-                    headers = {'User-Agent': 'Mozilla/5.0'}
-                    req = urllib.request.Request(logo_url, headers=headers)
-                    with urllib.request.urlopen(req, timeout=5) as response:
-                        img_data = response.read()
-                        pil_img = PILImage.open(BytesIO(img_data))
-                        out_io = BytesIO()
-                        pil_img.save(out_io, format='PNG')
-                        out_io.seek(0)
-                        logo_flowable = RLImage(out_io, width=45, height=45)
-                elif os.path.exists(logo_url):
-                    pil_img = PILImage.open(logo_url)
-                    out_io = BytesIO()
-                    pil_img.save(out_io, format='PNG')
-                    out_io.seek(0)
-                    logo_flowable = RLImage(out_io, width=45, height=45)
-            except Exception:
-                pass
-
-        if not logo_flowable:
-            fallback_logo_path = 'd:\\IMS-Thirumalai\\APP-THIRU\\src\\assets\\logo.webp'
-            try:
-                if os.path.exists(fallback_logo_path):
-                    pil_img = PILImage.open(fallback_logo_path)
-                    out_io = BytesIO()
-                    pil_img.save(out_io, format='PNG')
-                    out_io.seek(0)
-                    logo_flowable = RLImage(out_io, width=45, height=45)
-            except Exception:
-                pass
 
         story = []
 
@@ -2354,10 +2160,10 @@ class MarksViewSet(viewsets.ViewSet):
             exam_date_str = datetime.date.today().strftime('%d/%m/%Y')
 
         sem_num = 1
-        if semester_id and str(semester_id).isdigit():
+        if semester_obj and hasattr(semester_obj, 'semester_number') and semester_obj.semester_number:
+            sem_num = semester_obj.semester_number
+        elif semester_id and str(semester_id).isdigit():
             sem_num = int(semester_id)
-        elif semester_obj and hasattr(semester_obj, 'id') and isinstance(semester_obj.id, int):
-            sem_num = semester_obj.id
 
         year_roman = 'I'
         if sem_num in [3, 4]:
@@ -2385,44 +2191,20 @@ class MarksViewSet(viewsets.ViewSet):
         if not exam_title_str:
             exam_title_str = "INTERNAL EXAM"
 
-        header_title_style = ParagraphStyle(
-            name='InternalHdrTitle',
-            fontName='Helvetica-Bold',
-            fontSize=11,
-            leading=14,
-            alignment=1,
-            textColor=colors.black
-        )
-
         for subj_index, target_subj in enumerate(subjects):
             if subj_index > 0:
                 story.append(PageBreak())
 
-            college_header_parts = []
-            if header_name:
-                college_header_parts.append(header_name)
+            if subj_index == 0:
+                header_table = build_standard_college_header(college_header_obj, page_w=525, logo_size=55)
+                story.append(header_table)
+                story.append(Spacer(1, 6))
+
+            sheet_title = "EXAM RESULT ANALYSIS"
             if exam_title_str:
-                college_header_parts.append(exam_title_str)
-            college_header_parts.append("EXAM RESULT ANALYSIS")
-            header_title_text = "<br/>".join(college_header_parts)
-            title_paragraph = Paragraph(f"<b>{header_title_text}</b>", header_title_style)
-
-            if logo_flowable:
-                header_table_data = [[logo_flowable, title_paragraph]]
-                header_table = Table(header_table_data, colWidths=[65, 460])
-            else:
-                header_table_data = [[title_paragraph]]
-                header_table = Table(header_table_data, colWidths=[525])
-
-            header_table.setStyle(TableStyle([
-                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                ('TOPPADDING', (0,0), (-1,-1), 6),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-            ]))
-            story.append(header_table)
-            story.append(Spacer(1, 14))
+                sheet_title = f"{exam_title_str} - EXAM RESULT ANALYSIS"
+            story.append(build_centered_report_title(sheet_title, font_size=12, leading=15))
+            story.append(Spacer(1, 6))
 
             faculty_handler_name = "N/A"
             tt = ClassTimetable.objects.filter(
@@ -2464,14 +2246,14 @@ class MarksViewSet(viewsets.ViewSet):
 
             lbl_bold = ParagraphStyle(
                 name='InternalLblBold',
-                fontName='Helvetica-Bold',
+                fontName='Times-Bold',
                 fontSize=8.5,
                 leading=11,
                 textColor=colors.black
             )
             val_norm = ParagraphStyle(
                 name='InternalValNorm',
-                fontName='Helvetica',
+                fontName='Times-Roman',
                 fontSize=8.5,
                 leading=11,
                 textColor=colors.black
@@ -2631,7 +2413,7 @@ class MarksViewSet(viewsets.ViewSet):
 
             stats_colon_style = ParagraphStyle(
                 name='InternalAnalysisMetaColon',
-                fontName='Helvetica-Bold',
+                fontName='Times-Bold',
                 fontSize=9,
                 leading=12,
                 alignment=1,
@@ -2639,7 +2421,7 @@ class MarksViewSet(viewsets.ViewSet):
             )
             stats_val_bold_style = ParagraphStyle(
                 name='InternalAnalysisMetaValBold',
-                fontName='Helvetica-Bold',
+                fontName='Times-Bold',
                 fontSize=9,
                 leading=12,
                 alignment=0,
@@ -2714,12 +2496,12 @@ class MarksViewSet(viewsets.ViewSet):
             story.append(Spacer(1, 10))
 
             if not use_grade_distribution:
-                story.append(Paragraph("<b>Minimum Pass Marks: 50 Marks</b>", ParagraphStyle(name='MinPassNote', fontName='Helvetica-Bold', fontSize=9, leading=12)))
+                story.append(Paragraph("<b>Minimum Pass Marks: 50 Marks</b>", ParagraphStyle(name='MinPassNote', fontName='Times-Bold', fontSize=9, leading=12)))
             story.append(Spacer(1, 60))
 
             sig_data = [[
-                Paragraph("<b>Faculty In-Charge</b>", ParagraphStyle(name='InternalSig1', fontName='Helvetica-Bold', fontSize=9.5, alignment=1)),
-                Paragraph("<b>HOD</b>", ParagraphStyle(name='InternalSig2', fontName='Helvetica-Bold', fontSize=9.5, alignment=1))
+                Paragraph("<b>Faculty In-Charge</b>", ParagraphStyle(name='InternalSig1', fontName='Times-Bold', fontSize=9.5, alignment=1)),
+                Paragraph("<b>HOD</b>", ParagraphStyle(name='InternalSig2', fontName='Times-Bold', fontSize=9.5, alignment=1))
             ]]
             sig_table = Table(sig_data, colWidths=[260, 265])
             sig_table.setStyle(TableStyle([
@@ -2862,41 +2644,6 @@ class MarksViewSet(viewsets.ViewSet):
         )
         styles = getSampleStyleSheet()
 
-        logo_url = college_header_obj.primary_logo if college_header_obj else None
-        logo_flowable = None
-        if logo_url:
-            try:
-                if isinstance(logo_url, str) and logo_url.startswith('http'):
-                    headers = {'User-Agent': 'Mozilla/5.0'}
-                    req = urllib.request.Request(logo_url, headers=headers)
-                    with urllib.request.urlopen(req, timeout=5) as response:
-                        img_data = response.read()
-                        pil_img = PILImage.open(BytesIO(img_data))
-                        out_io = BytesIO()
-                        pil_img.save(out_io, format='PNG')
-                        out_io.seek(0)
-                        logo_flowable = RLImage(out_io, width=45, height=45)
-                elif os.path.exists(logo_url):
-                    pil_img = PILImage.open(logo_url)
-                    out_io = BytesIO()
-                    pil_img.save(out_io, format='PNG')
-                    out_io.seek(0)
-                    logo_flowable = RLImage(out_io, width=45, height=45)
-            except Exception:
-                pass
-
-        if not logo_flowable:
-            fallback_logo_path = 'd:\\IMS-Thirumalai\\APP-THIRU\\src\\assets\\logo.webp'
-            try:
-                if os.path.exists(fallback_logo_path):
-                    pil_img = PILImage.open(fallback_logo_path)
-                    out_io = BytesIO()
-                    pil_img.save(out_io, format='PNG')
-                    out_io.seek(0)
-                    logo_flowable = RLImage(out_io, width=45, height=45)
-            except Exception:
-                pass
-
         story = []
 
         sem_num = 1
@@ -2927,41 +2674,15 @@ class MarksViewSet(viewsets.ViewSet):
         if not exam_title_str:
             exam_title_str = "EXAM"
 
-        header_title_style = ParagraphStyle(
-            name='ConsolidatedHdrTitle',
-            fontName='Helvetica-Bold',
-            fontSize=11,
-            leading=14,
-            alignment=1,
-            textColor=colors.black
-        )
-
-        college_name_str = college_header_obj.college_name.upper() if (college_header_obj and college_header_obj.college_name) else ""
-        college_header_parts = []
-        if college_name_str:
-            college_header_parts.append(college_name_str)
-        if exam_title_str:
-            college_header_parts.append(exam_title_str)
-        college_header_parts.append("CONSOLIDATED EXAM RESULT ANALYSIS")
-        header_title_text = "<br/>".join(college_header_parts)
-        title_paragraph = Paragraph(f"<b>{header_title_text}</b>", header_title_style)
-
-        if logo_flowable:
-            header_table_data = [[logo_flowable, title_paragraph]]
-            header_table = Table(header_table_data, colWidths=[65, 460])
-        else:
-            header_table_data = [[title_paragraph]]
-            header_table = Table(header_table_data, colWidths=[525])
-
-        header_table.setStyle(TableStyle([
-            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('TOPPADDING', (0,0), (-1,-1), 6),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-        ]))
+        header_table = build_standard_college_header(college_header_obj, page_w=525, logo_size=55)
         story.append(header_table)
-        story.append(Spacer(1, 10))
+        story.append(Spacer(1, 6))
+
+        sheet_title = "CONSOLIDATED EXAM RESULT ANALYSIS"
+        if exam_title_str:
+            sheet_title = f"{exam_title_str} - CONSOLIDATED EXAM RESULT ANALYSIS"
+        story.append(build_centered_report_title(sheet_title, font_size=12, leading=15))
+        story.append(Spacer(1, 6))
 
         dept_name_str = department.department_name.title() if department else ""
         batch_str = batch.batch if batch else ""
@@ -2973,7 +2694,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         lbl_bold = ParagraphStyle(
             name='CeraLblBold',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=8,
             leading=10,
             textColor=colors.black
@@ -2981,7 +2702,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         val_norm = ParagraphStyle(
             name='CeraValNorm',
-            fontName='Helvetica',
+            fontName='Times-Roman',
             fontSize=8,
             leading=10,
             textColor=colors.black
@@ -3013,7 +2734,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         tbl_hdr_style = ParagraphStyle(
             name='ConsolidatedTblHdr',
-            fontName='Helvetica-Bold',
+            fontName='Times-Bold',
             fontSize=8,
             leading=10,
             alignment=1,
@@ -3021,17 +2742,13 @@ class MarksViewSet(viewsets.ViewSet):
         )
         tbl_cell_center = ParagraphStyle(
             name='ConsolidatedTblCellCenter',
-            fontName='Helvetica',
+            fontName='Times-Roman',
             fontSize=8,
             leading=10,
             alignment=1,
             textColor=colors.black
         )
-        try:
-            pdfmetrics.registerFont(TTFont('ArialUni', 'C:\\Windows\\Fonts\\ARIALUNI.TTF'))
-            font_name_left = 'ArialUni'
-        except Exception:
-            font_name_left = 'Helvetica'
+        font_name_left = 'Times-Roman'
 
         tbl_cell_left = ParagraphStyle(
             name='ConsolidatedTblCellLeft',
@@ -3258,8 +2975,8 @@ class MarksViewSet(viewsets.ViewSet):
                 cum_fail_more = sum(1 for f in student_cum_fail_counts.values() if f > 3)
                 cum_overall_pass_pct = f"{round((cum_fail_0 / total_students_val * 100), 2):.2f}%" if total_students_val > 0 else "0.00%"
 
-            summary_hdr_style = ParagraphStyle(name='SumHdr', fontName='Helvetica-Bold', fontSize=8, alignment=1)
-            summary_cell_center = ParagraphStyle(name='SumCellCenter', fontName='Helvetica', fontSize=8, alignment=1)
+            summary_hdr_style = ParagraphStyle(name='SumHdr', fontName='Times-Bold', fontSize=8, alignment=1)
+            summary_cell_center = ParagraphStyle(name='SumCellCenter', fontName='Times-Roman', fontSize=8, alignment=1)
 
             summary_table_data = [
                 [
@@ -3309,8 +3026,8 @@ class MarksViewSet(viewsets.ViewSet):
             story.append(Spacer(1, 40))
 
         else:
-            perf_hdr_style = ParagraphStyle(name='PerfHdrInt', fontName='Helvetica-Bold', fontSize=9, alignment=1)
-            tbl_cell_left_perf = ParagraphStyle(name='PerfLeftInt', fontName='Helvetica', fontSize=8, alignment=0)
+            perf_hdr_style = ParagraphStyle(name='PerfHdrInt', fontName='Times-Bold', fontSize=9, alignment=1)
+            tbl_cell_left_perf = ParagraphStyle(name='PerfLeftInt', fontName='Times-Roman', fontSize=8, alignment=0)
 
             perf_data = [
                 [Paragraph("<b>Performance Category</b>", perf_hdr_style), Paragraph("<b>Number of Students</b>", perf_hdr_style)],
@@ -3335,10 +3052,10 @@ class MarksViewSet(viewsets.ViewSet):
             story.append(Spacer(1, 40))
 
         sig_data = [[
-            Paragraph("<b>Test Coordinator</b>", ParagraphStyle(name='Sig1', fontName='Helvetica', fontSize=9, alignment=1)),
-            Paragraph("<b>HOD</b>", ParagraphStyle(name='Sig2', fontName='Helvetica', fontSize=9, alignment=1)),
-            Paragraph("<b>Vice Principal</b>", ParagraphStyle(name='Sig3', fontName='Helvetica', fontSize=9, alignment=1)),
-            Paragraph("<b>Principal</b>", ParagraphStyle(name='Sig4', fontName='Helvetica', fontSize=9, alignment=1))
+            Paragraph("<b>Test Coordinator</b>", ParagraphStyle(name='Sig1', fontName='Times-Bold', fontSize=9, alignment=1)),
+            Paragraph("<b>HOD</b>", ParagraphStyle(name='Sig2', fontName='Times-Bold', fontSize=9, alignment=1)),
+            Paragraph("<b>Vice Principal</b>", ParagraphStyle(name='Sig3', fontName='Times-Bold', fontSize=9, alignment=1)),
+            Paragraph("<b>Principal</b>", ParagraphStyle(name='Sig4', fontName='Times-Bold', fontSize=9, alignment=1))
         ]]
         sig_table = Table(sig_data, colWidths=[130, 130, 130, 130])
         sig_table.setStyle(TableStyle([
@@ -3486,29 +3203,6 @@ class MarksViewSet(viewsets.ViewSet):
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=35, rightMargin=35, topMargin=30, bottomMargin=30)
 
-        logo_url = college_header_obj.primary_logo if college_header_obj else None
-        logo_flowable = None
-        if logo_url:
-            try:
-                if isinstance(logo_url, str) and logo_url.startswith('http'):
-                    headers = {'User-Agent': 'Mozilla/5.0'}
-                    req_obj = urllib.request.Request(logo_url, headers=headers)
-                    with urllib.request.urlopen(req_obj, timeout=5) as resp:
-                        img_data = resp.read()
-                        pil_img = PILImage.open(BytesIO(img_data))
-                        out_io = BytesIO()
-                        pil_img.save(out_io, format='PNG')
-                        out_io.seek(0)
-                        logo_flowable = RLImage(out_io, width=45, height=45)
-                elif os.path.exists(logo_url):
-                    pil_img = PILImage.open(logo_url)
-                    out_io = BytesIO()
-                    pil_img.save(out_io, format='PNG')
-                    out_io.seek(0)
-                    logo_flowable = RLImage(out_io, width=45, height=45)
-            except Exception:
-                pass
-
         story = []
 
         exam_title_str = ""
@@ -3521,31 +3215,15 @@ class MarksViewSet(viewsets.ViewSet):
         if not exam_title_str:
             exam_title_str = "ALL EXAMS"
 
-        hdr_style = ParagraphStyle(name='SPRHdrTitle', fontName='Helvetica-Bold', fontSize=11, leading=14, alignment=1, textColor=colors.black)
-        college_name_str = college_header_obj.college_name.upper() if (college_header_obj and college_header_obj.college_name) else ""
-
-        hdr_parts = []
-        if college_name_str:
-            hdr_parts.append(college_name_str)
-        if exam_title_str:
-            hdr_parts.append(exam_title_str)
-            hdr_parts.append("STUDENT PERFORMANCE REPORT")
-
-        hdr_paragraph = Paragraph("<br/>".join(f"<b>{p}</b>" for p in hdr_parts), hdr_style)
-
-        if logo_flowable:
-            header_table = Table([[logo_flowable, hdr_paragraph]], colWidths=[65, 460])
-        else:
-            header_table = Table([[hdr_paragraph]], colWidths=[525])
-        header_table.setStyle(TableStyle([
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
+        header_table = build_standard_college_header(college_header_obj, page_w=525, logo_size=55)
         story.append(header_table)
-        story.append(Spacer(1, 8))
+        story.append(Spacer(1, 6))
+
+        sheet_title = "STUDENT PERFORMANCE REPORT"
+        if exam_title_str:
+            sheet_title = f"{exam_title_str} - STUDENT PERFORMANCE REPORT"
+        story.append(build_centered_report_title(sheet_title, font_size=12, leading=15))
+        story.append(Spacer(1, 6))
 
         sem_num = 1
         if semester_id and str(semester_id).isdigit():
@@ -3561,8 +3239,8 @@ class MarksViewSet(viewsets.ViewSet):
             if reg_obj:
                 regulation_str = reg_obj.regulation_code
 
-        lbl_bold = ParagraphStyle(name='SPRLblBold', fontName='Helvetica-Bold', fontSize=8, leading=10, textColor=colors.black)
-        val_norm = ParagraphStyle(name='SPRValNorm', fontName='Helvetica', fontSize=8, leading=10, textColor=colors.black)
+        lbl_bold = ParagraphStyle(name='SPRLblBold', fontName='Times-Bold', fontSize=8, leading=10, textColor=colors.black)
+        val_norm = ParagraphStyle(name='SPRValNorm', fontName='Times-Roman', fontSize=8, leading=10, textColor=colors.black)
 
         meta_data = [
             [
@@ -3588,16 +3266,12 @@ class MarksViewSet(viewsets.ViewSet):
         story.append(meta_table)
         story.append(Spacer(1, 12))
 
-        try:
-            pdfmetrics.registerFont(TTFont('ArialUni', 'C:\\Windows\\Fonts\\ARIALUNI.TTF'))
-            name_font = 'ArialUni'
-        except Exception:
-            name_font = 'Helvetica'
+        name_font = 'Times-Roman'
 
-        tbl_hdr_style = ParagraphStyle(name='SPRTblHdr', fontName='Helvetica-Bold', fontSize=8, leading=10, alignment=1, textColor=colors.black)
-        tbl_cell_center = ParagraphStyle(name='SPRTblCC', fontName='Helvetica', fontSize=8, leading=10, alignment=1, textColor=colors.black)
+        tbl_hdr_style = ParagraphStyle(name='SPRTblHdr', fontName='Times-Bold', fontSize=8, leading=10, alignment=1, textColor=colors.black)
+        tbl_cell_center = ParagraphStyle(name='SPRTblCC', fontName='Times-Roman', fontSize=8, leading=10, alignment=1, textColor=colors.black)
         tbl_cell_left = ParagraphStyle(name='SPRTblCL', fontName=name_font, fontSize=8, leading=10, alignment=0, textColor=colors.black)
-        tbl_cell_fail = ParagraphStyle(name='SPRTblFail', fontName='Helvetica-Bold', fontSize=8, leading=10, alignment=1, textColor=colors.HexColor('#1D4ED8'))
+        tbl_cell_fail = ParagraphStyle(name='SPRTblFail', fontName='Times-Bold', fontSize=8, leading=10, alignment=1, textColor=colors.HexColor('#1D4ED8'))
 
         table_data = [[
             Paragraph("<b>S.No</b>", tbl_hdr_style),
@@ -3647,12 +3321,12 @@ class MarksViewSet(viewsets.ViewSet):
         count_2    = sum(1 for v in student_fail_counts.values() if v == 2)
         count_3plus = sum(1 for v in student_fail_counts.values() if v >= 3)
 
-        summ_hdr  = ParagraphStyle(name='SPRSummHdr',  fontName='Helvetica-Bold', fontSize=8, leading=10, alignment=1, textColor=colors.black)
-        summ_cell = ParagraphStyle(name='SPRSummCell', fontName='Helvetica',      fontSize=8, leading=10, alignment=1, textColor=colors.black)
-        summ_cell_left = ParagraphStyle(name='SPRSummCellL', fontName='Helvetica', fontSize=8, leading=10, alignment=0, textColor=colors.black)
+        summ_hdr  = ParagraphStyle(name='SPRSummHdr',  fontName='Times-Bold', fontSize=8, leading=10, alignment=1, textColor=colors.black)
+        summ_cell = ParagraphStyle(name='SPRSummCell', fontName='Times-Roman',      fontSize=8, leading=10, alignment=1, textColor=colors.black)
+        summ_cell_left = ParagraphStyle(name='SPRSummCellL', fontName='Times-Roman', fontSize=8, leading=10, alignment=0, textColor=colors.black)
 
-        summ_bold_left = ParagraphStyle(name='SPRSummBL',   fontName='Helvetica-Bold', fontSize=8, leading=10, alignment=0, textColor=colors.black)
-        summ_blue = ParagraphStyle(name='SPRSummBlue', fontName='Helvetica-Bold', fontSize=8, leading=10, alignment=1, textColor=colors.HexColor('#1D4ED8'))
+        summ_bold_left = ParagraphStyle(name='SPRSummBL',   fontName='Times-Bold', fontSize=8, leading=10, alignment=0, textColor=colors.black)
+        summ_blue = ParagraphStyle(name='SPRSummBlue', fontName='Times-Bold', fontSize=8, leading=10, alignment=1, textColor=colors.HexColor('#1D4ED8'))
 
         breakdown_data = [
             [
@@ -3700,7 +3374,7 @@ class MarksViewSet(viewsets.ViewSet):
         story.append(breakdown_table)
         story.append(Spacer(1, 40))
 
-        sig_style = ParagraphStyle(name='SPRSig', fontName='Helvetica', fontSize=9, alignment=1)
+        sig_style = ParagraphStyle(name='SPRSig', fontName='Times-Bold', fontSize=9, alignment=1)
         sig_data = [[
             Paragraph("<b>Test Coordinator</b>", sig_style),
             Paragraph("<b>HOD</b>", sig_style),
@@ -3754,6 +3428,10 @@ class MarksViewSet(viewsets.ViewSet):
                 section_obj = Section.objects.filter(sections__iexact=section_id).first()
 
         semester_obj = Semester.objects.filter(id=semester_id).first() if (semester_id and str(semester_id).isdigit()) else None
+        if department and (not semester_obj or semester_obj.department_id != department.id) and semester_id:
+            alt_sem = Semester.objects.filter(department=department, semester_number=semester_id).first()
+            if alt_sem:
+                semester_obj = alt_sem
 
         college_header_obj = None
         if str(header_type).isdigit():
@@ -3867,48 +3545,13 @@ class MarksViewSet(viewsets.ViewSet):
             bottomMargin=30
         )
 
-        logo_url = college_header_obj.primary_logo if college_header_obj else None
-        logo_flowable = None
-        if logo_url:
-            try:
-                if isinstance(logo_url, str) and logo_url.startswith('http'):
-                    headers = {'User-Agent': 'Mozilla/5.0'}
-                    req = urllib.request.Request(logo_url, headers=headers)
-                    with urllib.request.urlopen(req, timeout=5) as response:
-                        img_data = response.read()
-                        pil_img = PILImage.open(BytesIO(img_data))
-                        out_io = BytesIO()
-                        pil_img.save(out_io, format='PNG')
-                        out_io.seek(0)
-                        logo_flowable = RLImage(out_io, width=45, height=45)
-                elif os.path.exists(logo_url):
-                    pil_img = PILImage.open(logo_url)
-                    out_io = BytesIO()
-                    pil_img.save(out_io, format='PNG')
-                    out_io.seek(0)
-                    logo_flowable = RLImage(out_io, width=45, height=45)
-            except Exception:
-                pass
-
-        if not logo_flowable:
-            fallback_logo_path = 'd:\\IMS-Thirumalai\\APP-THIRU\\src\\assets\\logo.webp'
-            try:
-                if os.path.exists(fallback_logo_path):
-                    pil_img = PILImage.open(fallback_logo_path)
-                    out_io = BytesIO()
-                    pil_img.save(out_io, format='PNG')
-                    out_io.seek(0)
-                    logo_flowable = RLImage(out_io, width=45, height=45)
-            except Exception:
-                pass
-
         story = []
 
         sem_num = 1
-        if semester_id and str(semester_id).isdigit():
+        if semester_obj and hasattr(semester_obj, 'semester_number') and semester_obj.semester_number:
+            sem_num = semester_obj.semester_number
+        elif semester_id and str(semester_id).isdigit():
             sem_num = int(semester_id)
-        elif semester_obj and hasattr(semester_obj, 'id') and isinstance(semester_obj.id, int):
-            sem_num = semester_obj.id
 
         sec_name = section_obj.sections if section_obj else (section_id if section_id else 'A')
 
@@ -3923,41 +3566,15 @@ class MarksViewSet(viewsets.ViewSet):
         if not exam_title_str:
             exam_title_str = "INTERNAL EXAM"
 
-        header_title_style = ParagraphStyle(
-            name='CapaHdrTitle',
-            fontName='Helvetica-Bold',
-            fontSize=11,
-            leading=14,
-            alignment=1,
-            textColor=colors.black
-        )
-
-        college_name_str = college_header_obj.college_name.upper() if (college_header_obj and college_header_obj.college_name) else ""
-        college_header_parts = []
-        if college_name_str:
-            college_header_parts.append(college_name_str)
-        if exam_title_str:
-            college_header_parts.append(exam_title_str)
-        college_header_parts.append("CORRECTIVE AND PREVENTIVE ACTION FORM")
-        header_title_text = "<br/>".join(college_header_parts)
-        title_paragraph = Paragraph(f"<b>{header_title_text}</b>", header_title_style)
-
-        if logo_flowable:
-            header_table_data = [[logo_flowable, title_paragraph]]
-            header_table = Table(header_table_data, colWidths=[65, 460])
-        else:
-            header_table_data = [[title_paragraph]]
-            header_table = Table(header_table_data, colWidths=[525])
-
-        header_table.setStyle(TableStyle([
-            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('TOPPADDING', (0,0), (-1,-1), 6),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-        ]))
+        header_table = build_standard_college_header(college_header_obj, page_w=525, logo_size=55)
         story.append(header_table)
-        story.append(Spacer(1, 10))
+        story.append(Spacer(1, 6))
+
+        sheet_title = "CORRECTIVE AND PREVENTIVE ACTION FORM"
+        if exam_title_str:
+            sheet_title = f"{exam_title_str} - CORRECTIVE AND PREVENTIVE ACTION FORM"
+        story.append(build_centered_report_title(sheet_title, font_size=12, leading=15))
+        story.append(Spacer(1, 6))
 
         dept_name_str = department.department_name.title() if department else ""
         batch_str = batch.batch if batch else ""
@@ -3967,8 +3584,8 @@ class MarksViewSet(viewsets.ViewSet):
             if reg_obj:
                 regulation_str = reg_obj.regulation_code
 
-        lbl_bold = ParagraphStyle(name='CapaLblBold', fontName='Helvetica-Bold', fontSize=8, leading=10, textColor=colors.black)
-        val_norm = ParagraphStyle(name='CapaValNorm', fontName='Helvetica', fontSize=8, leading=10, textColor=colors.black)
+        lbl_bold = ParagraphStyle(name='CapaLblBold', fontName='Times-Bold', fontSize=8, leading=10, textColor=colors.black)
+        val_norm = ParagraphStyle(name='CapaValNorm', fontName='Times-Roman', fontSize=8, leading=10, textColor=colors.black)
 
         subj_full_str = f"{subject_obj.subject_code} - {subject_obj.subject_name}" if subject_obj else "—"
 
@@ -4005,7 +3622,7 @@ class MarksViewSet(viewsets.ViewSet):
         story.append(meta_table)
         story.append(Spacer(1, 10))
 
-        issue_type_style = ParagraphStyle(name='IssueTypeStyle', fontName='Helvetica-Bold', fontSize=8.5, leading=11, alignment=1)
+        issue_type_style = ParagraphStyle(name='IssueTypeStyle', fontName='Times-Bold', fontSize=8.5, leading=11, alignment=1)
         issue_box_data = [
             [
                 Paragraph("<b>Issue Type</b>", issue_type_style),
@@ -4026,9 +3643,9 @@ class MarksViewSet(viewsets.ViewSet):
         story.append(issue_table)
         story.append(Spacer(1, 10))
 
-        cell_hdr_style = ParagraphStyle(name='FormHdr', fontName='Helvetica-Bold', fontSize=8.5, leading=11)
-        cell_text_style = ParagraphStyle(name='FormTxt', fontName='Helvetica', fontSize=8, leading=11)
-        right_action_date_style = ParagraphStyle(name='FormActionDate', fontName='Helvetica-Bold', fontSize=8, leading=11, alignment=2)
+        cell_hdr_style = ParagraphStyle(name='FormHdr', fontName='Times-Bold', fontSize=8.5, leading=11)
+        cell_text_style = ParagraphStyle(name='FormTxt', fontName='Times-Roman', fontSize=8, leading=11)
+        right_action_date_style = ParagraphStyle(name='FormActionDate', fontName='Times-Bold', fontSize=8, leading=11, alignment=2)
 
         failed_roll_para = Paragraph(failed_rolls_str, cell_text_style)
 
@@ -4068,11 +3685,11 @@ class MarksViewSet(viewsets.ViewSet):
         story.append(form_table)
         story.append(Spacer(1, 12))
 
-        story.append(Paragraph("<b>Effectiveness Verified By:</b>", ParagraphStyle(name='VerifiedTitle', fontName='Helvetica-Bold', fontSize=8.5, alignment=1)))
+        story.append(Paragraph("<b>Effectiveness Verified By:</b>", ParagraphStyle(name='VerifiedTitle', fontName='Times-Bold', fontSize=8.5, alignment=1)))
         story.append(Spacer(1, 4))
 
-        ver_hdr_style = ParagraphStyle(name='VerHdr', fontName='Helvetica-Bold', fontSize=8, leading=10, alignment=1)
-        ver_txt_style = ParagraphStyle(name='VerTxt', fontName='Helvetica', fontSize=8, leading=10, alignment=1)
+        ver_hdr_style = ParagraphStyle(name='VerHdr', fontName='Times-Bold', fontSize=8, leading=10, alignment=1)
+        ver_txt_style = ParagraphStyle(name='VerTxt', fontName='Times-Roman', fontSize=8, leading=10, alignment=1)
         ver_data = [
             [
                 Paragraph("<b>Responsible Member</b>", ver_hdr_style),
@@ -4099,7 +3716,7 @@ class MarksViewSet(viewsets.ViewSet):
         story.append(ver_table)
         story.append(Spacer(1, 35))
 
-        story.append(Paragraph("<b>HOD</b>", ParagraphStyle(name='HodSig', fontName='Helvetica-Bold', fontSize=9, alignment=1)))
+        story.append(Paragraph("<b>HOD</b>", ParagraphStyle(name='HodSig', fontName='Times-Bold', fontSize=9, alignment=1)))
 
         doc.build(story)
         pdf = buffer.getvalue()

@@ -50,6 +50,7 @@ urlpatterns = [
     path('admission-slip/save', StudentViewSet.as_view({'post': 'admission_slip_save'}), name='admission-slip-save'),
     path('admission-slip/data/<int:pk>', StudentViewSet.as_view({'get': 'admission_slip_data'}), name='admission-slip-data'),
     path('admission-slip/pdf/<int:pk>', StudentViewSet.as_view({'get': 'admission_slip_pdf'}), name='admission-slip-pdf'),
+    path('name-list-report/pdf', StudentViewSet.as_view({'post': 'name_list_report_pdf', 'get': 'name_list_report_pdf'}), name='name-list-report-pdf'),
     path('fees/save', StudentViewSet.as_view({'post': 'fees_save'}), name='fees-save'),
     path('comprehensive-view', StudentViewSet.as_view({'get': 'comprehensive_view'}), name='student-comprehensive-view'),
     path('full-profile-edit/<int:pk>', StudentViewSet.as_view({'put': 'full_profile_update', 'post': 'full_profile_update', 'patch': 'full_profile_update'}), name='student-full-profile-edit'),

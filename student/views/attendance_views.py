@@ -28,6 +28,7 @@ from institution.models import Department, Batch, Section, Semester, Regulation,
 from subject.models import Subject
 from timetable.models import ClassTimetable
 from .marks_views import generate_report_filename
+from common.report_utils import build_standard_college_header, build_centered_report_title
 
 logger = logging.getLogger(__name__)
 
@@ -372,6 +373,10 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
                 section_obj = Section.objects.filter(sections__iexact=section_id).first()
 
         semester_obj = Semester.objects.filter(id=semester_id).first() if (semester_id and str(semester_id).isdigit()) else None
+        if department and (not semester_obj or semester_obj.department_id != department.id) and semester_id:
+            alt_sem = Semester.objects.filter(department=department, semester_number=semester_id).first()
+            if alt_sem:
+                semester_obj = alt_sem
 
         college_header_obj = None
         if str(header_type).isdigit():
@@ -446,51 +451,15 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
         page_size = A4
         doc = SimpleDocTemplate(buffer, pagesize=page_size, leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
 
-        logo_url = college_header_obj.primary_logo if college_header_obj else None
-        logo_flowable = None
-        if logo_url:
-            try:
-                if isinstance(logo_url, str) and logo_url.startswith('http'):
-                    headers = {'User-Agent': 'Mozilla/5.0'}
-                    req = urllib.request.Request(logo_url, headers=headers)
-                    with urllib.request.urlopen(req, timeout=5) as resp:
-                        img_data = resp.read()
-                        pil_img = PILImage.open(BytesIO(img_data))
-                        out_io = BytesIO()
-                        pil_img.save(out_io, format='PNG')
-                        out_io.seek(0)
-                        logo_flowable = RLImage(out_io, width=45, height=45)
-                elif os.path.exists(logo_url):
-                    pil_img = PILImage.open(logo_url)
-                    out_io = BytesIO()
-                    pil_img.save(out_io, format='PNG')
-                    out_io.seek(0)
-                    logo_flowable = RLImage(out_io, width=45, height=45)
-            except Exception:
-                pass
-
         story = []
-        hdr_style = ParagraphStyle(name='ConAttHdr', fontName='Helvetica-Bold', fontSize=11, leading=14, alignment=1, textColor=colors.black)
-        college_name_str = college_header_obj.college_name.upper() if (college_header_obj and college_header_obj.college_name) else ""
-        hdr_parts = []
-        if college_name_str:
-            hdr_parts.append(college_name_str)
-        hdr_parts.append("CONSOLIDATED ATTENDANCE REPORT")
-        hdr_paragraph = Paragraph("<br/>".join(f"<b>{p}</b>" for p in hdr_parts), hdr_style)
         page_w = page_size[0] - 40
-        if logo_flowable:
-            header_table = Table([[logo_flowable, hdr_paragraph]], colWidths=[60, page_w - 60])
-        else:
-            header_table = Table([[hdr_paragraph]], colWidths=[page_w])
-        header_table.setStyle(TableStyle([
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('TOPPADDING', (0, 0), (-1, -1), 5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-        ]))
+        header_table = build_standard_college_header(college_header_obj, page_w=page_w, logo_size=60)
         story.append(header_table)
-        story.append(Spacer(1, 8))
+        story.append(Spacer(1, 6))
+
+        rpt_title = build_centered_report_title("CONSOLIDATED ATTENDANCE REPORT", font_size=12, leading=15)
+        story.append(rpt_title)
+        story.append(Spacer(1, 6))
 
         sem_num = 1
         if semester_id and str(semester_id).isdigit():
@@ -506,8 +475,8 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
             if reg_obj:
                 regulation_str = reg_obj.regulation_code
 
-        lbl_bold = ParagraphStyle(name='ConAttLbl', fontName='Helvetica-Bold', fontSize=8, leading=10)
-        val_norm = ParagraphStyle(name='ConAttVal', fontName='Helvetica', fontSize=8, leading=10)
+        lbl_bold = ParagraphStyle(name='ConAttLbl', fontName='Times-Bold', fontSize=8.5, leading=11)
+        val_norm = ParagraphStyle(name='ConAttVal', fontName='Times-Roman', fontSize=8.5, leading=11)
         meta_data = [
             [Paragraph("<b>Department:</b>", lbl_bold), Paragraph(department.department_name.title() if department else "", val_norm),
              Paragraph("<b>Batch:</b>", lbl_bold), Paragraph(batch_str, val_norm)],
@@ -531,11 +500,11 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
         story.append(meta_table)
         story.append(Spacer(1, 10))
 
-        tbl_hdr_style = ParagraphStyle(name='ConAttTH', fontName='Helvetica-Bold', fontSize=6.5, leading=8, alignment=1)
-        tbl_cell_center = ParagraphStyle(name='ConAttCC', fontName='Helvetica', fontSize=6.5, leading=8, alignment=1)
-        tbl_cell_left = ParagraphStyle(name='ConAttCL', fontName='Helvetica', fontSize=6.5, leading=8, alignment=0)
-        tbl_cell_eligible = ParagraphStyle(name='ConAttElig', fontName='Helvetica-Bold', fontSize=6.5, leading=8, alignment=1, textColor=colors.HexColor('#15803D'))
-        tbl_cell_shortage = ParagraphStyle(name='ConAttShort', fontName='Helvetica-Bold', fontSize=6.5, leading=8, alignment=1, textColor=colors.HexColor('#B91C1C'))
+        tbl_hdr_style = ParagraphStyle(name='ConAttTH', fontName='Times-Bold', fontSize=7, leading=9, alignment=1)
+        tbl_cell_center = ParagraphStyle(name='ConAttCC', fontName='Times-Roman', fontSize=7, leading=9, alignment=1)
+        tbl_cell_left = ParagraphStyle(name='ConAttCL', fontName='Times-Roman', fontSize=7, leading=9, alignment=0)
+        tbl_cell_eligible = ParagraphStyle(name='ConAttElig', fontName='Times-Bold', fontSize=7, leading=9, alignment=1, textColor=colors.HexColor('#15803D'))
+        tbl_cell_shortage = ParagraphStyle(name='ConAttShort', fontName='Times-Bold', fontSize=7, leading=9, alignment=1, textColor=colors.HexColor('#B91C1C'))
 
         # Build header row
         header_row = [
@@ -548,16 +517,14 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
             Paragraph("OD", tbl_hdr_style),
             Paragraph("Total Attended", tbl_hdr_style),
             Paragraph("Overall %", tbl_hdr_style),
-            Paragraph("Status", tbl_hdr_style),
         ]
 
         # Column widths
         # Adjusted for ~555 total:
-        col_widths = [25, 70, 135, 50, 45, 45, 35, 60, 50, 40] 
+        col_widths = [25, 75, 160, 50, 45, 45, 35, 60, 60] 
 
         table_rows = [header_row]
         eligible_cnt = 0
-        shortage_cnt = 0
 
         for idx, st in enumerate(students, start=1):
             st_name = (st.user.name if st.user and st.user.name else "") or ""
@@ -585,10 +552,6 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
             overall_pct = (st_total_attended / st_total_conducted * 100) if st_total_conducted > 0 else 100.0
             if overall_pct >= 75.0:
                 eligible_cnt += 1
-                status_p = Paragraph("OK", tbl_cell_eligible)
-            else:
-                shortage_cnt += 1
-                status_p = Paragraph("Short", tbl_cell_shortage)
 
             row = [
                 Paragraph(str(idx), tbl_cell_center),
@@ -600,7 +563,6 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
                 Paragraph(str(st_total_od), tbl_cell_center),
                 Paragraph(str(st_total_attended), tbl_cell_center),
                 Paragraph(f"<b>{overall_pct:.1f}%</b>", tbl_cell_center),
-                status_p,
             ]
             table_rows.append(row)
 
@@ -626,12 +588,11 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
         tot_students = len(students)
         summary_data = [
             [Paragraph("<b>Total Students</b>", tbl_hdr_style), Paragraph("<b>Eligible (>= 75%)</b>", tbl_hdr_style),
-             Paragraph("<b>Shortage (< 75%)</b>", tbl_hdr_style), Paragraph("<b>Class Eligibility %</b>", tbl_hdr_style)],
+             Paragraph("<b>Class Eligibility %</b>", tbl_hdr_style)],
             [Paragraph(str(tot_students), tbl_cell_center), Paragraph(str(eligible_cnt), tbl_cell_eligible),
-             Paragraph(str(shortage_cnt), tbl_cell_shortage),
              Paragraph(f"<b>{round(eligible_cnt / tot_students * 100, 2) if tot_students > 0 else 0:.2f}%</b>", tbl_cell_center)],
         ]
-        summ_table = Table(summary_data, colWidths=[135, 135, 135, 135])
+        summ_table = Table(summary_data, colWidths=[185, 185, 185])
         summ_table.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F5F5F5')),
@@ -644,8 +605,8 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
 
         sig_data = [[
             Paragraph("<b>Class In-Charge</b>", val_norm),
-            Paragraph("<b>HOD</b>", ParagraphStyle(name='ConAttSigHOD', fontName='Helvetica-Bold', fontSize=8.5, alignment=1)),
-            Paragraph("<b>Principal</b>", ParagraphStyle(name='ConAttSigPrin', fontName='Helvetica-Bold', fontSize=8.5, alignment=2)),
+            Paragraph("<b>HOD</b>", ParagraphStyle(name='ConAttSigHOD', fontName='Times-Bold', fontSize=9, alignment=1)),
+            Paragraph("<b>Principal</b>", ParagraphStyle(name='ConAttSigPrin', fontName='Times-Bold', fontSize=9, alignment=2)),
         ]]
         sig_table = Table(sig_data, colWidths=[180, 180, 180])
         sig_table.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
@@ -697,6 +658,10 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
                 section_obj = Section.objects.filter(sections__iexact=section_id).first()
 
         semester_obj = Semester.objects.filter(id=semester_id).first() if (semester_id and str(semester_id).isdigit()) else None
+        if department and (not semester_obj or semester_obj.department_id != department.id) and semester_id:
+            alt_sem = Semester.objects.filter(department=department, semester_number=semester_id).first()
+            if alt_sem:
+                semester_obj = alt_sem
         subject_obj = Subject.objects.filter(id=subject_id).first() if subject_id else None
 
         college_header_obj = None
@@ -781,52 +746,15 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
 
-        logo_url = college_header_obj.primary_logo if college_header_obj else None
-        logo_flowable = None
-        if logo_url:
-            try:
-                if isinstance(logo_url, str) and logo_url.startswith('http'):
-                    headers = {'User-Agent': 'Mozilla/5.0'}
-                    req = urllib.request.Request(logo_url, headers=headers)
-                    with urllib.request.urlopen(req, timeout=5) as resp:
-                        img_data = resp.read()
-                        pil_img = PILImage.open(BytesIO(img_data))
-                        out_io = BytesIO()
-                        pil_img.save(out_io, format='PNG')
-                        out_io.seek(0)
-                        logo_flowable = RLImage(out_io, width=45, height=45)
-                elif os.path.exists(logo_url):
-                    pil_img = PILImage.open(logo_url)
-                    out_io = BytesIO()
-                    pil_img.save(out_io, format='PNG')
-                    out_io.seek(0)
-                    logo_flowable = RLImage(out_io, width=45, height=45)
-            except Exception:
-                pass
-
         story = []
-        hdr_style = ParagraphStyle(name='SubAttHdr', fontName='Helvetica-Bold', fontSize=11, leading=14, alignment=1, textColor=colors.black)
-        college_name_str = college_header_obj.college_name.upper() if (college_header_obj and college_header_obj.college_name) else ""
-
-        hdr_parts = []
-        if college_name_str:
-            hdr_parts.append(college_name_str)
-        hdr_parts.append("SUBJECT-WISE ATTENDANCE REPORT")
-
-        hdr_paragraph = Paragraph("<br/>".join(f"<b>{p}</b>" for p in hdr_parts), hdr_style)
-        if logo_flowable:
-            header_table = Table([[logo_flowable, hdr_paragraph]], colWidths=[60, 480])
-        else:
-            header_table = Table([[hdr_paragraph]], colWidths=[540])
-        header_table.setStyle(TableStyle([
-            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('TOPPADDING', (0,0), (-1,-1), 5),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
-        ]))
+        page_w = 545
+        header_table = build_standard_college_header(college_header_obj, page_w=page_w, logo_size=60)
         story.append(header_table)
-        story.append(Spacer(1, 8))
+        story.append(Spacer(1, 6))
+
+        rpt_title = build_centered_report_title("SUBJECT-WISE ATTENDANCE REPORT", font_size=12, leading=15)
+        story.append(rpt_title)
+        story.append(Spacer(1, 6))
 
         sem_num = 1
         if semester_id and str(semester_id).isdigit():
@@ -884,8 +812,8 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
 
         subject_handler_str = ", ".join(sorted(handler_names)) if handler_names else "—"
 
-        lbl_bold = ParagraphStyle(name='SubAttLbl', fontName='Helvetica-Bold', fontSize=8, leading=10, textColor=colors.black)
-        val_norm = ParagraphStyle(name='SubAttVal', fontName='Helvetica', fontSize=8, leading=10, textColor=colors.black)
+        lbl_bold = ParagraphStyle(name='SubAttLbl', fontName='Times-Bold', fontSize=8.5, leading=11, textColor=colors.black)
+        val_norm = ParagraphStyle(name='SubAttVal', fontName='Times-Roman', fontSize=8.5, leading=11, textColor=colors.black)
 
         meta_data = [
             [
@@ -920,11 +848,11 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
         story.append(meta_table)
         story.append(Spacer(1, 10))
 
-        tbl_hdr_style = ParagraphStyle(name='SubAttTH', fontName='Helvetica-Bold', fontSize=7.5, leading=9, alignment=1, textColor=colors.black)
-        tbl_cell_center = ParagraphStyle(name='SubAttCC', fontName='Helvetica', fontSize=7.5, leading=9, alignment=1, textColor=colors.black)
-        tbl_cell_left = ParagraphStyle(name='SubAttCL', fontName='Helvetica', fontSize=7.5, leading=9, alignment=0, textColor=colors.black)
-        tbl_cell_eligible = ParagraphStyle(name='SubAttElig', fontName='Helvetica-Bold', fontSize=7.5, leading=9, alignment=1, textColor=colors.HexColor('#15803D'))
-        tbl_cell_shortage = ParagraphStyle(name='SubAttShort', fontName='Helvetica-Bold', fontSize=7.5, leading=9, alignment=1, textColor=colors.HexColor('#B91C1C'))
+        tbl_hdr_style = ParagraphStyle(name='SubAttTH', fontName='Times-Bold', fontSize=7.5, leading=9, alignment=1, textColor=colors.black)
+        tbl_cell_center = ParagraphStyle(name='SubAttCC', fontName='Times-Roman', fontSize=7.5, leading=9, alignment=1, textColor=colors.black)
+        tbl_cell_left = ParagraphStyle(name='SubAttCL', fontName='Times-Roman', fontSize=7.5, leading=9, alignment=0, textColor=colors.black)
+        tbl_cell_eligible = ParagraphStyle(name='SubAttElig', fontName='Times-Bold', fontSize=7.5, leading=9, alignment=1, textColor=colors.HexColor('#15803D'))
+        tbl_cell_shortage = ParagraphStyle(name='SubAttShort', fontName='Times-Bold', fontSize=7.5, leading=9, alignment=1, textColor=colors.HexColor('#B91C1C'))
 
         table_header = [
             Paragraph("S.No", tbl_hdr_style),
@@ -936,14 +864,12 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
             Paragraph("OD", tbl_hdr_style),
             Paragraph("Total Attended", tbl_hdr_style),
             Paragraph("Overall %", tbl_hdr_style),
-            Paragraph("Status", tbl_hdr_style),
         ]
 
         table_rows = [table_header]
-        col_widths = [25, 70, 130, 50, 45, 45, 30, 55, 45, 45]
+        col_widths = [25, 75, 155, 50, 45, 45, 35, 55, 55]
 
         eligible_cnt = 0
-        shortage_cnt = 0
 
         for idx, st in enumerate(students, start=1):
             st_name = (st.user.name if st.user and st.user.name else (st.user.username if st.user else "")) or ""
@@ -971,10 +897,6 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
             overall_pct = (st_total_attended / st_total_conducted * 100) if st_total_conducted > 0 else 100.0
             if overall_pct >= 75.0:
                 eligible_cnt += 1
-                status_p = Paragraph("Satisfactory", tbl_cell_eligible)
-            else:
-                shortage_cnt += 1
-                status_p = Paragraph("Shortage", tbl_cell_shortage)
 
             row_cells = [
                 Paragraph(str(idx), tbl_cell_center),
@@ -986,7 +908,6 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
                 Paragraph(str(st_total_od), tbl_cell_center),
                 Paragraph(str(st_total_attended), tbl_cell_center),
                 Paragraph(f"<b>{overall_pct:.1f}%</b>", tbl_cell_center),
-                status_p
             ]
 
             table_rows.append(row_cells)
@@ -1014,17 +935,15 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
             [
                 Paragraph("<b>Total Students</b>", tbl_hdr_style),
                 Paragraph("<b>Eligible (>= 75%)</b>", tbl_hdr_style),
-                Paragraph("<b>Shortage (< 75%)</b>", tbl_hdr_style),
                 Paragraph("<b>Class Eligibility %</b>", tbl_hdr_style),
             ],
             [
                 Paragraph(str(tot_students), tbl_cell_center),
                 Paragraph(str(eligible_cnt), tbl_cell_eligible),
-                Paragraph(str(shortage_cnt), tbl_cell_shortage),
                 Paragraph(f"<b>{round(eligible_cnt / tot_students * 100, 2) if tot_students > 0 else 0:.2f}%</b>", tbl_cell_center),
             ]
         ]
-        summ_table = Table(summary_data, colWidths=[135, 135, 135, 135])
+        summ_table = Table(summary_data, colWidths=[180, 180, 180])
         summ_table.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 0.5, colors.black),
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#F5F5F5')),
@@ -1037,8 +956,8 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
         story.append(Spacer(1, 35))
         sig_data = [[
             Paragraph("<b>Class In-Charge</b>", val_norm),
-            Paragraph("<b>HOD</b>", ParagraphStyle(name='AttSigHOD', fontName='Helvetica-Bold', fontSize=8.5, alignment=1)),
-            Paragraph("<b>Principal</b>", ParagraphStyle(name='AttSigPrin', fontName='Helvetica-Bold', fontSize=8.5, alignment=2))
+            Paragraph("<b>HOD</b>", ParagraphStyle(name='AttSigHOD', fontName='Times-Bold', fontSize=9, alignment=1)),
+            Paragraph("<b>Principal</b>", ParagraphStyle(name='AttSigPrin', fontName='Times-Bold', fontSize=9, alignment=2))
         ]]
         sig_table = Table(sig_data, colWidths=[180, 180, 180])
         sig_table.setStyle(TableStyle([

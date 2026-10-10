@@ -21,10 +21,12 @@ from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDeni
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import Image as RLImage
 from PIL import Image as PILImage
+
+from common.report_utils import build_standard_college_header, build_centered_report_title
 
 from ..models import StudentStatus, Student, StudentAdmissionSlip, StudentFees
 from ..serializers import StudentSerializer, StudentAdmissionSlipSerializer, StudentFeesSerializer
@@ -2687,3 +2689,190 @@ class StudentViewSet(viewsets.ModelViewSet):
                 "count": imported_students_count
             }
         }, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get', 'post'], url_path='name-list-report/pdf')
+    def name_list_report_pdf(self, request, *args, **kwargs):
+        dept_id = request.data.get('department') or request.query_params.get('department')
+        batch_id = request.data.get('batch') or request.query_params.get('batch')
+        section_id = request.data.get('section') or request.query_params.get('section')
+        program_id = request.data.get('program') or request.query_params.get('program')
+        header_type = request.data.get('report_header') or request.query_params.get('report_header')
+
+        from institution.models import Department, Batch, Section, Program, CollegeHeader
+
+        department = None
+        if dept_id:
+            if str(dept_id).isdigit():
+                department = Department.objects.filter(id=int(dept_id)).first()
+            if not department:
+                department = Department.objects.filter(department_code=dept_id).first()
+            if not department:
+                department = Department.objects.filter(department_name__iexact=dept_id).first()
+
+        batch = None
+        if batch_id:
+            if str(batch_id).isdigit():
+                batch = Batch.objects.filter(id=int(batch_id)).first()
+            if not batch:
+                batch = Batch.objects.filter(batch=batch_id).first()
+
+        section_obj = None
+        if section_id:
+            if str(section_id).isdigit():
+                section_obj = Section.objects.filter(id=int(section_id)).first()
+            if not section_obj:
+                section_obj = Section.objects.filter(sections__iexact=section_id).first()
+
+        program_obj = None
+        if program_id:
+            if str(program_id).isdigit():
+                program_obj = Program.objects.filter(id=int(program_id)).first()
+            if not program_obj:
+                program_obj = Program.objects.filter(program_name__iexact=program_id).first()
+        elif department and getattr(department, 'program', None):
+            program_obj = department.program
+
+        college_header_obj = None
+        if header_type:
+            college_header_obj = CollegeHeader.objects.filter(header_type=header_type).first()
+        if not college_header_obj:
+            college_header_obj = CollegeHeader.objects.first()
+
+        students_qs = Student.objects.select_related(
+            'department', 'department__program', 'batch', 'section', 'quota',
+            'application', 'application__candidate'
+        ).all()
+
+        if department:
+            students_qs = students_qs.filter(department=department)
+        if batch:
+            students_qs = students_qs.filter(batch=batch)
+        if section_obj:
+            students_qs = students_qs.filter(section=section_obj)
+        elif section_id:
+            students_qs = students_qs.filter(section__sections__iexact=str(section_id))
+        if program_obj:
+            students_qs = students_qs.filter(department__program=program_obj)
+
+        students = list(students_qs.order_by('roll_number', 'register_number', 'student_name'))
+
+        if not students:
+            return HttpResponse("No students found matching the selected criteria.", status=400)
+
+        # ── PDF Generation ──
+        buffer = BytesIO()
+        page_size = A4
+        doc = SimpleDocTemplate(buffer, pagesize=page_size, leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
+
+        story = []
+
+        page_w = page_size[0] - 40  # 555.27 pt
+        col_widths = [45, 135, 145, 230]  # Sum = 555 pt (S.No, Roll No, Register No, Student Name)
+
+        # 1. College Header (ONLY on first page)
+        header_table = build_standard_college_header(college_header_obj, page_w=page_w, logo_size=62)
+        story.append(header_table)
+        story.append(Spacer(1, 6))
+
+        # 2. Report Name centered after college header (ONLY on first page)
+        story.append(build_centered_report_title("STUDENT NAME LIST", font_size=12, leading=15))
+        story.append(Spacer(1, 6))
+
+        sec_name = section_obj.sections if section_obj else (section_id if section_id else '—')
+        batch_str = batch.batch if batch else '—'
+        dept_str = department.department_name.title() if department else '—'
+        prog_str = program_obj.program_name.upper() if program_obj else (department.program.program_name.upper() if department and department.program else '—')
+
+        lbl_bold = ParagraphStyle(name='NLLbl', fontName='Times-Bold', fontSize=9, leading=12, textColor=colors.black)
+        val_norm = ParagraphStyle(name='NLVal', fontName='Times-Roman', fontSize=9, leading=12, textColor=colors.black)
+
+        tbl_hdr_style = ParagraphStyle(name='NLTH', fontName='Times-Bold', fontSize=10.5, leading=13, alignment=1, textColor=colors.black)
+        tbl_cell_center = ParagraphStyle(name='NLCC', fontName='Times-Roman', fontSize=9.5, leading=13, alignment=1, textColor=colors.black)
+        tbl_cell_left = ParagraphStyle(name='NLCL', fontName='Times-Roman', fontSize=9.5, leading=13, alignment=0, textColor=colors.black)
+
+        # 3. Meta Info Table (Program, Department, Batch, Section)
+        meta_data = [
+            [Paragraph("<b>Program:</b>", lbl_bold), Paragraph(prog_str, val_norm),
+             Paragraph("<b>Department:</b>", lbl_bold), Paragraph(dept_str, val_norm)],
+            [Paragraph("<b>Batch:</b>", lbl_bold), Paragraph(str(batch_str), val_norm),
+             Paragraph("<b>Section:</b>", lbl_bold), Paragraph(str(sec_name), val_norm)],
+        ]
+        meta_table = Table(meta_data, colWidths=[90, 185, 95, 185])
+        meta_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F8FAFC')),
+            ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#F8FAFC')),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('LEFTPADDING', (0, 0), (-1, -1), 5),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        story.append(meta_table)
+        story.append(Spacer(1, 8))
+
+        # 4. Continuous Student Table (Repeats column headers only on upcoming pages, no college header)
+        header_row = [
+            Paragraph("<b>S.No</b>", tbl_hdr_style),
+            Paragraph("<b>Roll No</b>", tbl_hdr_style),
+            Paragraph("<b>Register No</b>", tbl_hdr_style),
+            Paragraph("<b>Student Name</b>", tbl_hdr_style),
+        ]
+        table_rows = [header_row]
+
+        for i, st in enumerate(students, start=1):
+            st_name = (st.name if hasattr(st, 'name') and st.name else (st.student_name or ''))
+            roll_no = st.roll_number or '—'
+            reg_no = st.register_number or '—'
+
+            row = [
+                Paragraph(str(i), tbl_cell_center),
+                Paragraph(roll_no, tbl_cell_center),
+                Paragraph(reg_no, tbl_cell_center),
+                Paragraph(st_name.upper(), tbl_cell_left),
+            ]
+            table_rows.append(row)
+
+        student_table = Table(table_rows, colWidths=col_widths, repeatRows=1)
+        ts = [
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#64748B')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 5),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E2E8F0')),
+        ]
+        for r in range(1, len(table_rows)):
+            if r % 2 == 0:
+                ts.append(('BACKGROUND', (0, r), (-1, r), colors.HexColor('#F8FAFC')))
+        student_table.setStyle(TableStyle(ts))
+        story.append(student_table)
+
+        # 5. Institutional Sign-off Block at the end of the report
+        story.append(Spacer(1, 28))
+        sig_data = [[
+            Paragraph("<b>Class In-Charge</b>", val_norm),
+            Paragraph("<b>HOD</b>", ParagraphStyle(name='NLSigHOD', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=1)),
+            Paragraph("<b>Principal</b>", ParagraphStyle(name='NLSigPrin', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=2))
+        ]]
+        sig_table = Table(sig_data, colWidths=[185, 185, 185])
+        sig_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        story.append(KeepTogether(sig_table))
+
+        doc.build(story)
+        buffer.seek(0)
+
+        dept_file_str = (department.department_code or department.department_name or '').replace(' ', '_') if department else 'All'
+        batch_file_str = str(batch_str).replace(' ', '_')
+        sec_file_str = str(sec_name).replace(' ', '_')
+        filename = f"Student_Name_List_{dept_file_str}_{batch_file_str}_Sec_{sec_file_str}.pdf"
+
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response
