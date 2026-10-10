@@ -1771,7 +1771,7 @@ class MarksViewSet(viewsets.ViewSet):
                 ],
                 [
                     Paragraph("<b>Batch:</b>", lbl_bold), Paragraph(str(batch_val), val_norm),
-                    Paragraph("<b>Sem / Section:</b>", lbl_bold), Paragraph(f"Sem {sem_val} - Sec {sec_name}", val_norm)
+                    Paragraph("<b>Sem / Section:</b>", lbl_bold), Paragraph(f"{sem_val} - Sec {sec_name}", val_norm)
                 ],
                 [
                     Paragraph("<b>Date of Exam:</b>", lbl_bold), Paragraph(exam_date_str, val_norm),
@@ -2789,7 +2789,22 @@ class MarksViewSet(viewsets.ViewSet):
                 exam_date_str = tt_exam_item.exam_date.strftime('%d/%m/%Y')
                 has_any_exam_date = True
             
-            ct_item = ClassTimetable.objects.filter(subject=subj).exclude(faculty=None).first()
+            ct_item = ClassTimetable.objects.filter(
+                subject=subj,
+                department=department,
+                batch=batch,
+                section=section_obj,
+                semester=semester_obj
+            ).exclude(faculty=None).first()
+            if not ct_item:
+                ct_item = ClassTimetable.objects.filter(
+                    subject=subj,
+                    department=department,
+                    section=section_obj
+                ).exclude(faculty=None).first()
+            if not ct_item:
+                ct_item = ClassTimetable.objects.filter(subject=subj).exclude(faculty=None).first()
+
             faculty_name = ""
             if ct_item and ct_item.faculty:
                 faculty_name = ct_item.faculty.name or ct_item.faculty.username or ""
@@ -2798,7 +2813,7 @@ class MarksViewSet(viewsets.ViewSet):
                 if m_item and m_item[0].created_by:
                     faculty_name = m_item[0].created_by.name or m_item[0].created_by.username or ""
             if not faculty_name:
-                faculty_name = "Mrs AMBIGA A"
+                faculty_name = "—"
 
             subj_marks = [m for m in all_marks_list if m.subject_id == subj.id]
             subj_marks_dict = {m.student_id: m.marks_obtained for m in subj_marks}
@@ -3494,7 +3509,7 @@ class MarksViewSet(viewsets.ViewSet):
             if m_item and m_item.created_by:
                 faculty_name = m_item.created_by.name or m_item.created_by.username or ""
         if not faculty_name:
-            faculty_name = "Mrs AMBIGA A"
+            faculty_name = "—"
 
         buffer = BytesIO()
         doc = SimpleDocTemplate(
