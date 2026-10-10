@@ -176,6 +176,12 @@ class BatchViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelView
         dept_id = self.request.query_params.get('department_id') or self.request.query_params.get('department')
         if dept_id:
             qs = qs.filter(department_id=dept_id)
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            if is_active.lower() in ['true', '1']:
+                qs = qs.filter(is_active=True)
+            elif is_active.lower() in ['false', '0']:
+                qs = qs.filter(is_active=False)
         return qs
 
     def list(self, request, *args, **kwargs):
