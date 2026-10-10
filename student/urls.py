@@ -6,6 +6,7 @@ from .views import (
     CounsellingReportViewSet, 
     FacultyActivityViewSet, 
     StudentAttendanceViewSet,
+    FacultySpecialDutyViewSet,
     GradeSystemViewSet,
     HostelVisitorLogViewSet
 )
@@ -79,6 +80,13 @@ urlpatterns = [
     path('attendance/list', StudentAttendanceViewSet.as_view({'get': 'list'}), name='attendance-list'),
     path('attendance/subject-wise-report/pdf', StudentAttendanceViewSet.as_view({'post': 'subject_wise_attendance_report_pdf', 'get': 'subject_wise_attendance_report_pdf'}), name='subject-wise-attendance-report-pdf'),
     path('attendance/consolidated-report/pdf', StudentAttendanceViewSet.as_view({'post': 'consolidated_attendance_report_pdf', 'get': 'consolidated_attendance_report_pdf'}), name='consolidated-attendance-report-pdf'),
+
+    # Faculty Special Duty / OD endpoints (Others / Non-Class Activity)
+    path('attendance/special-duty/create', FacultySpecialDutyViewSet.as_view({'post': 'create'}), name='faculty-special-duty-create'),
+    path('attendance/special-duty/list', FacultySpecialDutyViewSet.as_view({'get': 'list'}), name='faculty-special-duty-list'),
+    path('attendance/special-duty/get/<int:pk>', FacultySpecialDutyViewSet.as_view({'get': 'retrieve'}), name='faculty-special-duty-detail'),
+    path('attendance/special-duty/edit/<int:pk>', FacultySpecialDutyViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='faculty-special-duty-edit'),
+    path('attendance/special-duty/remove/<int:pk>', FacultySpecialDutyViewSet.as_view({'delete': 'destroy'}), name='faculty-special-duty-remove'),
 
     # Counselling Report endpoints
     path('counselling/create', CounsellingReportViewSet.as_view({'post': 'create'}), name='counselling-create'),

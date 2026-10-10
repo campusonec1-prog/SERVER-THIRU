@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from common.serializers import TrackingModelSerializerMixin
-from .models import StudentStatus, Student, FacultyActivity, StudentAttendance
+from .models import StudentStatus, Student, FacultyActivity, StudentAttendance, FacultySpecialDuty
 from institution.models import Department, Section, Batch, Quota
 from users.models import User
 from dynamic_forms.models import Application, ApplicationUser
@@ -835,5 +835,62 @@ class HostelVisitorLogSerializer(serializers.ModelSerializer):
                 'hostel_room_number': student.hostel_room_number,
             }
         return ret
+
+
+class FacultySpecialDutySerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
+    faculty = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(),
+        required=False,
+        allow_null=True
+    )
+    department = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.all(),
+        required=False,
+        allow_null=True
+    )
+    faculty_name = serializers.SerializerMethodField()
+    faculty_username = serializers.CharField(source='faculty.username', read_only=True)
+    department_name = serializers.CharField(source='department.department_name', read_only=True)
+    department_code = serializers.CharField(source='department.department_code', read_only=True)
+    department_short_name = serializers.CharField(source='department.short_name', read_only=True)
+
+    class Meta:
+        model = FacultySpecialDuty
+        fields = [
+            'id', 'faculty', 'faculty_name', 'faculty_username',
+            'department', 'department_name', 'department_code', 'department_short_name',
+            'date', 'session_scope', 'periods', 'category', 'title', 'description', 'reference_no', 'is_active',
+            'created_at', 'updated_at', 'created_by', 'updated_by'
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        apply_default_error_messages(self.fields)
+
+    def validate(self, attrs):
+        # Auto-resolve department if not provided
+        if not attrs.get('department'):
+            request = self.context.get('request')
+            target_user = attrs.get('faculty') or (request.user if (request and request.user.is_authenticated) else None)
+            if target_user and hasattr(target_user, 'user_details'):
+                ud = target_user.user_details.select_related('department').first()
+                if ud and ud.department:
+                    attrs['department'] = ud.department
+            if not attrs.get('department'):
+                from timetable.models import ClassTimetable
+                first_slot = ClassTimetable.objects.filter(faculty=target_user).first() if target_user else None
+                if first_slot and first_slot.department:
+                    attrs['department'] = first_slot.department
+            if not attrs.get('department'):
+                attrs['department'] = Department.objects.filter(is_active=True).first()
+        return attrs
+
+    def get_faculty_name(self, obj):
+        if obj.faculty:
+            return obj.faculty.name or obj.faculty.username
+        return ''
+
+
 
 

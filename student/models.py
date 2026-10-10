@@ -418,6 +418,58 @@ class HostelVisitorLog(TrackingModel):
         return f"Visitor {self.visitor_name} for {self.student.roll_number or self.student.id} at {self.check_in}"
 
 
+class FacultySpecialDuty(TrackingModel):
+    DUTY_SCOPE_CHOICES = [
+        ('FULL_DAY', 'Full Day'),
+        ('HALF_DAY_FN', 'Half Day (Forenoon)'),
+        ('HALF_DAY_AN', 'Half Day (Afternoon)'),
+        ('SPECIFIC_PERIODS', 'Specific Periods'),
+    ]
+    DUTY_CATEGORY_CHOICES = [
+        ('OD', 'On Duty (OD)'),
+        ('PARENTS_MEETING', 'Parents-Teachers Meeting (PTM)'),
+        ('DEPT_WORK', 'Department / NAAC / NBA Work'),
+        ('EXAM_DUTY', 'Exam / Valuation Duty'),
+        ('EVENT', 'Symposium / Workshop / College Event'),
+        ('ADMISSION', 'Admission Duty'),
+        ('OTHERS', 'Others / Special Work'),
+    ]
+
+    faculty = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        db_column='faculty_id',
+        related_name='special_duties'
+    )
+    department = models.ForeignKey(
+        'institution.Department',
+        on_delete=models.CASCADE,
+        db_column='department_id',
+        related_name='faculty_special_duties',
+        null=True,
+        blank=True
+    )
+    date = models.DateField()
+    session_scope = models.CharField(max_length=30, choices=DUTY_SCOPE_CHOICES, default='FULL_DAY')
+    periods = models.JSONField(null=True, blank=True)
+    category = models.CharField(max_length=50, choices=DUTY_CATEGORY_CHOICES, default='OD')
+    title = models.CharField(max_length=200, null=True, blank=True)
+    description = models.TextField()
+    reference_no = models.CharField(max_length=150, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'faculty_special_duties'
+        ordering = ['-date', '-id']
+        indexes = [
+            models.Index(fields=['faculty', 'date']),
+            models.Index(fields=['department', 'date']),
+        ]
+
+    def __str__(self):
+        return f"{self.faculty.username} - {self.category} ({self.date})"
+
+
 
 
 

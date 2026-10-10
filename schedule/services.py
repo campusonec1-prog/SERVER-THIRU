@@ -2,7 +2,7 @@ from datetime import datetime, date
 from django.db.models import Q
 from .models import Day, Period, AcademicCalendarEvent
 from timetable.models import ClassTimetable
-from student.models import FacultyActivity
+from student.models import FacultyActivity, FacultySpecialDuty
 
 
 DAY_MAP = {
@@ -248,6 +248,34 @@ def resolve_effective_schedule_for_date(target_date, department_id=None, batch_i
     total_present_sum = sum(s['total_present'] for s in resolved_slots if s['attendance_taken'])
     total_enrolled_sum = sum(s['total_students'] for s in resolved_slots if s['attendance_taken'])
 
+    # Fetch any special duty / OD logged for this date
+    special_duties_qs = FacultySpecialDuty.objects.filter(date=target_date, is_active=True).select_related('faculty', 'department')
+    if department_id:
+        special_duties_qs = special_duties_qs.filter(department_id=department_id)
+    if faculty_id:
+        special_duties_qs = special_duties_qs.filter(faculty_id=faculty_id)
+
+    special_duties_list = [
+        {
+            'id': sd.id,
+            'faculty_id': sd.faculty_id,
+            'faculty_name': sd.faculty.name or sd.faculty.username if sd.faculty else '',
+            'faculty_username': sd.faculty.username if sd.faculty else '',
+            'department_id': sd.department_id,
+            'department_name': sd.department.department_name if sd.department else '',
+            'department_code': sd.department.department_code if sd.department else '',
+            'short_name': sd.department.short_name if sd.department else '',
+            'session_scope': sd.session_scope,
+            'category': sd.category,
+            'title': sd.title or sd.get_category_display(),
+            'description': sd.description,
+            'reference_no': sd.reference_no,
+            'periods': sd.periods,
+            'created_at': sd.created_at.strftime('%d %b %I:%M %p') if (hasattr(sd, 'created_at') and sd.created_at) else None,
+        }
+        for sd in special_duties_qs
+    ]
+
     return {
         'date': str(target_date),
         'natural_day': natural_day_code,
@@ -274,5 +302,6 @@ def resolve_effective_schedule_for_date(target_date, department_id=None, batch_i
             'total_present_sum': total_present_sum,
             'total_enrolled_sum': total_enrolled_sum,
         },
-        'schedule_slots': resolved_slots
+        'schedule_slots': resolved_slots,
+        'special_duties': special_duties_list
     }

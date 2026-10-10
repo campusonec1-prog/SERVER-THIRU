@@ -20,8 +20,8 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Image as RLImage
 from PIL import Image as PILImage
 
-from ..models import Student, FacultyActivity, StudentAttendance
-from ..serializers import FacultyActivitySerializer, StudentAttendanceSerializer
+from ..models import Student, FacultyActivity, StudentAttendance, FacultySpecialDuty
+from ..serializers import FacultyActivitySerializer, StudentAttendanceSerializer, FacultySpecialDutySerializer
 from ..permissions import AttendancePermission
 
 from institution.models import Department, Batch, Section, Semester, Regulation, CollegeHeader
@@ -983,3 +983,70 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
         response['Access-Control-Expose-Headers'] = 'Content-Disposition'
         response.write(pdf)
         return response
+
+
+class FacultySpecialDutyViewSet(viewsets.ModelViewSet):
+    queryset = FacultySpecialDuty.objects.select_related(
+        'faculty', 'department', 'created_by', 'updated_by'
+    ).all().order_by('-date', '-id')
+    serializer_class = FacultySpecialDutySerializer
+    permission_classes = [AttendancePermission]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        date_val = self.request.query_params.get('date')
+        if date_val:
+            qs = qs.filter(date=date_val)
+        dept_id = self.request.query_params.get('department_id') or self.request.query_params.get('department')
+        if dept_id:
+            qs = qs.filter(department_id=dept_id)
+        faculty_id = self.request.query_params.get('faculty_id') or self.request.query_params.get('faculty')
+        if faculty_id:
+            qs = qs.filter(faculty_id=faculty_id)
+        category = self.request.query_params.get('category')
+        if category:
+            qs = qs.filter(category=category)
+        return qs
+
+    def perform_create(self, serializer):
+        user = self.request.user if (self.request.user and self.request.user.is_authenticated) else None
+        save_kwargs = {}
+        if not serializer.validated_data.get('faculty') and user:
+            save_kwargs['faculty'] = user
+        if not serializer.validated_data.get('department'):
+            dept = None
+            target_user = serializer.validated_data.get('faculty') or user
+            if target_user and hasattr(target_user, 'user_details'):
+                ud = target_user.user_details.select_related('department').first()
+                if ud and ud.department:
+                    dept = ud.department
+            if not dept and target_user:
+                from timetable.models import ClassTimetable
+                first_slot = ClassTimetable.objects.filter(faculty=target_user).first()
+                if first_slot and first_slot.department:
+                    dept = first_slot.department
+            if not dept:
+                dept = Department.objects.filter(is_active=True).first()
+            if dept:
+                save_kwargs['department'] = dept
+        serializer.save(**save_kwargs)
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Faculty special duties retrieved successfully",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response({
+            "code": 201,
+            "message": "Special activity / OD logged successfully",
+            "data": serializer.data
+        }, status=status.HTTP_201_CREATED, headers=headers)
+
