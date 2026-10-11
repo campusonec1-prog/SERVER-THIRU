@@ -53,8 +53,13 @@ urlpatterns = [
     path('admission-slip/pdf/<int:pk>', StudentViewSet.as_view({'get': 'admission_slip_pdf'}), name='admission-slip-pdf'),
     path('name-list-report/pdf', StudentViewSet.as_view({'post': 'name_list_report_pdf', 'get': 'name_list_report_pdf'}), name='name-list-report-pdf'),
     path('fees/save', StudentViewSet.as_view({'post': 'fees_save'}), name='fees-save'),
+    path('fees/overview/<int:pk>', StudentViewSet.as_view({'get': 'fees_overview'}), name='fees-overview'),
+    path('fees/apply-concession', StudentViewSet.as_view({'post': 'fees_apply_concession'}), name='fees-apply-concession'),
+    path('fees/semester-report', StudentViewSet.as_view({'get': 'fees_semester_report', 'post': 'fees_semester_report'}), name='fees-semester-report'),
+    path('fees/semester-report/pdf', StudentViewSet.as_view({'get': 'fees_semester_report_pdf', 'post': 'fees_semester_report_pdf'}), name='fees-semester-report-pdf'),
     path('comprehensive-view', StudentViewSet.as_view({'get': 'comprehensive_view'}), name='student-comprehensive-view'),
     path('full-profile-edit/<int:pk>', StudentViewSet.as_view({'put': 'full_profile_update', 'post': 'full_profile_update', 'patch': 'full_profile_update'}), name='student-full-profile-edit'),
+
 
     # Marks endpoints
     path('marks/create', MarksViewSet.as_view({'post': 'create'}), name='marks-create'),

@@ -1,4 +1,7 @@
+from decimal import Decimal
 from django.db import models
+from django.utils import timezone
+from django.core.exceptions import ValidationError
 from common.models import TrackingModel
 
 
@@ -283,8 +286,170 @@ class StudentFees(TrackingModel):
     class Meta:
         db_table = 'students_fees'
 
+    @property
+    def total_semester_allocated(self):
+        from django.db.models import Sum
+        val = self.semester_fees.aggregate(s=Sum('total_amount'))['s']
+        return val if val is not None else Decimal('0.00')
+
+    @property
+    def total_semester_concessions(self):
+        from django.db.models import Sum
+        val = self.semester_fees.aggregate(s=Sum('concession_amount'))['s']
+        return val if val is not None else Decimal('0.00')
+
+    @property
+    def total_semester_paid(self):
+        from django.db.models import Sum
+        val = self.semester_fees.aggregate(s=Sum('paid_amount'))['s']
+        return val if val is not None else Decimal('0.00')
+
+    @property
+    def total_semester_balance(self):
+        from django.db.models import Sum
+        val = self.semester_fees.aggregate(s=Sum('balance_amount'))['s']
+        return val if val is not None else Decimal('0.00')
+
+    @property
+    def unallocated_paid_amount(self):
+        return max(Decimal('0.00'), (self.paid_amount or Decimal('0.00')) - self.total_semester_paid)
+
     def __str__(self):
         return f"Fees Payment for {self.student.user.name if self.student.user else 'Student'}"
+
+
+class StudentSemesterFee(TrackingModel):
+    student_fees = models.ForeignKey(
+        StudentFees,
+        on_delete=models.PROTECT,
+        db_column='student_fees_id',
+        related_name='semester_fees'
+    )
+    semester = models.ForeignKey(
+        'institution.Semester',
+        on_delete=models.PROTECT,
+        db_column='semester_id',
+        related_name='student_semester_fees'
+    )
+    semester_fee_structure = models.ForeignKey(
+        'institution.SemesterFeeStructure',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='semester_fee_structure_id',
+        related_name='assigned_student_fees'
+    )
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    concession_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    balance_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    due_date = models.DateField(null=True, blank=True)
+    
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('PARTIAL', 'Partially Paid'),
+        ('PAID', 'Fully Paid'),
+        ('EXEMPTED', 'Exempted'),
+    ]
+    status = models.CharField(max_length=20, default='PENDING', choices=STATUS_CHOICES)
+
+    class Meta:
+        db_table = 'student_semester_fees'
+        unique_together = ('student_fees', 'semester')
+        ordering = ['student_fees', 'semester__semester_number']
+
+    def clean(self):
+        super().clean()
+        if self.total_amount is not None and self.total_amount < 0:
+            raise ValidationError({'total_amount': 'Fee amount cannot be negative.'})
+        if self.concession_amount is not None and self.concession_amount < 0:
+            raise ValidationError({'concession_amount': 'Concession amount cannot be negative.'})
+        if self.concession_amount is not None and self.total_amount is not None and self.concession_amount > self.total_amount:
+            raise ValidationError({'concession_amount': 'Concession cannot exceed total fee amount.'})
+        if self.paid_amount is not None and self.paid_amount < 0:
+            raise ValidationError({'paid_amount': 'Paid amount cannot be negative.'})
+
+    def recalculate_balance(self):
+        net_payable = max(Decimal('0.00'), (self.total_amount or Decimal('0.00')) - (self.concession_amount or Decimal('0.00')))
+        paid = self.paid_amount or Decimal('0.00')
+        self.balance_amount = max(Decimal('0.00'), net_payable - paid)
+        if net_payable == Decimal('0.00'):
+            self.status = 'EXEMPTED' if (self.concession_amount or Decimal('0.00')) > Decimal('0.00') else 'PAID'
+        elif paid >= net_payable:
+            self.status = 'PAID'
+        elif paid > Decimal('0.00'):
+            self.status = 'PARTIAL'
+        else:
+            self.status = 'PENDING'
+        return self.balance_amount
+
+    def __str__(self):
+        roll = getattr(self.student_fees.student, 'roll_number', None) or self.student_fees.student_id
+        sem_name = getattr(self.semester, 'semester_name', 'Semester')
+        return f"{roll} - {sem_name}: Bal {self.balance_amount}"
+
+
+class FeePayment(TrackingModel):
+    CATEGORY_CHOICES = [
+        ('TUITION', 'Tuition Fees'),
+        ('BOOKS', 'Books & Uniform'),
+        ('OTHER', 'Other Fees'),
+    ]
+    PAYMENT_MODE_CHOICES = [
+        ('Cash', 'Cash'),
+        ('UPI', 'UPI'),
+        ('Cheque', 'Cheque'),
+        ('Net Banking', 'Net Banking'),
+        ('DD', 'Demand Draft (DD)'),
+        ('Card', 'Credit/Debit Card'),
+        ('Other', 'Other'),
+    ]
+
+    student_fees = models.ForeignKey(
+        StudentFees,
+        on_delete=models.PROTECT,
+        db_column='student_fees_id',
+        related_name='payments'
+    )
+    student_semester_fee = models.ForeignKey(
+        StudentSemesterFee,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        db_column='student_semester_fee_id',
+        related_name='payments'
+    )
+    amount_paid = models.DecimalField(max_digits=10, decimal_places=2)
+    fee_category = models.CharField(max_length=20, default='TUITION', choices=CATEGORY_CHOICES)
+    payment_mode = models.CharField(max_length=50, default='Cash')
+    payment_date = models.DateField(default=timezone.now)
+    payment_timestamp = models.DateTimeField(default=timezone.now)
+    receipt_number = models.CharField(max_length=60, unique=True, db_index=True)
+    transaction_reference = models.CharField(max_length=100, null=True, blank=True)
+    idempotency_key = models.CharField(max_length=100, unique=True, null=True, blank=True, db_index=True)
+    remarks = models.TextField(null=True, blank=True)
+    recorded_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='recorded_by_id',
+        related_name='recorded_fee_payments'
+    )
+    is_reconciled = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'fee_payments'
+        ordering = ['-payment_timestamp', '-id']
+
+    def clean(self):
+        super().clean()
+        if self.amount_paid is not None and self.amount_paid <= 0:
+            raise ValidationError({'amount_paid': 'Payment amount must be greater than zero.'})
+
+    def __str__(self):
+        return f"Receipt {self.receipt_number}: ₹{self.amount_paid} via {self.payment_mode}"
+
 
 
 class FacultyActivity(TrackingModel):

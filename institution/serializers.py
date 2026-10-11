@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader, ExamType, Exam, Quota, FeesStructure
+from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader, ExamType, Exam, Quota, FeesStructure, SemesterFeeStructure
 from users.models import User
 from common.serializers import TrackingModelSerializerMixin
 
@@ -605,14 +605,22 @@ class FeesStructureSerializer(TrackingModelSerializerMixin, serializers.ModelSer
     batch_name = serializers.CharField(source='batch.batch', read_only=True)
     quota_name = serializers.CharField(source='quota.quota_name', read_only=True)
 
+    allocated_total = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    unallocated_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    is_allocation_complete = serializers.BooleanField(read_only=True)
+
     class Meta:
         model = FeesStructure
         fields = [
             'id', 'department_id', 'department_name', 
             'batch_id', 'batch_name', 'quota_id', 'quota_name',
-            'fees', 'created_at', 'updated_at', 'created_by', 'updated_by'
+            'fees', 'allocated_total', 'unallocated_amount', 'is_allocation_complete',
+            'created_at', 'updated_at', 'created_by', 'updated_by'
         ] + TrackingModelSerializerMixin.TRACKING_FIELDS
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = [
+            'allocated_total', 'unallocated_amount', 'is_allocation_complete',
+            'created_at', 'updated_at', 'created_by', 'updated_by'
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
             'fees': {'required': True},
         }
@@ -643,6 +651,35 @@ class FeesStructureSerializer(TrackingModelSerializerMixin, serializers.ModelSer
                 "non_field_errors": "Fees structure for this department, batch, and quota already exists."
             })
         return attrs
+
+
+class SemesterFeeStructureSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
+    fee_structure_id = serializers.PrimaryKeyRelatedField(
+        source='fee_structure',
+        queryset=FeesStructure.objects.all(),
+        required=False
+    )
+    semester_id = serializers.PrimaryKeyRelatedField(
+        source='semester',
+        queryset=Semester.objects.all(),
+        error_messages={'does_not_exist': 'Semester does not exist.'}
+    )
+    semester_number = serializers.IntegerField(source='semester.semester_number', read_only=True)
+    semester_name = serializers.CharField(source='semester.semester_name', read_only=True)
+
+    class Meta:
+        model = SemesterFeeStructure
+        fields = [
+            'id', 'fee_structure_id', 'semester_id', 'semester_number', 'semester_name',
+            'amount', 'due_date', 'created_at', 'updated_at'
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['created_at', 'updated_at'] + TrackingModelSerializerMixin.TRACKING_FIELDS
+
+    def validate_amount(self, value):
+        if value < 0:
+            raise serializers.ValidationError("Semester fee amount cannot be negative.")
+        return value
+
 
 
 

@@ -109,8 +109,14 @@ def build_standard_college_header(college_header_obj, page_w=555, logo_size=60):
       - College Address (Times-Roman, 10pt)
     Note: The report name is intentionally NOT included in this box.
     """
-    college_name_str = college_header_obj.college_name.upper() if (college_header_obj and college_header_obj.college_name) else ""
-    college_addr_str = college_header_obj.address.strip() if (college_header_obj and college_header_obj.address) else ""
+    if not college_header_obj:
+        return Spacer(0, 0)
+
+    college_name_str = college_header_obj.college_name.upper() if getattr(college_header_obj, 'college_name', None) else ""
+    college_addr_str = college_header_obj.address.strip() if getattr(college_header_obj, 'address', None) else ""
+
+    if not college_name_str and not college_addr_str:
+        return Spacer(0, 0)
 
     logo_bytes = get_college_logo_bytes(college_header_obj)
     logo_flowable = RLImage(BytesIO(logo_bytes), width=logo_size, height=logo_size) if logo_bytes else None

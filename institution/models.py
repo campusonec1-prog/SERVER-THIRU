@@ -1,4 +1,5 @@
 from django.db import models
+from django.core.exceptions import ValidationError
 from common.models import TrackingModel
 
 
@@ -264,8 +265,58 @@ class FeesStructure(TrackingModel):
         db_table = 'fees_structure'
         unique_together = ('department', 'batch', 'quota')
 
+    @property
+    def allocated_total(self):
+        from django.db.models import Sum
+        total = self.semester_allocations.aggregate(s=Sum('amount'))['s']
+        return total if total is not None else 0
+
+    @property
+    def is_allocation_complete(self):
+        return self.allocated_total == self.fees
+
+    @property
+    def unallocated_amount(self):
+        return self.fees - self.allocated_total
+
     def __str__(self):
         return f"{self.department.department_code} - {self.batch.batch} - {self.quota.quota_name}: {self.fees}"
+
+
+class SemesterFeeStructure(TrackingModel):
+    fee_structure = models.ForeignKey(
+        FeesStructure,
+        on_delete=models.CASCADE,
+        db_column='fee_structure_id',
+        related_name='semester_allocations'
+    )
+    semester = models.ForeignKey(
+        Semester,
+        on_delete=models.PROTECT,
+        db_column='semester_id',
+        related_name='fee_allocations'
+    )
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    due_date = models.DateField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'semester_fees_structure'
+        unique_together = ('fee_structure', 'semester')
+        ordering = ['fee_structure', 'semester__semester_number']
+
+    def clean(self):
+        super().clean()
+        if self.amount is not None and self.amount < 0:
+            raise ValidationError({'amount': 'Semester fee amount cannot be negative.'})
+        if self.fee_structure and self.semester:
+            if self.semester.department_id != self.fee_structure.department_id:
+                raise ValidationError({
+                    'semester': f"Semester belongs to department ID {self.semester.department_id}, but fee structure belongs to department ID {self.fee_structure.department_id}."
+                })
+
+    def __str__(self):
+        return f"{self.fee_structure} - {self.semester.semester_name}: {self.amount}"
+
 
 
 

@@ -222,7 +222,8 @@ class StudentSerializer(TrackingModelSerializerMixin, serializers.ModelSerialize
                         photo_url = val.get('photo')
                         break
 
-        ret['student_name'] = name_val or "Unknown"
+        ret['student_name'] = name_val or (instance.name if hasattr(instance, 'name') else None) or instance.student_name or "Unknown"
+        ret['name'] = ret['student_name']
         ret['student_email'] = candidate.email if candidate else None
         ret['student_phone'] = phone_val
         ret['phone_number'] = phone_val
@@ -540,7 +541,8 @@ class CounsellingReportSerializer(TrackingModelSerializerMixin, serializers.Mode
         apply_default_error_messages(self.fields)
 
 
-from .models import StudentFees, StudentAdmissionSlip
+from .models import StudentFees, StudentAdmissionSlip, StudentSemesterFee, FeePayment
+
 
 class StudentAdmissionSlipSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     student_id = serializers.PrimaryKeyRelatedField(
@@ -598,12 +600,53 @@ class StudentAdmissionSlipSerializer(TrackingModelSerializerMixin, serializers.M
         apply_default_error_messages(self.fields)
 
 
+
+class StudentSemesterFeeSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
+    semester_number = serializers.IntegerField(source='semester.semester_number', read_only=True)
+    semester_name = serializers.CharField(source='semester.semester_name', read_only=True)
+    total_fee = serializers.DecimalField(source='total_amount', max_digits=10, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = StudentSemesterFee
+        fields = [
+            'id', 'student_fees_id', 'semester_id', 'semester_number', 'semester_name',
+            'semester_fee_structure_id', 'total_amount', 'total_fee', 'concession_amount',
+            'paid_amount', 'balance_amount', 'due_date', 'status',
+            'created_at', 'updated_at'
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['paid_amount', 'balance_amount', 'status', 'created_at', 'updated_at'] + TrackingModelSerializerMixin.TRACKING_FIELDS
+
+
+class FeePaymentSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
+    recorded_by_name = serializers.CharField(source='recorded_by.name', read_only=True)
+    semester_name = serializers.CharField(source='student_semester_fee.semester.semester_name', read_only=True)
+    semester_number = serializers.IntegerField(source='student_semester_fee.semester.semester_number', read_only=True)
+
+    class Meta:
+        model = FeePayment
+        fields = [
+            'id', 'student_fees_id', 'student_semester_fee_id', 'semester_name', 'semester_number',
+            'amount_paid', 'fee_category', 'payment_mode', 'payment_date', 'payment_timestamp',
+            'receipt_number', 'transaction_reference', 'idempotency_key', 'remarks',
+            'recorded_by_id', 'recorded_by_name', 'is_reconciled', 'created_at', 'updated_at'
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = ['receipt_number', 'payment_timestamp', 'created_at', 'updated_at'] + TrackingModelSerializerMixin.TRACKING_FIELDS
+
+
 class StudentFeesSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     student_id = serializers.PrimaryKeyRelatedField(
         source='student',
         queryset=Student.objects.all(),
         error_messages={'does_not_exist': 'Student does not exist.'}
     )
+    semester_fees = StudentSemesterFeeSerializer(many=True, read_only=True)
+    payments = FeePaymentSerializer(many=True, read_only=True)
+
+    total_semester_allocated = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    total_semester_concessions = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    total_semester_paid = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    total_semester_balance = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    unallocated_paid_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
 
     class Meta:
         model = StudentFees
@@ -611,13 +654,21 @@ class StudentFeesSerializer(TrackingModelSerializerMixin, serializers.ModelSeria
             'id', 'student_id',
             'total_fees', 'paid_amount', 'balance_amount', 'payment_mode',
             'books_fees_total', 'books_fees_paid', 'due_date', 'remarks',
+            'semester_fees', 'payments',
+            'total_semester_allocated', 'total_semester_concessions',
+            'total_semester_paid', 'total_semester_balance', 'unallocated_paid_amount',
             'created_at', 'updated_at', 'created_by', 'updated_by',
         ] + TrackingModelSerializerMixin.TRACKING_FIELDS
-        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
+        read_only_fields = [
+            'total_semester_allocated', 'total_semester_concessions',
+            'total_semester_paid', 'total_semester_balance', 'unallocated_paid_amount',
+            'created_at', 'updated_at', 'created_by', 'updated_by'
+        ] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         apply_default_error_messages(self.fields)
+
 
 
 class FacultyActivitySerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):

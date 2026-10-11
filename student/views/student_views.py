@@ -28,8 +28,8 @@ from PIL import Image as PILImage
 
 from common.report_utils import build_standard_college_header, build_centered_report_title
 
-from ..models import StudentStatus, Student, StudentAdmissionSlip, StudentFees
-from ..serializers import StudentSerializer, StudentAdmissionSlipSerializer, StudentFeesSerializer
+from ..models import StudentStatus, Student, StudentAdmissionSlip, StudentFees, StudentSemesterFee, FeePayment
+from ..serializers import StudentSerializer, StudentAdmissionSlipSerializer, StudentFeesSerializer, StudentSemesterFeeSerializer, FeePaymentSerializer
 from ..permissions import StudentPermission
 
 logger = logging.getLogger(__name__)
@@ -159,6 +159,7 @@ class StudentViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(route_id=route_id)
         if search:
             queryset = queryset.filter(
+                Q(student_name__icontains=search) |
                 Q(application__candidate__name__icontains=search) |
                 Q(application__application_no__icontains=search) |
                 Q(roll_number__icontains=search) |
@@ -269,6 +270,61 @@ class StudentViewSet(viewsets.ModelViewSet):
         except Exception:
             pass
 
+    @staticmethod
+    def _reconcile_student_semester_fees(fees_payment, tracking_user=None):
+        """
+        Ensures that StudentSemesterFee records exist and that cumulative
+        paid_amount on StudentFees is cleanly reconciled FIFO across semesters.
+        """
+        from decimal import Decimal
+        from student.models import StudentSemesterFee
+        from institution.models import FeesStructure, SemesterFeeStructure
+
+        if not fees_payment:
+            return
+
+        student = fees_payment.student
+        sem_fees = list(StudentSemesterFee.objects.filter(student_fees=fees_payment).order_by('semester__semester_number'))
+
+        # If no semester fees exist, auto-create them from SemesterFeeStructure or FeesStructure
+        if len(sem_fees) == 0:
+            fs = FeesStructure.objects.filter(department=student.department, batch=student.batch, quota=student.quota).first()
+            if fs:
+                sfs_qs = SemesterFeeStructure.objects.filter(fee_structure=fs).order_by('semester__semester_number')
+                if sfs_qs.exists():
+                    for sfs in sfs_qs:
+                        sem_fee, _ = StudentSemesterFee.objects.get_or_create(
+                            student_fees=fees_payment,
+                            semester=sfs.semester,
+                            defaults={
+                                'semester_fee_structure': sfs,
+                                'total_amount': sfs.amount,
+                                'paid_amount': Decimal('0.00'),
+                                'concession_amount': Decimal('0.00'),
+                                'balance_amount': sfs.amount,
+                                'status': 'PENDING',
+                            }
+                        )
+                        sem_fees.append(sem_fee)
+
+        if len(sem_fees) == 0:
+            return
+
+        current_sem_paid_sum = sum(s.paid_amount for s in sem_fees)
+        target_tuition_paid = fees_payment.paid_amount or Decimal('0.00')
+
+        if current_sem_paid_sum != target_tuition_paid:
+            unallocated = target_tuition_paid
+            for s in sem_fees:
+                net_payable = max(Decimal('0.00'), (s.total_amount or Decimal('0.00')) - (s.concession_amount or Decimal('0.00')))
+                alloc = min(unallocated, net_payable)
+                s.paid_amount = alloc
+                s.recalculate_balance()
+                if tracking_user:
+                    s.updated_by = tracking_user
+                s.save()
+                unallocated -= alloc
+
     def admission_slip_data(self, request, pk, *args, **kwargs):
         """
         Returns rich structured data for the admission slip modal:
@@ -301,7 +357,7 @@ class StudentViewSet(viewsets.ModelViewSet):
 
         # ── Personal Info ──────────────────────────────────────────────
         personal = get_fd('personal_information')
-        candidate_name = personal.get('applicant_name', '') or (cand.name if cand else '')
+        candidate_name = personal.get('applicant_name', '') or (cand.name if cand else '') or (student.name if hasattr(student, 'name') else '') or (student.student_name or '')
         aadhaar_number = str(personal.get('aadhaar_number', '') or '')
         community = str(personal.get('community', '') or '')
         phone = str(personal.get('student_mobile', '') or (cand.phone_number if cand else ''))
@@ -508,31 +564,34 @@ class StudentViewSet(viewsets.ModelViewSet):
             }
 
         # ── Fees data (StudentFees) ───────────────────────────────────
+        from decimal import Decimal
+        from institution.models import SemesterFeeStructure
         fees_payment = getattr(student, 'fees_payment', None)
-        if fees_payment:
-            fees_data = {
-                'id': fees_payment.id,
-                'total_fees': float(fees_payment.total_fees) or total_fees,
-                'paid_amount': float(fees_payment.paid_amount),
-                'balance_amount': float(fees_payment.balance_amount),
-                'books_fees_total': float(fees_payment.books_fees_total),
-                'books_fees_paid': float(fees_payment.books_fees_paid),
-                'due_date': fees_payment.due_date.isoformat() if fees_payment.due_date else None,
-                'payment_mode': fees_payment.payment_mode,
-                'remarks': fees_payment.remarks or '',
-            }
-        else:
-            fees_data = {
-                'id': None,
-                'total_fees': total_fees,
-                'paid_amount': 0.0,
-                'balance_amount': total_fees,
-                'books_fees_total': 0.0,
-                'books_fees_paid': 0.0,
-                'due_date': None,
-                'payment_mode': 'Cash',
-                'remarks': '',
-            }
+        if not fees_payment:
+            fees_payment, _ = StudentFees.objects.get_or_create(
+                student=student,
+                defaults={'total_fees': Decimal(str(total_fees)), 'balance_amount': Decimal(str(total_fees))}
+            )
+
+        StudentViewSet._reconcile_student_semester_fees(fees_payment)
+
+        resolved_total = float(fees_payment.total_fees) if float(fees_payment.total_fees) > 0 else total_fees
+        resolved_paid = float(fees_payment.paid_amount)
+        resolved_balance = float(fees_payment.balance_amount) if float(fees_payment.total_fees) > 0 else max(0.0, resolved_total - resolved_paid)
+        sem_list = StudentSemesterFeeSerializer(fees_payment.semester_fees.all().order_by('semester__semester_number'), many=True).data
+
+        fees_data = {
+            'id': fees_payment.id,
+            'total_fees': resolved_total,
+            'paid_amount': resolved_paid,
+            'balance_amount': resolved_balance,
+            'books_fees_total': float(fees_payment.books_fees_total),
+            'books_fees_paid': float(fees_payment.books_fees_paid),
+            'due_date': fees_payment.due_date.isoformat() if fees_payment.due_date else None,
+            'payment_mode': fees_payment.payment_mode,
+            'remarks': fees_payment.remarks or '',
+            'semester_fees': sem_list,
+        }
 
         # Resolve photo_url from application form_data
         photo_url = fd.get('photo', '')
@@ -567,9 +626,11 @@ class StudentViewSet(viewsets.ModelViewSet):
             'data': {
                 'student': {
                     'id': student.id,
-                    'name': candidate_name,
-                    'roll_number': student.roll_number,
-                    'phone': phone,
+                    'name': candidate_name or (student.name if hasattr(student, 'name') else '') or (student.student_name or ''),
+                    'student_name': candidate_name or (student.name if hasattr(student, 'name') else '') or (student.student_name or ''),
+                    'roll_number': student.roll_number or '',
+                    'register_number': student.register_number or '',
+                    'phone': phone or (student.user.phone_number if getattr(student, 'user', None) else ''),
                     'is_hostler': student.is_hostler,
                     'is_day_scholar': student.is_day_scholar,
                     'is_bus': student.is_bus,
@@ -642,35 +703,338 @@ class StudentViewSet(viewsets.ModelViewSet):
                 "errors": serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
 
+    def _generate_receipt_number(self):
+        from django.utils import timezone
+        prefix = timezone.now().strftime('REC-%Y%m-')
+        last_payment = FeePayment.objects.select_for_update().filter(receipt_number__startswith=prefix).order_by('-id').first()
+        if last_payment and last_payment.receipt_number:
+            try:
+                seq = int(last_payment.receipt_number.replace(prefix, '').split('-')[0]) + 1
+            except Exception:
+                seq = FeePayment.objects.count() + 1
+        else:
+            seq = 1
+        return f"{prefix}{seq:05d}"
+
     def fees_save(self, request, *args, **kwargs):
-        """Save fee payment fields into StudentFees."""
+        """
+        Authoritative fee payment and ledger update endpoint.
+        Safeguards:
+        - Atomic transaction with select_for_update() row locking to prevent race conditions.
+        - Idempotency key checking to prevent duplicate network submissions.
+        - Consistent decimal math and positive payment validation.
+        - Synchronous reconciliation between semester ledgers and overall tuition balance.
+        - Backward-compatible with legacy fees_save payloads from existing admission & cashier screens.
+        """
+        from decimal import Decimal
+        from django.db import transaction
+        from django.utils import timezone
+        from users.models import User as StandardUser
+
         student_id = request.data.get('student_id')
         if not student_id:
             return Response({"code": 400, "message": "student_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
+        user = self.request.user if self.request.user and self.request.user.is_authenticated else None
+        tracking_user = user if isinstance(user, StandardUser) else None
+
+        # 1. Idempotency check before acquiring lock
+        idempotency_key = request.data.get('idempotency_key')
+        if idempotency_key:
+            existing_payment = FeePayment.objects.filter(idempotency_key=idempotency_key).first()
+            if existing_payment:
+                fees_record = StudentFees.objects.filter(student_id=student_id).first()
+                return Response({
+                    "code": 200,
+                    "message": "Payment already processed (idempotent duplicate request)",
+                    "data": StudentFeesSerializer(fees_record).data if fees_record else None,
+                    "receipt": FeePaymentSerializer(existing_payment).data
+                }, status=status.HTTP_200_OK)
+
+        with transaction.atomic():
+            try:
+                student = Student.objects.select_for_update().get(pk=student_id)
+            except Student.DoesNotExist:
+                return Response({"code": 404, "message": "Student not found"}, status=status.HTTP_404_NOT_FOUND)
+
+            fees_payment, created = StudentFees.objects.select_for_update().get_or_create(student=student)
+
+            # If total_fees was passed and record was just created or had 0 fees
+            if 'total_fees' in request.data:
+                try:
+                    passed_total = Decimal(str(request.data['total_fees']))
+                    if fees_payment.total_fees == Decimal('0.00') or created:
+                        fees_payment.total_fees = passed_total
+                        fees_payment.balance_amount = max(Decimal('0.00'), passed_total - fees_payment.paid_amount)
+                except Exception:
+                    pass
+
+            if 'books_fees_total' in request.data:
+                try:
+                    fees_payment.books_fees_total = Decimal(str(request.data['books_fees_total']))
+                except Exception:
+                    pass
+
+            # Payment mode & due date updates
+            if 'payment_mode' in request.data and request.data['payment_mode']:
+                fees_payment.payment_mode = str(request.data['payment_mode']).strip()
+
+            if 'due_date' in request.data:
+                fees_payment.due_date = request.data['due_date'] or None
+
+            if 'remarks' in request.data:
+                fees_payment.remarks = request.data['remarks']
+
+            # Determine tuition amount being paid right now
+            pay_tuition_now = Decimal('0.00')
+            if 'amount_paying_now' in request.data or 'amount_paid' in request.data:
+                raw_amt = request.data.get('amount_paying_now') or request.data.get('amount_paid')
+                try:
+                    pay_tuition_now = Decimal(str(raw_amt))
+                except Exception:
+                    return Response({"code": 400, "message": "Invalid amount_paying_now or amount_paid"}, status=status.HTTP_400_BAD_REQUEST)
+            elif 'paid_amount' in request.data:
+                # Legacy frontend: sent cumulative paid total
+                try:
+                    target_cumulative = Decimal(str(request.data['paid_amount']))
+                    pay_tuition_now = max(Decimal('0.00'), target_cumulative - fees_payment.paid_amount)
+                except Exception:
+                    pass
+
+            if pay_tuition_now < 0:
+                return Response({"code": 400, "message": "Payment amount cannot be negative"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Determine books amount being paid right now
+            pay_books_now = Decimal('0.00')
+            if 'book_paid_today' in request.data or 'books_paid_now' in request.data:
+                raw_book = request.data.get('book_paid_today') or request.data.get('books_paid_now')
+                try:
+                    pay_books_now = Decimal(str(raw_book))
+                except Exception:
+                    pass
+            elif 'books_fees_paid' in request.data:
+                try:
+                    target_books = Decimal(str(request.data['books_fees_paid']))
+                    pay_books_now = max(Decimal('0.00'), target_books - fees_payment.books_fees_paid)
+                except Exception:
+                    pass
+
+            if pay_books_now < 0:
+                return Response({"code": 400, "message": "Books payment amount cannot be negative"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Process tuition payment
+            receipt_records = []
+            if pay_tuition_now > Decimal('0.00'):
+                # Validate against total tuition outstanding balance
+                if pay_tuition_now > fees_payment.balance_amount and fees_payment.balance_amount > Decimal('0.00'):
+                    return Response({
+                        "code": 400,
+                        "message": f"Payment amount ₹{pay_tuition_now:,.2f} exceeds outstanding tuition balance ₹{fees_payment.balance_amount:,.2f}."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                # Semester-specific allocation check
+                semester_id = request.data.get('semester_id')
+                student_semester_fee_id = request.data.get('student_semester_fee_id')
+                sem_fee = None
+
+                if student_semester_fee_id:
+                    sem_fee = StudentSemesterFee.objects.select_for_update().filter(pk=student_semester_fee_id, student_fees=fees_payment).first()
+                elif semester_id:
+                    sem_fee = StudentSemesterFee.objects.select_for_update().filter(semester_id=semester_id, student_fees=fees_payment).first()
+
+                if sem_fee:
+                    if pay_tuition_now > sem_fee.balance_amount and sem_fee.balance_amount > Decimal('0.00'):
+                        return Response({
+                            "code": 400,
+                            "message": f"Payment amount ₹{pay_tuition_now:,.2f} exceeds outstanding semester balance ₹{sem_fee.balance_amount:,.2f}."
+                        }, status=status.HTTP_400_BAD_REQUEST)
+                    sem_fee.paid_amount += pay_tuition_now
+                    sem_fee.recalculate_balance()
+                    sem_fee.updated_by = tracking_user
+                    sem_fee.save()
+
+                # Generate unique receipt number safely
+                receipt_no = self._generate_receipt_number()
+
+                # Create Payment transaction
+                tuit_payment = FeePayment.objects.create(
+                    student_fees=fees_payment,
+                    student_semester_fee=sem_fee,
+                    amount_paid=pay_tuition_now,
+                    fee_category='TUITION',
+                    payment_mode=fees_payment.payment_mode or 'Cash',
+                    payment_date=timezone.now().date(),
+                    payment_timestamp=timezone.now(),
+                    receipt_number=receipt_no,
+                    transaction_reference=request.data.get('transaction_reference') or '',
+                    idempotency_key=idempotency_key,
+                    remarks=request.data.get('notes') or ('Tuition fee payment' if not sem_fee else f"Tuition payment for {sem_fee.semester.semester_name}"),
+                    recorded_by=tracking_user,
+                    created_by=tracking_user,
+                    updated_by=tracking_user,
+                    is_reconciled=True
+                )
+                receipt_records.append(tuit_payment)
+
+                # Reconcile overall tuition ledger
+                fees_payment.paid_amount += pay_tuition_now
+                fees_payment.balance_amount = max(Decimal('0.00'), fees_payment.total_fees - fees_payment.paid_amount)
+
+            # Process books payment
+            if pay_books_now > Decimal('0.00'):
+                book_receipt_no = self._generate_receipt_number()
+                book_payment = FeePayment.objects.create(
+                    student_fees=fees_payment,
+                    student_semester_fee=None,
+                    amount_paid=pay_books_now,
+                    fee_category='BOOKS',
+                    payment_mode=fees_payment.payment_mode or 'Cash',
+                    payment_date=timezone.now().date(),
+                    payment_timestamp=timezone.now(),
+                    receipt_number=book_receipt_no,
+                    transaction_reference=request.data.get('transaction_reference') or '',
+                    idempotency_key=f"{idempotency_key}-BOOKS" if idempotency_key else None,
+                    remarks=request.data.get('notes') or 'Books & uniform fee payment',
+                    recorded_by=tracking_user,
+                    created_by=tracking_user,
+                    updated_by=tracking_user,
+                    is_reconciled=True
+                )
+                fees_payment.books_fees_paid += pay_books_now
+                receipt_records.append(book_payment)
+
+            fees_payment.updated_by = tracking_user
+            fees_payment.save()
+            StudentViewSet._reconcile_student_semester_fees(fees_payment, tracking_user)
+
+        # Reload with fresh relationships
+        updated_fees = StudentFees.objects.prefetch_related('semester_fees', 'payments').get(pk=fees_payment.pk)
+        return Response({
+            "code": 200,
+            "message": "Student fees and payment transaction saved successfully",
+            "data": StudentFeesSerializer(updated_fees).data,
+            "receipts": FeePaymentSerializer(receipt_records, many=True).data if receipt_records else []
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='fees-overview')
+    def fees_overview(self, request, pk=None):
+        """
+        Comprehensive financial dossier for a student:
+        - Overall tuition and books ledger
+        - Semester-wise breakdown with individual balances and concessions
+        - Complete transaction payment history with receipt numbers and cashier details
+        """
         try:
-            student = Student.objects.get(pk=student_id)
+            student = Student.objects.select_related(
+                'department', 'batch', 'quota', 'status'
+            ).get(pk=pk)
         except Student.DoesNotExist:
             return Response({"code": 404, "message": "Student not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        fees_payment, _ = StudentFees.objects.get_or_create(student=student)
-        serializer = StudentFeesSerializer(fees_payment, data=request.data, partial=True)
-        if serializer.is_valid():
-            user = self.request.user if self.request.user and self.request.user.is_authenticated else None
-            from users.models import User as StandardUser
-            tracking_user = user if isinstance(user, StandardUser) else None
-            serializer.save(updated_by=tracking_user)
-            return Response({
-                "code": 200,
-                "message": "Student fees saved successfully",
-                "data": serializer.data
-            }, status=status.HTTP_200_OK)
-        else:
+        fees_payment = StudentFees.objects.prefetch_related(
+            'semester_fees__semester',
+            'payments__student_semester_fee__semester',
+            'payments__recorded_by'
+        ).filter(student=student).first()
+
+        if not fees_payment:
+            fees_payment, _ = StudentFees.objects.get_or_create(student=student)
+
+        StudentViewSet._reconcile_student_semester_fees(fees_payment)
+        fees_payment = StudentFees.objects.prefetch_related(
+            'semester_fees__semester',
+            'payments__student_semester_fee__semester',
+            'payments__recorded_by'
+        ).filter(student=student).first()
+
+        data = {
+            "student": {
+                "id": student.id,
+                "student_name": student.student_name,
+                "roll_number": student.roll_number,
+                "register_number": student.register_number,
+                "department_id": student.department_id,
+                "department_name": getattr(student.department, 'department_name', ''),
+                "batch_id": student.batch_id,
+                "batch_name": getattr(student.batch, 'batch', ''),
+                "quota_id": student.quota_id,
+                "quota_name": getattr(student.quota, 'quota_name', ''),
+            },
+            "ledger": StudentFeesSerializer(fees_payment).data if fees_payment else None
+        }
+        return Response({
+            "code": 200,
+            "message": "Student fees overview retrieved successfully",
+            "data": data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='fees-apply-concession')
+    def fees_apply_concession(self, request):
+        """
+        Applies student-specific scholarship or fee concession for a semester
+        without altering the institution's standard fee structure.
+        """
+        from decimal import Decimal
+        from django.db import transaction
+        from users.models import User as StandardUser
+
+        student_id = request.data.get('student_id')
+        semester_id = request.data.get('semester_id')
+        raw_concession = request.data.get('concession_amount')
+
+        if not student_id or not semester_id or raw_concession is None:
             return Response({
                 "code": 400,
-                "message": "Validation failed",
-                "errors": serializer.errors
+                "message": "student_id, semester_id, and concession_amount are required."
             }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            concession = Decimal(str(raw_concession))
+            if concession < 0:
+                raise ValueError()
+        except Exception:
+            return Response({"code": 400, "message": "Invalid concession_amount."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = self.request.user if self.request.user and self.request.user.is_authenticated else None
+        tracking_user = user if isinstance(user, StandardUser) else None
+
+        with transaction.atomic():
+            sem_fee = StudentSemesterFee.objects.select_for_update().filter(
+                student_fees__student_id=student_id,
+                semester_id=semester_id
+            ).first()
+
+            if not sem_fee:
+                return Response({
+                    "code": 404,
+                    "message": "Student semester fee record not found for this semester."
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            if concession > sem_fee.total_amount:
+                return Response({
+                    "code": 400,
+                    "message": f"Concession amount ₹{concession:,.2f} cannot exceed the semester tuition fee ₹{sem_fee.total_amount:,.2f}."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            sem_fee.concession_amount = concession
+            sem_fee.recalculate_balance()
+            sem_fee.updated_by = tracking_user
+            sem_fee.save()
+
+            # Reconcile overall student fees balance
+            sf = sem_fee.student_fees
+            total_concessions = sum(s.concession_amount for s in sf.semester_fees.all())
+            sf.balance_amount = max(Decimal('0.00'), sf.total_fees - total_concessions - sf.paid_amount)
+            sf.updated_by = tracking_user
+            sf.save()
+            StudentViewSet._reconcile_student_semester_fees(sf, tracking_user)
+
+        return Response({
+            "code": 200,
+            "message": "Concession applied and semester balance recalculated successfully.",
+            "data": StudentSemesterFeeSerializer(sem_fee).data
+        }, status=status.HTTP_200_OK)
+
 
     @action(detail=True, methods=['put', 'post', 'patch'], url_path='full-profile-edit')
     def full_profile_update(self, request, pk=None, *args, **kwargs):
@@ -2650,28 +3014,55 @@ class StudentViewSet(viewsets.ModelViewSet):
                         }
                     )
 
-                    # Create / update StudentFees eagerly from database Fee Structure
+                    # Create / preserve StudentFees safely from database Fee Structure
                     from institution.models import FeesStructure
-                    total_fees = 0.0
+                    from decimal import Decimal
+                    total_fees = Decimal('0.00')
+                    matching_fs = None
                     if student.department and student.batch and student.quota:
-                        fs = FeesStructure.objects.filter(
+                        matching_fs = FeesStructure.objects.filter(
                             department=student.department,
                             batch=student.batch,
                             quota=student.quota
                         ).first()
-                        if fs:
-                            total_fees = float(fs.fees)
+                        if matching_fs:
+                            total_fees = matching_fs.fees
 
-                    StudentFees.objects.update_or_create(
-                        student=student,
-                        defaults={
-                            "total_fees": total_fees,
-                            "paid_amount": 0.0,
-                            "balance_amount": total_fees,
-                            "created_by": tracking_user,
-                            "updated_by": tracking_user
-                        }
-                    )
+                    sf = StudentFees.objects.filter(student=student).first()
+                    if not sf:
+                        sf = StudentFees.objects.create(
+                            student=student,
+                            total_fees=total_fees,
+                            paid_amount=Decimal('0.00'),
+                            balance_amount=total_fees,
+                            created_by=tracking_user,
+                            updated_by=tracking_user
+                        )
+                    else:
+                        # SAFEGUARD: Existing student record — NEVER overwrite paid_amount or concessions!
+                        if sf.paid_amount == Decimal('0.00') and sf.total_fees == Decimal('0.00') and total_fees > Decimal('0.00'):
+                            sf.total_fees = total_fees
+                            sf.balance_amount = total_fees
+                            sf.updated_by = tracking_user
+                            sf.save(update_fields=['total_fees', 'balance_amount', 'updated_by', 'updated_at'])
+
+                    # Initialize Semester Allocations if applicable and complete
+                    if matching_fs and matching_fs.is_allocation_complete:
+                        for alloc in matching_fs.semester_allocations.select_related('semester').all():
+                            if not StudentSemesterFee.objects.filter(student_fees=sf, semester=alloc.semester).exists():
+                                StudentSemesterFee.objects.create(
+                                    student_fees=sf,
+                                    semester=alloc.semester,
+                                    semester_fee_structure=alloc,
+                                    total_amount=alloc.amount,
+                                    concession_amount=Decimal('0.00'),
+                                    paid_amount=Decimal('0.00'),
+                                    balance_amount=alloc.amount,
+                                    due_date=alloc.due_date,
+                                    status='PENDING',
+                                    created_by=tracking_user,
+                                    updated_by=tracking_user
+                                )
 
                     self._broadcast_change(student, 'student_created')
                     imported_students_count += 1
@@ -2769,10 +3160,11 @@ class StudentViewSet(viewsets.ModelViewSet):
         page_w = page_size[0] - 40  # 555.27 pt
         col_widths = [45, 135, 145, 230]  # Sum = 555 pt (S.No, Roll No, Register No, Student Name)
 
-        # 1. College Header (ONLY on first page)
+        # 1. College Header (ONLY on first page if header configured)
         header_table = build_standard_college_header(college_header_obj, page_w=page_w, logo_size=62)
-        story.append(header_table)
-        story.append(Spacer(1, 6))
+        if header_table:
+            story.append(header_table)
+            story.append(Spacer(1, 6))
 
         # 2. Report Name centered after college header (ONLY on first page)
         story.append(build_centered_report_title("STUDENT NAME LIST", font_size=12, leading=15))
@@ -2872,6 +3264,312 @@ class StudentViewSet(viewsets.ModelViewSet):
         batch_file_str = str(batch_str).replace(' ', '_')
         sec_file_str = str(sec_name).replace(' ', '_')
         filename = f"Student_Name_List_{dept_file_str}_{batch_file_str}_Sec_{sec_file_str}.pdf"
+
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response
+
+    def _get_fees_semester_data_helper(self, request):
+        req_data = getattr(request, 'data', None) or {}
+        req_params = getattr(request, 'query_params', None) or getattr(request, 'GET', {})
+        dept_id = req_data.get('department') or req_params.get('department')
+        batch_id = req_data.get('batch') or req_params.get('batch')
+        section_id = req_data.get('section') or req_params.get('section')
+        program_id = req_data.get('program') or req_params.get('program')
+        sem_param = req_data.get('semester') or req_params.get('semester') or 1
+        header_type = req_data.get('report_header') or req_params.get('report_header')
+
+        from institution.models import Department, Batch, Section, Program, CollegeHeader, Semester, FeesStructure
+        from student.models import StudentFees, StudentSemesterFee
+
+        try:
+            sem_num = int(sem_param)
+        except (ValueError, TypeError):
+            sem_num = 1
+
+        department = None
+        if dept_id:
+            if str(dept_id).isdigit():
+                department = Department.objects.filter(id=int(dept_id)).first()
+            if not department:
+                department = Department.objects.filter(department_code=dept_id).first()
+            if not department:
+                department = Department.objects.filter(department_name__iexact=dept_id).first()
+
+        batch = None
+        if batch_id:
+            if str(batch_id).isdigit():
+                batch = Batch.objects.filter(id=int(batch_id)).first()
+            if not batch:
+                batch = Batch.objects.filter(batch=batch_id).first()
+
+        section_obj = None
+        if section_id:
+            if str(section_id).isdigit():
+                section_obj = Section.objects.filter(id=int(section_id)).first()
+            if not section_obj:
+                section_obj = Section.objects.filter(sections__iexact=section_id).first()
+
+        program_obj = None
+        if program_id:
+            if str(program_id).isdigit():
+                program_obj = Program.objects.filter(id=int(program_id)).first()
+            if not program_obj:
+                program_obj = Program.objects.filter(program_name__iexact=program_id).first()
+        elif department and getattr(department, 'program', None):
+            program_obj = department.program
+
+        college_header_obj = None
+        if header_type:
+            college_header_obj = CollegeHeader.objects.filter(header_type=header_type).first()
+        if not college_header_obj:
+            college_header_obj = CollegeHeader.objects.first()
+
+        students_qs = Student.objects.select_related(
+            'department', 'department__program', 'batch', 'section', 'quota',
+            'application', 'application__candidate'
+        ).all()
+
+        if department:
+            students_qs = students_qs.filter(department=department)
+        if batch:
+            students_qs = students_qs.filter(batch=batch)
+        if section_obj:
+            students_qs = students_qs.filter(section=section_obj)
+        elif section_id:
+            students_qs = students_qs.filter(section__sections__iexact=str(section_id))
+        if program_obj:
+            students_qs = students_qs.filter(department__program=program_obj)
+
+        students = list(students_qs.order_by('roll_number', 'register_number', 'student_name'))
+
+        records = []
+        tot_fee = 0.0
+        tot_paid = 0.0
+        tot_concession = 0.0
+        tot_bal = 0.0
+
+        for i, st in enumerate(students, start=1):
+            st_name = (st.name if hasattr(st, 'name') and st.name else (st.student_name or 'Student'))
+            reg_no = st.register_number or st.roll_number or '—'
+            quota_name = st.quota.quota_name if st.quota else 'Regular'
+
+            sf = StudentFees.objects.filter(student=st).first()
+            sem_fee = None
+            if sf:
+                sem_fee = StudentSemesterFee.objects.filter(student_fees=sf, semester__semester_number=sem_num).first()
+                if not sem_fee:
+                    StudentViewSet._reconcile_student_semester_fees(sf)
+                    sem_fee = StudentSemesterFee.objects.filter(student_fees=sf, semester__semester_number=sem_num).first()
+
+            if sem_fee:
+                cur_total = float(sem_fee.total_amount or 0)
+                cur_paid = float(sem_fee.paid_amount or 0)
+                cur_concession = float(sem_fee.concession_amount or 0)
+                cur_bal = float(sem_fee.balance_amount or 0)
+                cur_status = sem_fee.status
+            elif sf:
+                cur_total = float(sf.total_fees or 0) / 8.0
+                cur_paid = 0.0
+                cur_concession = 0.0
+                cur_bal = cur_total
+                cur_status = 'PENDING'
+            else:
+                fs = FeesStructure.objects.filter(department=st.department, batch=st.batch, quota=st.quota).first()
+                if not fs and st.department and st.batch:
+                    fs = FeesStructure.objects.filter(department=st.department, batch=st.batch).first()
+                cur_total = float(fs.total_fees or 0) / 8.0 if fs else 0.0
+                cur_paid = 0.0
+                cur_concession = 0.0
+                cur_bal = cur_total
+                cur_status = 'PENDING' if cur_total > 0 else 'NOT SET'
+
+            tot_fee += cur_total
+            tot_paid += cur_paid
+            tot_concession += cur_concession
+            tot_bal += cur_bal
+
+            records.append({
+                'sno': i,
+                'student_id': st.id,
+                'register_no': reg_no,
+                'roll_no': st.roll_number or '—',
+                'name': st_name,
+                'quota': quota_name,
+                'total_fee': cur_total,
+                'paid_fee': cur_paid,
+                'concession_fee': cur_concession,
+                'balance_fee': cur_bal,
+                'status': cur_status,
+            })
+
+        sec_name = section_obj.sections if section_obj else (section_id if section_id else 'All Sections')
+        batch_str = batch.batch if batch else 'All Batches'
+        dept_str = department.department_name if department else 'All Departments'
+        prog_str = program_obj.program_name if program_obj else (department.program.program_name if department and department.program else 'All Programs')
+
+        meta = {
+            'program': prog_str,
+            'department': dept_str,
+            'batch': str(batch_str),
+            'section': str(sec_name),
+            'semester': sem_num,
+            'semester_name': f"Semester {sem_num}",
+        }
+
+        summary = {
+            'total_students': len(students),
+            'total_semester_fees': tot_fee,
+            'total_paid_fees': tot_paid,
+            'total_concession_fees': tot_concession,
+            'total_balance_fees': tot_bal,
+        }
+
+        return meta, summary, records, college_header_obj, department, batch, sec_name, sem_num
+
+    def fees_semester_report(self, request, *args, **kwargs):
+        """JSON endpoint returning filtered semester fee records."""
+        meta, summary, records, _, _, _, _, _ = self._get_fees_semester_data_helper(request)
+        return Response({
+            'success': True,
+            'metadata': meta,
+            'summary': summary,
+            'students': records
+        }, status=status.HTTP_200_OK)
+
+    def fees_semester_report_pdf(self, request, *args, **kwargs):
+        """Generates and streams an official PDF report of semester fees."""
+        meta, summary, records, college_header_obj, department, batch, sec_name, sem_num = self._get_fees_semester_data_helper(request)
+
+        if not records:
+            return HttpResponse("No students found matching the selected criteria.", status=400)
+
+        buffer = BytesIO()
+        page_size = A4
+        doc = SimpleDocTemplate(buffer, pagesize=page_size, leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
+
+        story = []
+        page_w = page_size[0] - 40  # 555.27 pt
+
+        # 1. College Header (only if header is configured in database)
+        header_table = build_standard_college_header(college_header_obj, page_w=page_w, logo_size=62)
+        if header_table:
+            story.append(header_table)
+            story.append(Spacer(1, 6))
+
+        # 2. Centered Report Title
+        story.append(build_centered_report_title(f"FEES REPORT — SEMESTER {sem_num}", font_size=12, leading=15))
+        story.append(Spacer(1, 6))
+
+        # 3. Meta Info Table
+        lbl_bold = ParagraphStyle(name='FRLbl', fontName='Times-Bold', fontSize=9, leading=12, textColor=colors.black)
+        val_norm = ParagraphStyle(name='FRVal', fontName='Times-Roman', fontSize=9, leading=12, textColor=colors.black)
+
+        meta_data = [
+            [Paragraph("<b>Program:</b>", lbl_bold), Paragraph(str(meta['program']), val_norm),
+             Paragraph("<b>Department:</b>", lbl_bold), Paragraph(str(meta['department']), val_norm)],
+            [Paragraph("<b>Batch:</b>", lbl_bold), Paragraph(str(meta['batch']), val_norm),
+             Paragraph("<b>Section:</b>", lbl_bold), Paragraph(str(meta['section']), val_norm)],
+            [Paragraph("<b>Semester:</b>", lbl_bold), Paragraph(str(meta['semester_name']), val_norm),
+             Paragraph("<b>Total Students:</b>", lbl_bold), Paragraph(str(summary['total_students']), val_norm)],
+        ]
+        meta_table = Table(meta_data, colWidths=[90, 185, 95, 185])
+        meta_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F8FAFC')),
+            ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#F8FAFC')),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('LEFTPADDING', (0, 0), (-1, -1), 5),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        story.append(meta_table)
+        story.append(Spacer(1, 8))
+
+        # 4. Student Fee Table
+        # Columns: S.No (35), Reg No (95), Name (155), Quota (70), Total Fee (65), Paid Fee (65), Balance (70) -> Sum = 555 pt
+        col_widths = [35, 95, 155, 70, 65, 65, 70]
+        tbl_hdr_style = ParagraphStyle(name='FRTH', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=1, textColor=colors.black)
+        tbl_hdr_right = ParagraphStyle(name='FRTHR', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=2, textColor=colors.black)
+        tbl_cell_center = ParagraphStyle(name='FRCC', fontName='Times-Roman', fontSize=9, leading=12, alignment=1, textColor=colors.black)
+        tbl_cell_left = ParagraphStyle(name='FRCL', fontName='Times-Roman', fontSize=9, leading=12, alignment=0, textColor=colors.black)
+        tbl_cell_right = ParagraphStyle(name='FRCR', fontName='Times-Roman', fontSize=9, leading=12, alignment=2, textColor=colors.black)
+        tbl_tot_bold = ParagraphStyle(name='FRTB', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=2, textColor=colors.black)
+
+        header_row = [
+            Paragraph("<b>S.No</b>", tbl_hdr_style),
+            Paragraph("<b>Register No</b>", tbl_hdr_style),
+            Paragraph("<b>Student Name</b>", tbl_hdr_style),
+            Paragraph("<b>Quota</b>", tbl_hdr_style),
+            Paragraph("<b>Total Fee</b>", tbl_hdr_right),
+            Paragraph("<b>Paid Fee</b>", tbl_hdr_right),
+            Paragraph("<b>Balance</b>", tbl_hdr_right),
+        ]
+        table_rows = [header_row]
+
+        for r in records:
+            row = [
+                Paragraph(str(r['sno']), tbl_cell_center),
+                Paragraph(str(r['register_no']), tbl_cell_center),
+                Paragraph(str(r['name']).upper(), tbl_cell_left),
+                Paragraph(str(r['quota']), tbl_cell_center),
+                Paragraph(f"{r['total_fee']:,.2f}", tbl_cell_right),
+                Paragraph(f"{r['paid_fee']:,.2f}", tbl_cell_right),
+                Paragraph(f"{r['balance_fee']:,.2f}", tbl_cell_right),
+            ]
+            table_rows.append(row)
+
+        # Totals footer row
+        total_row = [
+            Paragraph("<b>TOTAL</b>", ParagraphStyle(name='FRTotL', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=1)),
+            Paragraph("", tbl_cell_center),
+            Paragraph(f"<b>{summary['total_students']} Students</b>", ParagraphStyle(name='FRTotSt', fontName='Times-Bold', fontSize=9, leading=12, alignment=0)),
+            Paragraph("", tbl_cell_center),
+            Paragraph(f"<b>{summary['total_semester_fees']:,.2f}</b>", tbl_tot_bold),
+            Paragraph(f"<b>{summary['total_paid_fees']:,.2f}</b>", tbl_tot_bold),
+            Paragraph(f"<b>{summary['total_balance_fees']:,.2f}</b>", tbl_tot_bold),
+        ]
+        table_rows.append(total_row)
+
+        fee_table = Table(table_rows, colWidths=col_widths, repeatRows=1)
+        ts = [
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#64748B')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 3.5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3.5),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E2E8F0')),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#F1F5F9')),
+        ]
+        for r_idx in range(1, len(table_rows) - 1):
+            if r_idx % 2 == 0:
+                ts.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor('#F8FAFC')))
+        fee_table.setStyle(TableStyle(ts))
+        story.append(fee_table)
+
+        # 5. Signatures
+        story.append(Spacer(1, 26))
+        sig_data = [[
+            Paragraph("<b>Class In-Charge</b>", val_norm),
+            Paragraph("<b>HOD</b>", ParagraphStyle(name='FRSigHOD', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=1)),
+            Paragraph("<b>Principal / Cashier</b>", ParagraphStyle(name='FRSigPrin', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=2))
+        ]]
+        sig_table = Table(sig_data, colWidths=[185, 185, 185])
+        sig_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        story.append(KeepTogether(sig_table))
+
+        doc.build(story)
+        buffer.seek(0)
+
+        dept_str_clean = (department.department_code or department.department_name or 'Dept').replace(' ', '_') if department else 'All'
+        batch_str_clean = str(batch.batch if batch else 'Batch').replace(' ', '_')
+        filename = f"Fees_Report_Sem_{sem_num}_{dept_str_clean}_{batch_str_clean}.pdf"
 
         response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
         response['Content-Disposition'] = f'inline; filename="{filename}"'

@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import ProgramViewSet, DepartmentViewSet, AcademicYearViewSet, BatchViewSet, RegulationViewSet, SemesterViewSet, SectionViewSet, CollegeHeaderViewSet, ExamTypeViewSet, ExamViewSet, QuotaViewSet, FeesStructureViewSet
+from .views import ProgramViewSet, DepartmentViewSet, AcademicYearViewSet, BatchViewSet, RegulationViewSet, SemesterViewSet, SectionViewSet, CollegeHeaderViewSet, ExamTypeViewSet, ExamViewSet, QuotaViewSet, FeesStructureViewSet, SemesterFeeStructureViewSet
 
 urlpatterns = [
     # Program endpoints
@@ -85,4 +85,13 @@ urlpatterns = [
     path('fees-structures/get/<int:pk>', FeesStructureViewSet.as_view({'get': 'retrieve'}), name='fees-structure-detail'),
     path('fees-structures/edit/<int:pk>', FeesStructureViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='fees-structure-edit'),
     path('fees-structures/remove/<int:pk>', FeesStructureViewSet.as_view({'delete': 'destroy'}), name='fees-structure-remove'),
+    path('fees-structures/<int:pk>/semesters', FeesStructureViewSet.as_view({'get': 'get_semester_allocations', 'post': 'save_semester_allocations'}), name='fees-structure-semesters'),
+
+    # Semester Fee Structure endpoints
+    path('semester-fees-structures/list', SemesterFeeStructureViewSet.as_view({'get': 'list'}), name='semester-fee-structure-list'),
+    path('semester-fees-structures/create', SemesterFeeStructureViewSet.as_view({'post': 'create'}), name='semester-fee-structure-create'),
+    path('semester-fees-structures/get/<int:pk>', SemesterFeeStructureViewSet.as_view({'get': 'retrieve'}), name='semester-fee-structure-detail'),
+    path('semester-fees-structures/edit/<int:pk>', SemesterFeeStructureViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='semester-fee-structure-edit'),
+    path('semester-fees-structures/remove/<int:pk>', SemesterFeeStructureViewSet.as_view({'delete': 'destroy'}), name='semester-fee-structure-remove'),
 ]
+

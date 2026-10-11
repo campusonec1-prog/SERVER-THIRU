@@ -62,3 +62,9 @@ class QuotaPermission(BaseRolePermission):
 class FeesStructurePermission(BaseRolePermission):
     read_roles = ['authenticated']
     write_roles = ['admin', 'administrator', 'hod', 'principal', 'office', 'manager', 'tech_supporter', 'administration_officer']
+
+
+class SemesterFeeStructurePermission(BaseRolePermission):
+    read_roles = ['authenticated']
+    write_roles = ['admin', 'administrator', 'hod', 'principal', 'office', 'manager', 'tech_supporter', 'administration_officer']
+

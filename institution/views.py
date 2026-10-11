@@ -1,16 +1,18 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
+from rest_framework.decorators import action
 from django.http import Http404
 from rest_framework.exceptions import NotFound, NotAuthenticated, PermissionDenied
-from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader, ExamType, Exam, Quota, FeesStructure
-from .serializers import ProgramSerializer, DepartmentSerializer, AcademicYearSerializer, BatchSerializer, RegulationSerializer, SemesterSerializer, SectionSerializer, CollegeHeaderSerializer, ExamTypeSerializer, ExamSerializer, QuotaSerializer, FeesStructureSerializer
+from .models import Program, Department, AcademicYear, Batch, Regulation, Semester, Section, CollegeHeader, ExamType, Exam, Quota, FeesStructure, SemesterFeeStructure
+from .serializers import ProgramSerializer, DepartmentSerializer, AcademicYearSerializer, BatchSerializer, RegulationSerializer, SemesterSerializer, SectionSerializer, CollegeHeaderSerializer, ExamTypeSerializer, ExamSerializer, QuotaSerializer, FeesStructureSerializer, SemesterFeeStructureSerializer
 from users.permissions import IsAdminUser
 from common.caching import CachedOptionViewSetMixin, invalidate_option_cache
 from .permissions import (
     ProgramPermission, DepartmentPermission, AcademicYearPermission,
     BatchPermission, RegulationPermission, SemesterPermission,
     SectionPermission, CollegeHeaderPermission, ExamTypePermission,
-    ExamPermission, QuotaPermission, FeesStructurePermission
+    ExamPermission, QuotaPermission, FeesStructurePermission,
+    SemesterFeeStructurePermission
 )
 
 
@@ -776,6 +778,195 @@ class FeesStructureViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         super().destroy(request, *args, **kwargs)
         return Response({"code": 200, "message": "Fees structure deleted successfully"}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='semester-allocations')
+    def get_semester_allocations(self, request, pk=None):
+        instance = self.get_object()
+        allocations = instance.semester_allocations.select_related('semester').all().order_by('semester__semester_number')
+        serializer = SemesterFeeStructureSerializer(allocations, many=True)
+        return Response({
+            "code": 200,
+            "message": "Semester allocations retrieved successfully",
+            "data": {
+                "fee_structure_id": instance.id,
+                "total_course_fee": float(instance.fees),
+                "allocated_total": float(instance.allocated_total),
+                "unallocated_amount": float(instance.unallocated_amount),
+                "is_allocation_complete": instance.is_allocation_complete,
+                "allocations": serializer.data
+            }
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='save-semester-allocations')
+    def save_semester_allocations(self, request, pk=None):
+        """
+        Atomically saves/updates semester allocations for this fee structure.
+        Payload: { "allocations": [ {"semester_id": 1, "amount": 30000, "due_date": "2026-10-31"}, ... ] }
+        Validates:
+        - Sum of amounts equals fee_structure.fees
+        - All semesters belong to the same department as fee_structure
+        - No duplicate semester assignments
+        """
+        from decimal import Decimal
+        from django.db import transaction
+
+        instance = self.get_object()
+        allocations_data = request.data.get('allocations')
+        if not isinstance(allocations_data, list) or len(allocations_data) == 0:
+            return Response({
+                "code": 400,
+                "message": "A non-empty 'allocations' list is required."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user if request.user and request.user.is_authenticated else None
+
+        seen_semester_ids = set()
+        running_total = Decimal('0.00')
+        valid_items = []
+
+        for item in allocations_data:
+            sem_id = item.get('semester_id')
+            if not sem_id:
+                return Response({
+                    "code": 400,
+                    "message": "Each allocation must contain 'semester_id'."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            if sem_id in seen_semester_ids:
+                return Response({
+                    "code": 400,
+                    "message": f"Duplicate semester ID {sem_id} in allocation payload."
+                }, status=status.HTTP_400_BAD_REQUEST)
+            seen_semester_ids.add(sem_id)
+
+            try:
+                amount = Decimal(str(item.get('amount', 0)))
+            except Exception:
+                return Response({
+                    "code": 400,
+                    "message": f"Invalid amount for semester ID {sem_id}."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            if amount < 0:
+                return Response({
+                    "code": 400,
+                    "message": f"Amount for semester ID {sem_id} cannot be negative."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                sem = Semester.objects.get(pk=sem_id)
+            except Semester.DoesNotExist:
+                return Response({
+                    "code": 404,
+                    "message": f"Semester with ID {sem_id} does not exist."
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            if sem.department_id != instance.department_id:
+                return Response({
+                    "code": 400,
+                    "message": f"Semester '{sem.semester_name}' belongs to department {sem.department_id}, but fee structure belongs to department {instance.department_id}."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            running_total += amount
+            valid_items.append({
+                'semester': sem,
+                'amount': amount,
+                'due_date': item.get('due_date') or None
+            })
+
+        course_fee = Decimal(str(instance.fees))
+        if running_total != course_fee:
+            return Response({
+                "code": 400,
+                "message": f"Total semester allocations (₹{running_total:,.2f}) must exactly equal the course tuition fee (₹{course_fee:,.2f}). Difference: ₹{abs(course_fee - running_total):,.2f}."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            saved_objects = []
+            for item in valid_items:
+                sem_obj, _ = SemesterFeeStructure.objects.update_or_create(
+                    fee_structure=instance,
+                    semester=item['semester'],
+                    defaults={
+                        'amount': item['amount'],
+                        'due_date': item['due_date'],
+                        'updated_by': user
+                    }
+                )
+                saved_objects.append(sem_obj)
+
+        serializer = SemesterFeeStructureSerializer(saved_objects, many=True)
+        return Response({
+            "code": 200,
+            "message": "Semester allocations saved and validated successfully.",
+            "data": {
+                "fee_structure_id": instance.id,
+                "total_course_fee": float(instance.fees),
+                "allocated_total": float(running_total),
+                "unallocated_amount": 0.0,
+                "is_allocation_complete": True,
+                "allocations": serializer.data
+            }
+        }, status=status.HTTP_200_OK)
+
+
+# ─── Semester Fee Structure ViewSet ──────────────────────────────
+
+class SemesterFeeStructureViewSet(AdminWriteMixin, viewsets.ModelViewSet):
+    queryset = SemesterFeeStructure.objects.all().select_related('fee_structure', 'semester', 'created_by', 'updated_by').order_by('id')
+    serializer_class = SemesterFeeStructureSerializer
+    permission_classes = [SemesterFeeStructurePermission]
+    model_label = "Semester Fee Structure"
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+        if params.get('fee_structure_id'):
+            qs = qs.filter(fee_structure_id=params['fee_structure_id'])
+        if params.get('semester_id'):
+            qs = qs.filter(semester_id=params['semester_id'])
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            "code": 200,
+            "message": "Semester fee structures listed successfully",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Semester fee structure retrieved successfully",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        return Response({
+            "code": 201,
+            "message": "Semester fee structure created successfully",
+            "data": response.data
+        }, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        response = super().update(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Semester fee structure updated successfully",
+            "data": response.data
+        }, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        super().destroy(request, *args, **kwargs)
+        return Response({
+            "code": 200,
+            "message": "Semester fee structure deleted successfully"
+        }, status=status.HTTP_200_OK)
+
 
 
 
