@@ -99,6 +99,7 @@ urlpatterns = [
     path('counselling/get/<int:pk>', CounsellingReportViewSet.as_view({'get': 'retrieve'}), name='counselling-detail'),
     path('counselling/edit/<int:pk>', CounsellingReportViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='counselling-edit'),
     path('counselling/remove/<int:pk>', CounsellingReportViewSet.as_view({'delete': 'destroy'}), name='counselling-remove'),
+    path('counselling/report/pdf', CounsellingReportViewSet.as_view({'get': 'counselling_report_pdf', 'post': 'counselling_report_pdf'}), name='counselling-report-pdf'),
 ]
 
 

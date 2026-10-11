@@ -29,6 +29,9 @@ class CounsellingReportPermission(BaseRolePermission):
         if getattr(request.user, 'is_superuser', False) or getattr(request.user, 'is_staff', False):
             return True
 
+        if getattr(view, 'action', None) in ['counselling_report_pdf', 'report_pdf']:
+            return True
+
         try:
             user_role = request.user.role.role_name.upper().replace(' ', '_')
         except AttributeError:
