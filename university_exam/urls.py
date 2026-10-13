@@ -4,6 +4,7 @@ from .views import (
     UniversityExamAttendanceViewSet, ExamHallAllocationViewSet,
     ExamSeatAllocationViewSet, UniversityExamHallViewSet, ExamHallDateViewSet
 )
+from .views_results import UniversityResultPublishViewSet
 
 urlpatterns = [
     # Exam Halls (University Exam Configuration)
@@ -62,4 +63,8 @@ urlpatterns = [
     path('seat-allocations/edit/<int:pk>', ExamSeatAllocationViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='univ-exam-seat-alloc-edit'),
     path('seat-allocations/remove/<int:pk>', ExamSeatAllocationViewSet.as_view({'delete': 'destroy'}), name='univ-exam-seat-alloc-remove'),
     path('seat-allocations/by-hall/<int:hall_id>', ExamSeatAllocationViewSet.as_view({'get': 'by_hall'}), name='univ-exam-seat-by-hall'),
+
+    # Anna University Result & Revaluation Publish
+    path('results/preview', UniversityResultPublishViewSet.as_view({'post': 'preview_results'}), name='univ-exam-results-preview'),
+    path('results/publish', UniversityResultPublishViewSet.as_view({'post': 'publish_results'}), name='univ-exam-results-publish'),
 ]
