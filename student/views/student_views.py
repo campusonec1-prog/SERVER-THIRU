@@ -3574,3 +3574,514 @@ class StudentViewSet(viewsets.ModelViewSet):
         response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
         response['Content-Disposition'] = f'inline; filename="{filename}"'
         return response
+
+    def _get_fees_academic_year_data_helper(self, request):
+        import re
+        from decimal import Decimal
+        from institution.models import AcademicYear, Department, Batch, Section, Program, CollegeHeader, Semester, FeesStructure
+        from student.models import StudentFees, StudentSemesterFee
+
+        req_data = getattr(request, 'data', None) or {}
+        req_params = getattr(request, 'query_params', None) or getattr(request, 'GET', {})
+
+        acad_year_param = req_data.get('academic_year') or req_params.get('academic_year')
+        dept_id = req_data.get('department') or req_params.get('department')
+        batch_id = req_data.get('batch') or req_params.get('batch')
+        section_id = req_data.get('section') or req_params.get('section')
+        header_type = req_data.get('report_header') or req_params.get('report_header')
+
+        # 1. Resolve Academic Year
+        acad_year_obj = None
+        if acad_year_param and str(acad_year_param).strip().lower() not in ['', 'all', 'undefined', 'null']:
+            if str(acad_year_param).isdigit():
+                acad_year_obj = AcademicYear.objects.filter(id=int(acad_year_param)).first()
+            if not acad_year_obj:
+                acad_year_obj = AcademicYear.objects.filter(academic_year__iexact=str(acad_year_param)).first()
+        if not acad_year_obj:
+            acad_year_obj = (AcademicYear.objects.filter(is_display=True).first() or 
+                             AcademicYear.objects.filter(is_active=True).first() or 
+                             AcademicYear.objects.first())
+
+        acad_year_str = acad_year_obj.academic_year if acad_year_obj else '2025-2026'
+
+        # Extract start & end year from Academic Year string (e.g. 2025 from "2025-2026")
+        ay_years = [int(y) for y in re.findall(r'\b\d{4}\b', str(acad_year_str))]
+        if len(ay_years) >= 2:
+            ay_start, ay_end = ay_years[0], ay_years[1]
+        elif len(ay_years) == 1:
+            ay_start, ay_end = ay_years[0], ay_years[0] + 1
+        else:
+            ay_start, ay_end = 2025, 2026
+
+        # 2. Batch eligibility helper for academic year
+        def check_batch_eligibility(b_name, start_year):
+            if not b_name or not start_year:
+                return False, None, None, None
+            years = [int(y) for y in re.findall(r'\b\d{4}\b', str(b_name))]
+            if len(years) < 2:
+                return False, None, None, None
+            b_start, b_end = years[0], years[1]
+            if b_start <= start_year < b_end:
+                y_study = start_year - b_start + 1
+                s1 = (y_study - 1) * 2 + 1
+                s2 = (y_study - 1) * 2 + 2
+                return True, y_study, s1, s2
+            return False, None, None, None
+
+        # Build map of all eligible batches for this AY
+        all_batches_qs = Batch.objects.select_related('department').all()
+        eligible_batch_map = {}  # batch_id -> (y_study, s1, s2, batch_name)
+        eligible_batch_names = set()
+        for b in all_batches_qs:
+            is_elig, y_st, s1, s2 = check_batch_eligibility(b.batch, ay_start)
+            if is_elig:
+                eligible_batch_map[b.id] = (y_st, s1, s2, b.batch)
+                eligible_batch_names.add(b.batch)
+
+        # 3. Resolve Department (optional)
+        department = None
+        if dept_id and str(dept_id).strip().lower() not in ['', 'all', 'all_departments', 'undefined', 'null']:
+            if str(dept_id).isdigit():
+                department = Department.objects.filter(id=int(dept_id)).first()
+            if not department:
+                department = Department.objects.filter(department_code=dept_id).first()
+            if not department:
+                department = Department.objects.filter(department_name__iexact=dept_id).first()
+
+        # 4. Resolve Batch (optional)
+        batch = None
+        batch_filter_str = None
+        if batch_id and str(batch_id).strip().lower() not in ['', 'all', 'all_batches', 'undefined', 'null']:
+            if str(batch_id).isdigit():
+                batch = Batch.objects.filter(id=int(batch_id)).first()
+            if not batch:
+                b_match = Batch.objects.filter(batch=batch_id).first()
+                if b_match:
+                    batch = b_match
+                else:
+                    batch_filter_str = str(batch_id).strip()
+            if batch:
+                batch_filter_str = batch.batch
+
+        # 5. Resolve Section (optional)
+        section_obj = None
+        if section_id and str(section_id).strip().lower() not in ['', 'all', 'all_sections', 'undefined', 'null']:
+            if str(section_id).isdigit():
+                section_obj = Section.objects.filter(id=int(section_id)).first()
+            if not section_obj:
+                section_obj = Section.objects.filter(sections__iexact=str(section_id).strip()).first()
+
+        # 6. Resolve College Header
+        college_header_obj = None
+        if header_type:
+            college_header_obj = CollegeHeader.objects.filter(header_type=header_type).first()
+        if not college_header_obj:
+            college_header_obj = CollegeHeader.objects.first()
+
+        # 7. Query Students
+        students_qs = Student.objects.select_related(
+            'department', 'department__program', 'batch', 'section', 'quota',
+            'application', 'application__candidate'
+        ).all()
+
+        if department:
+            students_qs = students_qs.filter(department=department)
+
+        if batch:
+            students_qs = students_qs.filter(batch=batch)
+        elif batch_filter_str:
+            students_qs = students_qs.filter(batch__batch=batch_filter_str)
+        else:
+            # All Batches: only students in eligible batches for this AY
+            students_qs = students_qs.filter(batch_id__in=list(eligible_batch_map.keys()))
+
+        if section_obj:
+            students_qs = students_qs.filter(section=section_obj)
+        elif section_id and str(section_id).strip().lower() not in ['', 'all', 'all_sections', 'undefined', 'null']:
+            students_qs = students_qs.filter(section__sections__iexact=str(section_id).strip())
+
+        students = list(students_qs.order_by('department__department_name', 'batch__batch', 'roll_number', 'register_number', 'student_name'))
+
+        # 8. Bulk fetch fees to ensure fast response
+        st_ids = [s.id for s in students]
+        sf_list = StudentFees.objects.filter(student_id__in=st_ids)
+        sf_map = {sf.student_id: sf for sf in sf_list}
+        sf_ids = [sf.id for sf in sf_list]
+
+        sem_fee_list = StudentSemesterFee.objects.filter(student_fees_id__in=sf_ids).select_related('semester')
+        sem_fee_map = {(sm.student_fees_id, sm.semester.semester_number): sm for sm in sem_fee_list}
+
+        fs_list = FeesStructure.objects.all()
+        fs_map = {(fs.department_id, fs.batch_id, fs.quota_id): fs for fs in fs_list}
+        fs_dept_batch_map = {(fs.department_id, fs.batch_id): fs for fs in fs_list}
+
+        records = []
+        tot_fee_sum = 0.0
+        tot_paid_sum = 0.0
+        tot_conc_sum = 0.0
+        tot_bal_sum = 0.0
+
+        for i, st in enumerate(students, start=1):
+            b_obj = st.batch
+            b_name = b_obj.batch if b_obj else ''
+
+            if b_obj and b_obj.id in eligible_batch_map:
+                y_study, s1, s2, _ = eligible_batch_map[b_obj.id]
+            else:
+                is_elig, y_study, s1, s2 = check_batch_eligibility(b_name, ay_start)
+                if not is_elig:
+                    continue
+
+            st_name = (st.name if hasattr(st, 'name') and st.name else (st.student_name or 'Student'))
+            reg_no = st.register_number or st.roll_number or '—'
+            quota_name = st.quota.quota_name if st.quota else 'Regular'
+
+            sf = sf_map.get(st.id)
+
+            def _calc_sem(sem_num):
+                sm = sem_fee_map.get((sf.id, sem_num)) if sf else None
+                if not sm and sf:
+                    sm = StudentSemesterFee.objects.filter(student_fees=sf, semester__semester_number=sem_num).first()
+                    if not sm:
+                        StudentViewSet._reconcile_student_semester_fees(sf)
+                        sm = StudentSemesterFee.objects.filter(student_fees=sf, semester__semester_number=sem_num).first()
+                    if sm:
+                        sem_fee_map[(sf.id, sem_num)] = sm
+
+                if sm:
+                    return float(sm.total_amount or 0), float(sm.paid_amount or 0), float(sm.concession_amount or 0), float(sm.balance_amount or 0), sm.status
+                elif sf:
+                    t = float(sf.total_fees or 0) / 8.0
+                    return t, 0.0, 0.0, t, 'PENDING'
+                else:
+                    fs_entry = fs_map.get((st.department_id, st.batch_id, st.quota_id)) or fs_dept_batch_map.get((st.department_id, st.batch_id))
+                    t = float(fs_entry.total_fees or 0) / 8.0 if fs_entry else 0.0
+                    return t, 0.0, 0.0, t, ('PENDING' if t > 0 else 'NOT SET')
+
+            s1_tot, s1_paid, s1_conc, s1_bal, s1_status = _calc_sem(s1)
+            s2_tot, s2_paid, s2_conc, s2_bal, s2_status = _calc_sem(s2)
+
+            cur_tot = s1_tot + s2_tot
+            cur_paid = s1_paid + s2_paid
+            cur_conc = s1_conc + s2_conc
+            cur_bal = s1_bal + s2_bal
+
+            if cur_bal <= 0 and cur_tot > 0:
+                cur_status = 'PAID'
+            elif cur_paid > 0:
+                cur_status = 'PARTIAL'
+            elif cur_tot > 0:
+                cur_status = 'PENDING'
+            else:
+                cur_status = 'NOT SET'
+
+            tot_fee_sum += cur_tot
+            tot_paid_sum += cur_paid
+            tot_conc_sum += cur_conc
+            tot_bal_sum += cur_bal
+
+            records.append({
+                'sno': i,
+                'student_id': st.id,
+                'register_no': reg_no,
+                'roll_no': st.roll_number or '—',
+                'name': st_name,
+                'department_name': st.department.department_name if st.department else '—',
+                'department_code': st.department.department_code if st.department else '—',
+                'batch': b_name or '—',
+                'section': st.section.sections if st.section else 'A',
+                'year_of_study': y_study,
+                'semesters': [s1, s2],
+                'semesters_label': f"Sem {s1} & {s2}",
+                'quota': quota_name,
+                'total_fee': cur_tot,
+                'paid_fee': cur_paid,
+                'concession_fee': cur_conc,
+                'balance_fee': cur_bal,
+                'status': cur_status,
+                'sem1': {
+                    'semester_number': s1,
+                    'total_amount': s1_tot,
+                    'paid_amount': s1_paid,
+                    'concession_amount': s1_conc,
+                    'balance_amount': s1_bal,
+                    'status': s1_status,
+                },
+                'sem2': {
+                    'semester_number': s2,
+                    'total_amount': s2_tot,
+                    'paid_amount': s2_paid,
+                    'concession_amount': s2_conc,
+                    'balance_amount': s2_bal,
+                    'status': s2_status,
+                }
+            })
+
+        # Group records by (Department, Batch, Section)
+        from collections import OrderedDict
+        grouped_dict = OrderedDict()
+
+        for st_rec in records:
+            dept_k = st_rec['department_name']
+            batch_k = st_rec['batch']
+            sec_k = st_rec.get('section', 'A')
+            g_key = (dept_k, batch_k, sec_k)
+            if g_key not in grouped_dict:
+                grouped_dict[g_key] = {
+                    'department_name': dept_k,
+                    'department_code': st_rec.get('department_code', ''),
+                    'batch': batch_k,
+                    'year_of_study': st_rec.get('year_of_study', 1),
+                    'semesters': st_rec.get('semesters', [1, 2]),
+                    'semesters_label': st_rec.get('semesters_label', ''),
+                    'section': sec_k,
+                    'total_students': 0,
+                    'total_fee': 0.0,
+                    'paid_fee': 0.0,
+                    'concession_fee': 0.0,
+                    'balance_fee': 0.0,
+                    'students': []
+                }
+            g_item = grouped_dict[g_key]
+            g_item['total_students'] += 1
+            g_item['total_fee'] += st_rec['total_fee']
+            g_item['paid_fee'] += st_rec['paid_fee']
+            g_item['concession_fee'] += st_rec['concession_fee']
+            g_item['balance_fee'] += st_rec['balance_fee']
+
+            rec_in_g = dict(st_rec)
+            rec_in_g['group_sno'] = len(g_item['students']) + 1
+            g_item['students'].append(rec_in_g)
+
+        groups_list = list(grouped_dict.values())
+
+        sec_name = section_obj.sections if section_obj else (section_id if section_id else 'All Sections')
+        batch_display = batch_filter_str if batch_filter_str else (batch.batch if batch else 'All Batches')
+        dept_display = department.department_name if department else 'All Departments'
+
+        if batch and batch.id in eligible_batch_map:
+            _, s1_m, s2_m, _ = eligible_batch_map[batch.id]
+            sems_display = f"Semesters {s1_m} & {s2_m}"
+        elif batch_filter_str:
+            is_elig_m, _, s1_m, s2_m = check_batch_eligibility(batch_filter_str, ay_start)
+            sems_display = f"Semesters {s1_m} & {s2_m}" if is_elig_m else "2 Semesters (Academic Year)"
+        else:
+            sems_display = "2 Semesters each (Across Batches)"
+
+        meta = {
+            'academic_year': acad_year_str,
+            'academic_year_id': acad_year_obj.id if acad_year_obj else None,
+            'department': dept_display,
+            'batch': batch_display,
+            'section': str(sec_name),
+            'semesters_covered': sems_display,
+            'total_groups': len(groups_list),
+        }
+
+        summary = {
+            'total_students': len(records),
+            'total_groups': len(groups_list),
+            'total_academic_year_fees': tot_fee_sum,
+            'total_paid_fees': tot_paid_sum,
+            'total_concession_fees': tot_conc_sum,
+            'total_balance_fees': tot_bal_sum,
+        }
+
+        return meta, summary, records, groups_list, college_header_obj, department, batch, sec_name, acad_year_str
+
+    def fees_academic_year_report(self, request, *args, **kwargs):
+        """JSON endpoint returning filtered academic year fee records, grouped by department, batch, and section."""
+        meta, summary, records, groups_list, _, department, batch, sec_name, acad_year_str = self._get_fees_academic_year_data_helper(request)
+        return Response({
+            'success': True,
+            'metadata': meta,
+            'summary': summary,
+            'groups': groups_list,
+            'students': records
+        }, status=status.HTTP_200_OK)
+
+    def fees_academic_year_report_pdf(self, request, *args, **kwargs):
+        """Generates and streams an official PDF report of academic year fees, grouped by Department, Batch, and Section."""
+        meta, summary, records, groups_list, college_header_obj, department, batch, sec_name, acad_year_str = self._get_fees_academic_year_data_helper(request)
+
+        if not records:
+            return HttpResponse("No students found matching the selected criteria.", status=400)
+
+        buffer = BytesIO()
+        page_size = A4
+        doc = SimpleDocTemplate(buffer, pagesize=page_size, leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
+
+        story = []
+        page_w = page_size[0] - 40  # 555.27 pt
+
+        # 1. College Header
+        header_table = build_standard_college_header(college_header_obj, page_w=page_w, logo_size=62)
+        if header_table:
+            story.append(header_table)
+            story.append(Spacer(1, 6))
+
+        # 2. Centered Report Title
+        story.append(build_centered_report_title(f"FEES REPORT — ACADEMIC YEAR {acad_year_str.upper()}", font_size=12, leading=15))
+        story.append(Spacer(1, 6))
+
+        # 3. Meta Info Table
+        lbl_bold = ParagraphStyle(name='AYFRLbl', fontName='Times-Bold', fontSize=9, leading=12, textColor=colors.black)
+        val_norm = ParagraphStyle(name='AYFRVal', fontName='Times-Roman', fontSize=9, leading=12, textColor=colors.black)
+
+        meta_data = [
+            [Paragraph("<b>Academic Year:</b>", lbl_bold), Paragraph(str(meta['academic_year']), val_norm),
+             Paragraph("<b>Department:</b>", lbl_bold), Paragraph(str(meta['department']), val_norm)],
+            [Paragraph("<b>Batch:</b>", lbl_bold), Paragraph(str(meta['batch']), val_norm),
+             Paragraph("<b>Section:</b>", lbl_bold), Paragraph(str(meta['section']), val_norm)],
+            [Paragraph("<b>Semesters:</b>", lbl_bold), Paragraph(str(meta['semesters_covered']), val_norm),
+             Paragraph("<b>Total Students / Groups:</b>", lbl_bold), Paragraph(f"<b>{summary['total_students']} Students</b> ({len(groups_list)} Groups)", val_norm)],
+        ]
+        meta_table = Table(meta_data, colWidths=[90, 185, 105, 175])
+        meta_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F8FAFC')),
+            ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#F8FAFC')),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('LEFTPADDING', (0, 0), (-1, -1), 5),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        story.append(meta_table)
+        story.append(Spacer(1, 10))
+
+        # 4. Student Fee Table(s) Grouped by Department, Batch, and Section
+        col_widths = [35, 95, 155, 70, 65, 65, 70]  # Sum = 555 pt
+        tbl_hdr_style = ParagraphStyle(name='AYFRTH', fontName='Times-Bold', fontSize=9, leading=11, alignment=1, textColor=colors.black)
+        tbl_hdr_right = ParagraphStyle(name='AYFRTHR', fontName='Times-Bold', fontSize=9, leading=11, alignment=2, textColor=colors.black)
+        tbl_cell_center = ParagraphStyle(name='AYFRCC', fontName='Times-Roman', fontSize=8.5, leading=11, alignment=1, textColor=colors.black)
+        tbl_cell_left = ParagraphStyle(name='AYFRCL', fontName='Times-Roman', fontSize=8.5, leading=11, alignment=0, textColor=colors.black)
+        tbl_cell_right = ParagraphStyle(name='AYFRCR', fontName='Times-Roman', fontSize=8.5, leading=11, alignment=2, textColor=colors.black)
+        tbl_tot_bold = ParagraphStyle(name='AYFRTB', fontName='Times-Bold', fontSize=9, leading=11, alignment=2, textColor=colors.black)
+        grp_hdr_style = ParagraphStyle(name='AYFRGH', fontName='Times-Bold', fontSize=9, leading=12, textColor=colors.white)
+        grp_hdr_right = ParagraphStyle(name='AYFRGHR', fontName='Times-Bold', fontSize=9, leading=12, alignment=2, textColor=colors.HexColor('#38BDF8'))
+
+        header_row = [
+            Paragraph("<b>S.No</b>", tbl_hdr_style),
+            Paragraph("<b>Register No</b>", tbl_hdr_style),
+            Paragraph("<b>Student Name</b>", tbl_hdr_style),
+            Paragraph("<b>Quota</b>", tbl_hdr_style),
+            Paragraph("<b>Total Fee</b>", tbl_hdr_right),
+            Paragraph("<b>Paid Fee</b>", tbl_hdr_right),
+            Paragraph("<b>Balance</b>", tbl_hdr_right),
+        ]
+
+        for g_idx, grp in enumerate(groups_list, start=1):
+            # Group Header Banner
+            grp_banner_text = f"<b>GROUP {g_idx}: {grp['department_name'].upper()} &nbsp;|&nbsp; BATCH: {grp['batch']} ({grp['semesters_label']}) &nbsp;|&nbsp; SECTION: {grp['section']}</b>"
+            grp_banner_table = Table([
+                [Paragraph(grp_banner_text, grp_hdr_style),
+                 Paragraph(f"<b>{grp['total_students']} Students</b>", grp_hdr_right)]
+            ], colWidths=[450, 105])
+            grp_banner_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#1E293B')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 3.5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3.5),
+                ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+            ]))
+
+            # Group Student Rows
+            grp_rows = [header_row]
+            for st_in_g in grp['students']:
+                row = [
+                    Paragraph(str(st_in_g.get('group_sno', 1)), tbl_cell_center),
+                    Paragraph(str(st_in_g['register_no']), tbl_cell_center),
+                    Paragraph(str(st_in_g['name']).upper(), tbl_cell_left),
+                    Paragraph(str(st_in_g['quota']), tbl_cell_center),
+                    Paragraph(f"{st_in_g['total_fee']:,.2f}", tbl_cell_right),
+                    Paragraph(f"{st_in_g['paid_fee']:,.2f}", tbl_cell_right),
+                    Paragraph(f"{st_in_g['balance_fee']:,.2f}", tbl_cell_right),
+                ]
+                grp_rows.append(row)
+
+            # Subtotal Row
+            subtot_row = [
+                Paragraph("<b>SUBTOTAL</b>", ParagraphStyle(name=f'AYFRSubL_{g_idx}', fontName='Times-Bold', fontSize=8.5, leading=11, alignment=1)),
+                Paragraph("", tbl_cell_center),
+                Paragraph(f"<b>{grp['total_students']} Students</b>", ParagraphStyle(name=f'AYFRSubSt_{g_idx}', fontName='Times-Bold', fontSize=8.5, leading=11, alignment=0)),
+                Paragraph("", tbl_cell_center),
+                Paragraph(f"<b>{grp['total_fee']:,.2f}</b>", tbl_tot_bold),
+                Paragraph(f"<b>{grp['paid_fee']:,.2f}</b>", tbl_tot_bold),
+                Paragraph(f"<b>{grp['balance_fee']:,.2f}</b>", tbl_tot_bold),
+            ]
+            grp_rows.append(subtot_row)
+
+            fee_table = Table(grp_rows, colWidths=col_widths, repeatRows=1)
+            ts = [
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#64748B')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('LEFTPADDING', (0, 0), (-1, -1), 3.5),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 3.5),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E2E8F0')),
+                ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#EEF2F6')),
+            ]
+            for r_idx in range(1, len(grp_rows) - 1):
+                if r_idx % 2 == 0:
+                    ts.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor('#F8FAFC')))
+            fee_table.setStyle(TableStyle(ts))
+
+            # Add to story with banner
+            story.append(grp_banner_table)
+            story.append(fee_table)
+            story.append(Spacer(1, 10))
+
+        # Grand Total Table if multiple groups
+        if len(groups_list) > 1:
+            grand_tot_table = Table([
+                [
+                    Paragraph("<b>GRAND TOTAL (ALL GROUPS)</b>", ParagraphStyle(name='AYFRGTotL', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=1)),
+                    Paragraph("", tbl_cell_center),
+                    Paragraph(f"<b>{summary['total_students']} Students ({len(groups_list)} Groups)</b>", ParagraphStyle(name='AYFRGTotSt', fontName='Times-Bold', fontSize=9, leading=12, alignment=0)),
+                    Paragraph("", tbl_cell_center),
+                    Paragraph(f"<b>{summary['total_academic_year_fees']:,.2f}</b>", ParagraphStyle(name='AYFRGTot1', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=2)),
+                    Paragraph(f"<b>{summary['total_paid_fees']:,.2f}</b>", ParagraphStyle(name='AYFRGTot2', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=2)),
+                    Paragraph(f"<b>{summary['total_balance_fees']:,.2f}</b>", ParagraphStyle(name='AYFRGTot3', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=2)),
+                ]
+            ], colWidths=col_widths)
+            grand_tot_table.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#1E293B')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#E2E8F0')),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('LEFTPADDING', (0, 0), (-1, -1), 3.5),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 3.5),
+            ]))
+            story.append(grand_tot_table)
+            story.append(Spacer(1, 12))
+
+        # 5. Signatures
+        story.append(Spacer(1, 20))
+        sig_data = [[
+            Paragraph("<b>Class In-Charge</b>", val_norm),
+            Paragraph("<b>HOD</b>", ParagraphStyle(name='AYFRSigHOD', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=1)),
+            Paragraph("<b>Principal / Cashier</b>", ParagraphStyle(name='AYFRSigPrin', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=2))
+        ]]
+        sig_table = Table(sig_data, colWidths=[185, 185, 185])
+        sig_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        story.append(KeepTogether(sig_table))
+
+        doc.build(story)
+        buffer.seek(0)
+
+        dept_str_clean = (department.department_code or department.department_name or 'Dept').replace(' ', '_') if department else 'All_Depts'
+        batch_str_clean = str(meta['batch']).replace(' ', '_')
+        ay_str_clean = str(acad_year_str).replace(' ', '_')
+        filename = f"Fees_Report_AY_{ay_str_clean}_{dept_str_clean}_{batch_str_clean}.pdf"
+
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response
