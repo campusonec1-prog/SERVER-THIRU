@@ -16,11 +16,15 @@ from .serializers import (
     SendFullDayAbsentSMSRequestSerializer,
     AfternoonAbsenteeStudentSerializer,
     SendAfternoonAbsentSMSRequestSerializer,
+    FeesPendingStudentSerializer,
+    SendFeesPendingSMSRequestSerializer,
 )
 from .services import (
     get_student_sms_info,
     send_full_day_absent_sms_to_student,
     send_afternoon_absent_sms_to_student,
+    send_fees_pending_sms_to_student,
+    format_fees_pending_message,
     get_dial4sms_balance,
 )
 
@@ -559,6 +563,296 @@ class SendAfternoonAbsentSMSView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+class FeesPendingStudentsListView(APIView):
+    """
+    Returns the list of students with pending fees for an Academic Year.
+    Supports filtering by Academic Year, Department, Batch, Section, and text search.
+    Only students with balance_fee > 0 (academic year pending fee) are included.
+    Includes parent and student mobile numbers, live SMS status, and formatted message preview.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from student.views.student_views import StudentViewSet
+        from collections import OrderedDict
+
+        try:
+            res_helper = StudentViewSet()._get_fees_academic_year_data_helper(request)
+            meta, summary, records, groups_list, _, department, batch, sec_name, acad_year_str = res_helper[:9]
+            student_map = res_helper[9] if len(res_helper) > 9 else {}
+        except Exception as e:
+            logger.exception("Error calculating academic year fees")
+            return Response({
+                "code": 500,
+                "message": f"Failed to compute academic year fees: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        min_balance = float(request.query_params.get('min_balance', 0) or 0)
+        search_query = (request.query_params.get('search') or '').strip().lower()
+
+        pending_records = [r for r in records if float(r.get('balance_fee', 0)) > min_balance]
+
+        if search_query:
+            pending_records = [
+                r for r in pending_records
+                if (search_query in str(r.get('name', '')).lower() or
+                    search_query in str(r.get('register_no', '')).lower() or
+                    search_query in str(r.get('roll_no', '')).lower() or
+                    search_query in str(r.get('department_name', '')).lower() or
+                    search_query in str(r.get('batch', '')).lower())
+            ]
+
+        student_ids = [r['student_id'] for r in pending_records]
+        if not student_map:
+            students_qs = Student.objects.filter(id__in=student_ids).select_related(
+                'department', 'batch', 'section', 'application', 'application__candidate'
+            )
+            student_map = {s.id: s for s in students_qs}
+
+        # Query latest SMSLog for FEES_PENDING
+        sms_logs = SMSLog.objects.filter(
+            student_id__in=student_ids,
+            sms_type='FEES_PENDING'
+        ).values('id', 'student_id', 'status', 'response_id', 'error_message', 'created_at').order_by('-created_at')
+
+        latest_sms_map = {}
+        for log in sms_logs:
+            sid = log['student_id']
+            if sid and sid not in latest_sms_map:
+                latest_sms_map[sid] = log
+
+        enriched_records = []
+        tot_pending_amount = 0.0
+        sent_count = 0
+        failed_count = 0
+        not_sent_count = 0
+
+        grouped_dict = OrderedDict()
+
+        for rec in pending_records:
+            sid = rec['student_id']
+            st_obj = student_map.get(sid)
+            info = get_student_sms_info(st_obj) if st_obj else {
+                'student_name': rec.get('name', 'Student'),
+                'student_mobile': '',
+                'parent_mobile': '',
+                'parent_name': ''
+            }
+
+            bal_amount = float(rec.get('balance_fee', 0))
+            tot_pending_amount += bal_amount
+
+            st_name = rec.get('name') or info.get('student_name') or 'Student'
+            msg_preview, amt_str = format_fees_pending_message(st_name, bal_amount)
+
+            sms_log = latest_sms_map.get(sid)
+            if sms_log:
+                sms_status = sms_log.get('status') if isinstance(sms_log, dict) else sms_log.status
+                sms_sent_at = sms_log.get('created_at') if isinstance(sms_log, dict) else sms_log.created_at
+                sms_log_id = sms_log.get('id') if isinstance(sms_log, dict) else sms_log.id
+                sms_resp = {
+                    'response_id': sms_log.get('response_id') if isinstance(sms_log, dict) else sms_log.response_id,
+                    'error_message': sms_log.get('error_message') if isinstance(sms_log, dict) else sms_log.error_message
+                }
+                if sms_status == 'SUCCESS':
+                    sent_count += 1
+                elif sms_status == 'FAILED':
+                    failed_count += 1
+                else:
+                    not_sent_count += 1
+            else:
+                sms_status = 'NOT_SENT'
+                sms_sent_at = None
+                sms_log_id = None
+                sms_resp = None
+                not_sent_count += 1
+
+            enriched = {
+                'student_id': sid,
+                'student_name': st_name,
+                'register_number': rec.get('register_no') or '',
+                'roll_number': rec.get('roll_no') or '',
+                'department_id': st_obj.department_id if st_obj else None,
+                'department_name': rec.get('department_name') or '',
+                'department_code': rec.get('department_code') or '',
+                'batch_id': st_obj.batch_id if st_obj else None,
+                'batch_name': rec.get('batch') or '',
+                'section_id': st_obj.section_id if st_obj else None,
+                'section_name': rec.get('section') or 'A',
+                'year_of_study': rec.get('year_of_study', 1),
+                'semesters': rec.get('semesters', []),
+                'semesters_label': rec.get('semesters_label', ''),
+                'quota': rec.get('quota', 'Regular'),
+                'total_fee': rec.get('total_fee', 0.0),
+                'paid_fee': rec.get('paid_fee', 0.0),
+                'concession_fee': rec.get('concession_fee', 0.0),
+                'balance_fee': bal_amount,
+                'student_mobile': info.get('student_mobile') or '',
+                'parent_mobile': info.get('parent_mobile') or '',
+                'parent_name': info.get('parent_name') or '',
+                'sms_status': sms_status,
+                'sms_sent_at': sms_sent_at,
+                'sms_log_id': sms_log_id,
+                'sms_response': sms_resp,
+                'message_preview': msg_preview,
+            }
+            enriched_records.append(enriched)
+
+            dept_k = enriched['department_name']
+            batch_k = enriched['batch_name']
+            sec_k = enriched['section_name']
+            g_key = (dept_k, batch_k, sec_k)
+            if g_key not in grouped_dict:
+                grouped_dict[g_key] = {
+                    'department_name': dept_k,
+                    'department_code': enriched.get('department_code', ''),
+                    'batch': batch_k,
+                    'year_of_study': enriched.get('year_of_study', 1),
+                    'semesters_label': enriched.get('semesters_label', ''),
+                    'section': sec_k,
+                    'total_pending_students': 0,
+                    'total_pending_amount': 0.0,
+                    'students': []
+                }
+            g_item = grouped_dict[g_key]
+            g_item['total_pending_students'] += 1
+            g_item['total_pending_amount'] += bal_amount
+            g_item['students'].append(enriched)
+
+        return Response({
+            "code": 200,
+            "message": "Fees pending students retrieved successfully",
+            "academic_year": acad_year_str,
+            "stats": {
+                "total_students_with_pending_fees": len(enriched_records),
+                "total_pending_amount": tot_pending_amount,
+                "sent_count": sent_count,
+                "failed_count": failed_count,
+                "not_sent_count": not_sent_count,
+            },
+            "template": {
+                "template_id": getattr(settings, 'DIAL4SMS_FEES_TEMPLATE_ID', '1177179058551929973'),
+                "sender_id": getattr(settings, 'DIAL4SMS_SENDER_ID', 'TECKPM'),
+                "template_text": "Dear Parent, {#var#} Fees Pending {#var#}. ignore if already paid - PRINCIPAL, - Thirumlai Engineering College"
+            },
+            "metadata": meta,
+            "groups": list(grouped_dict.values()),
+            "data": enriched_records
+        }, status=status.HTTP_200_OK)
+
+
+class SendFeesPendingSMSView(APIView):
+    """
+    Sends Fees Pending SMS to selected students and logs the gateway responses.
+    Uses Academic Year pending amount.
+    DLT Template: Dear Parent, {#var#} Fees Pending {#var#}. ignore if already paid - PRINCIPAL, - Thirumlai Engineering College
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from student.views.student_views import StudentViewSet
+
+        serializer = SendFeesPendingSMSRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                "code": 400,
+                "message": "Invalid payload",
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        validated = serializer.validated_data
+        academic_year = validated.get('academic_year')
+        recipient_type = validated.get('recipient_type', 'PARENT')
+        force = validated.get('force', False)
+
+        target_student_map = {}
+        if validated.get('students'):
+            for item in validated['students']:
+                sid = item['student_id']
+                target_student_map[sid] = item.get('amount')
+
+        if validated.get('student_ids'):
+            for sid in validated['student_ids']:
+                if sid not in target_student_map:
+                    target_student_map[sid] = None
+
+        user = request.user
+        tracking_user = user if isinstance(user, StandardUser) else None
+
+        missing_amounts = [sid for sid, amt in target_student_map.items() if amt is None or amt <= 0]
+        if missing_amounts:
+            calc_req = type('Req', (), {'query_params': {'academic_year': academic_year}, 'data': {}, 'GET': {'academic_year': academic_year}})()
+            try:
+                _, _, records, _, _, _, _, _, _ = StudentViewSet()._get_fees_academic_year_data_helper(calc_req)
+                for rec in records:
+                    sid = rec['student_id']
+                    if sid in target_student_map and (target_student_map[sid] is None or target_student_map[sid] <= 0):
+                        target_student_map[sid] = float(rec.get('balance_fee', 0))
+            except Exception as e:
+                logger.warning(f"Could not recalculate academic year fees: {str(e)}")
+
+        students_qs = Student.objects.filter(id__in=list(target_student_map.keys())).select_related(
+            'department', 'batch', 'section', 'application', 'application__candidate'
+        )
+
+        results = []
+        success_count = 0
+        failed_count = 0
+        already_sent_count = 0
+
+        today = datetime.date.today()
+
+        for student in students_qs:
+            bal_amt = target_student_map.get(student.id, 0.0) or 0.0
+
+            if not force and SMSLog.objects.filter(student=student, sent_date=today, sms_type='FEES_PENDING', status='SUCCESS').exists():
+                already_sent_count += 1
+                results.append({
+                    'student_id': student.id,
+                    'student_name': student.student_name or student.name or 'Student',
+                    'amount': bal_amt,
+                    'status': 'ALREADY_SENT',
+                    'error': 'Fees SMS has already been sent to this student today.'
+                })
+                continue
+
+            try:
+                res = send_fees_pending_sms_to_student(
+                    student=student,
+                    balance_amount=bal_amt,
+                    user=tracking_user,
+                    recipient_type=recipient_type,
+                    academic_year_str=str(academic_year) if academic_year else None
+                )
+                if res['status'] == 'SUCCESS':
+                    success_count += 1
+                else:
+                    failed_count += 1
+                results.append(res)
+            except Exception as e:
+                logger.exception(f"Error sending fees SMS for student {student.id}")
+                failed_count += 1
+                results.append({
+                    'student_id': student.id,
+                    'student_name': student.student_name or student.name or 'Student',
+                    'amount': bal_amt,
+                    'status': 'FAILED',
+                    'error': str(e)
+                })
+
+        return Response({
+            "code": 200,
+            "message": f"Processed Fees SMS for {len(results)} students ({success_count} succeeded, {failed_count} failed, {already_sent_count} skipped/already sent).",
+            "data": {
+                "total": len(results),
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "already_sent_count": already_sent_count,
+                "results": results
+            }
+        }, status=status.HTTP_200_OK)
+
+
 class SMSLogViewSet(ReadOnlyModelViewSet):
     """
     Viewset to retrieve and filter SMS delivery logs.
@@ -699,6 +993,13 @@ class SMSDashboardStatsView(APIView):
                 'template_id': getattr(settings, 'DIAL4SMS_AFTERNOON_ABSENT_TEMPLATE_ID', '1177179058643015435'),
                 'sender_id': getattr(settings, 'DIAL4SMS_SENDER_ID', 'TECKPM'),
                 'template_text': 'Dear Parent, {#var#} is absent today Afternoon {#var#}. Principal - Thirumalai Engineering Collge'
+            },
+            {
+                'type': 'FEES_PENDING',
+                'title': 'Academic Year Fees Pending',
+                'template_id': getattr(settings, 'DIAL4SMS_FEES_TEMPLATE_ID', '1177179058551929973'),
+                'sender_id': getattr(settings, 'DIAL4SMS_SENDER_ID', 'TECKPM'),
+                'template_text': 'Dear Parent, {#var#} Fees Pending {#var#}. ignore if already paid - PRINCIPAL, - Thirumlai Engineering College'
             }
         ]
 

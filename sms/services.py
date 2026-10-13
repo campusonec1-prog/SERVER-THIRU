@@ -18,6 +18,7 @@ DEFAULT_CLIENT_ID = getattr(settings, 'DIAL4SMS_CLIENT_ID', os.getenv('DIAL4SMS_
 DEFAULT_SENDER_ID = getattr(settings, 'DIAL4SMS_SENDER_ID', os.getenv('DIAL4SMS_SENDER_ID', ''))
 DEFAULT_FULLDAY_TEMPLATE_ID = getattr(settings, 'DIAL4SMS_FULLDAY_ABSENT_TEMPLATE_ID', os.getenv('DIAL4SMS_FULLDAY_ABSENT_TEMPLATE_ID', ''))
 DEFAULT_AFTERNOON_TEMPLATE_ID = getattr(settings, 'DIAL4SMS_AFTERNOON_ABSENT_TEMPLATE_ID', os.getenv('DIAL4SMS_AFTERNOON_ABSENT_TEMPLATE_ID', ''))
+DEFAULT_FEES_TEMPLATE_ID = getattr(settings, 'DIAL4SMS_FEES_TEMPLATE_ID', os.getenv('DIAL4SMS_FEES_TEMPLATE_ID', '1177179058551929973'))
 
 
 def sanitize_phone_number(phone_raw):
@@ -156,6 +157,31 @@ def format_afternoon_absent_message(student_name, absent_date):
     # DLT Registered Template strictly requires matching text ("Collge" as registered in DLT)
     message = f"Dear Parent, {student_name} is absent today Afternoon {date_str}. Principal - Thirumalai Engineering Collge"
     return message, date_str
+
+
+def format_fees_pending_message(student_name, amount):
+    """
+    DLT Template ID: 1177179058551929973
+    Exact Registered DLT Template:
+    Dear Parent, {#var#} Fees Pending {#var#}. ignore if already paid - PRINCIPAL, - Thirumlai Engineering College
+    - First var: Student Name
+    - Second var: Academic Year Pending Fees Amount (not semester)
+    """
+    clean_name = str(student_name).strip() if student_name else 'Student'
+    clean_name = re.sub(r'\s+', ' ', clean_name)
+
+    if isinstance(amount, (int, float)):
+        amount_str = str(int(round(amount)))
+    else:
+        val = str(amount).strip().replace(',', '')
+        try:
+            amount_str = str(int(round(float(val))))
+        except ValueError:
+            amount_str = val
+
+    # DLT Registered Template strictly requires exact matching text
+    message = f"Dear Parent, {clean_name} Fees Pending {amount_str}. ignore if already paid - PRINCIPAL, - Thirumlai Engineering College"
+    return message, amount_str
 
 
 def send_dial4sms_single(phone_number, message, template_id=None, sender_id=None):
@@ -418,6 +444,93 @@ def send_afternoon_absent_sms_to_student(student, absent_date, user=None, recipi
         'student_name': student_name,
         'register_number': info['register_number'],
         'phone_number': target_phone,
+        'status': gw_result['status'],
+        'response_id': gw_result['response_id'],
+        'error': gw_result['error'],
+        'log_id': log_entry.id,
+        'gateway_response': gw_result['gateway_response']
+    }
+
+
+def send_fees_pending_sms_to_student(student, balance_amount, user=None, recipient_type='PARENT', academic_year_str=None):
+    """
+    Prepares, sends, and records Academic Year Fees Pending SMS for a student.
+    DLT Template: Dear Parent, {#var#} Fees Pending {#var#}. ignore if already paid - PRINCIPAL, - Thirumlai Engineering College
+    - First var: Student Name
+    - Second var: Academic Year Pending Fees Amount
+    """
+    info = get_student_sms_info(student)
+    student_name = info['student_name']
+    parent_phone = info['parent_mobile']
+    student_phone = info['student_mobile']
+
+    target_phone = parent_phone if recipient_type == 'PARENT' else (student_phone or parent_phone)
+
+    message, amount_str = format_fees_pending_message(student_name, balance_amount)
+    template_id = getattr(settings, 'DIAL4SMS_FEES_TEMPLATE_ID', os.getenv('DIAL4SMS_FEES_TEMPLATE_ID', DEFAULT_FEES_TEMPLATE_ID))
+
+    sent_date = datetime.date.today()
+
+    if not target_phone:
+        log_entry = SMSLog.objects.create(
+            student=student,
+            recipient_type=recipient_type,
+            phone_number='N/A',
+            student_name=student_name,
+            register_number=info['register_number'],
+            sms_type='FEES_PENDING',
+            template_id=template_id,
+            message=message,
+            sent_date=sent_date,
+            status='FAILED',
+            gateway_response={'error': f'No {recipient_type.lower()} phone number available for student'},
+            error_message=f'No {recipient_type.lower()} phone number available for student',
+            created_by=user,
+            updated_by=user
+        )
+        return {
+            'student_id': student.id,
+            'student_name': student_name,
+            'register_number': info['register_number'],
+            'phone_number': '',
+            'amount': amount_str,
+            'status': 'FAILED',
+            'error': f'No valid {recipient_type.lower()} phone number on file',
+            'log_id': log_entry.id
+        }
+
+    # Dispatch to Dial4SMS Gateway
+    gw_result = send_dial4sms_single(
+        phone_number=target_phone,
+        message=message,
+        template_id=template_id
+    )
+
+    # Save to SMSLog
+    log_entry = SMSLog.objects.create(
+        student=student,
+        recipient_type=recipient_type,
+        phone_number=target_phone,
+        student_name=student_name,
+        register_number=info['register_number'],
+        sms_type='FEES_PENDING',
+        template_id=template_id,
+        message=message,
+        sent_date=sent_date,
+        status=gw_result['status'],
+        gateway_response=gw_result['gateway_response'],
+        response_id=gw_result['response_id'],
+        error_message=gw_result['error'],
+        created_by=user,
+        updated_by=user
+    )
+
+    return {
+        'student_id': student.id,
+        'student_name': student_name,
+        'register_number': info['register_number'],
+        'phone_number': target_phone,
+        'amount': amount_str,
         'status': gw_result['status'],
         'response_id': gw_result['response_id'],
         'error': gw_result['error'],

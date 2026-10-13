@@ -100,3 +100,65 @@ class SendAfternoonAbsentSMSRequestSerializer(serializers.Serializer):
         default='PARENT',
         required=False
     )
+
+
+class FeesPendingStudentSerializer(serializers.Serializer):
+    student_id = serializers.IntegerField()
+    student_name = serializers.CharField()
+    register_number = serializers.CharField(allow_blank=True, allow_null=True)
+    roll_number = serializers.CharField(allow_blank=True, allow_null=True)
+    department_id = serializers.IntegerField(allow_null=True)
+    department_name = serializers.CharField(allow_blank=True, allow_null=True)
+    department_code = serializers.CharField(allow_blank=True, allow_null=True)
+    batch_id = serializers.IntegerField(allow_null=True)
+    batch_name = serializers.CharField(allow_blank=True, allow_null=True)
+    section_id = serializers.IntegerField(allow_null=True)
+    section_name = serializers.CharField(allow_blank=True, allow_null=True)
+    year_of_study = serializers.IntegerField(default=1)
+    semesters = serializers.ListField(child=serializers.IntegerField(), required=False)
+    semesters_label = serializers.CharField(allow_blank=True, allow_null=True)
+    quota = serializers.CharField(allow_blank=True, allow_null=True)
+    total_fee = serializers.FloatField(default=0.0)
+    paid_fee = serializers.FloatField(default=0.0)
+    concession_fee = serializers.FloatField(default=0.0)
+    balance_fee = serializers.FloatField(default=0.0)
+    student_mobile = serializers.CharField(allow_blank=True, allow_null=True)
+    parent_mobile = serializers.CharField(allow_blank=True, allow_null=True)
+    parent_name = serializers.CharField(allow_blank=True, allow_null=True)
+    sms_status = serializers.CharField(default='NOT_SENT')
+    sms_sent_at = serializers.DateTimeField(allow_null=True, required=False)
+    sms_log_id = serializers.IntegerField(allow_null=True, required=False)
+    sms_response = serializers.JSONField(allow_null=True, required=False)
+    message_preview = serializers.CharField(allow_blank=True, allow_null=True)
+
+
+class SendFeesPendingSMSItemSerializer(serializers.Serializer):
+    student_id = serializers.IntegerField(required=True)
+    amount = serializers.FloatField(required=False, allow_null=True)
+
+
+class SendFeesPendingSMSRequestSerializer(serializers.Serializer):
+    academic_year = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    student_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_empty=True
+    )
+    students = serializers.ListField(
+        child=SendFeesPendingSMSItemSerializer(),
+        required=False,
+        allow_empty=True
+    )
+    recipient_type = serializers.ChoiceField(
+        choices=['PARENT', 'STUDENT', 'BOTH'],
+        default='PARENT',
+        required=False
+    )
+    force = serializers.BooleanField(default=False, required=False)
+
+    def validate(self, data):
+        student_ids = data.get('student_ids') or []
+        students = data.get('students') or []
+        if not student_ids and not students:
+            raise serializers.ValidationError("Either student_ids or students list must be provided.")
+        return data

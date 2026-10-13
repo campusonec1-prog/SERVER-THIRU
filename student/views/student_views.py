@@ -3272,9 +3272,9 @@ class StudentViewSet(viewsets.ModelViewSet):
     def _get_fees_semester_data_helper(self, request):
         req_data = getattr(request, 'data', None) or {}
         req_params = getattr(request, 'query_params', None) or getattr(request, 'GET', {})
-        dept_id = req_data.get('department') or req_params.get('department')
-        batch_id = req_data.get('batch') or req_params.get('batch')
-        section_id = req_data.get('section') or req_params.get('section')
+        dept_id = req_data.get('department') or req_params.get('department') or req_data.get('department_id') or req_params.get('department_id')
+        batch_id = req_data.get('batch') or req_params.get('batch') or req_data.get('batch_id') or req_params.get('batch_id')
+        section_id = req_data.get('section') or req_params.get('section') or req_data.get('section_id') or req_params.get('section_id')
         program_id = req_data.get('program') or req_params.get('program')
         sem_param = req_data.get('semester') or req_params.get('semester') or 1
         header_type = req_data.get('report_header') or req_params.get('report_header')
@@ -3325,10 +3325,18 @@ class StudentViewSet(viewsets.ModelViewSet):
         if not college_header_obj:
             college_header_obj = CollegeHeader.objects.first()
 
+        # Only students who have a quota assigned fetch fees
         students_qs = Student.objects.select_related(
             'department', 'department__program', 'batch', 'section', 'quota',
             'application', 'application__candidate'
-        ).all()
+        ).filter(quota__isnull=False)
+
+        quota_param = req_data.get('quota') or req_params.get('quota') or req_data.get('quota_id') or req_params.get('quota_id')
+        if quota_param and str(quota_param).strip().lower() not in ['', 'all', 'all_quotas', 'undefined', 'null']:
+            if str(quota_param).isdigit():
+                students_qs = students_qs.filter(quota_id=int(quota_param))
+            else:
+                students_qs = students_qs.filter(quota__quota_name__iexact=str(quota_param).strip())
 
         if department:
             students_qs = students_qs.filter(department=department)
@@ -3343,6 +3351,18 @@ class StudentViewSet(viewsets.ModelViewSet):
 
         students = list(students_qs.order_by('roll_number', 'register_number', 'student_name'))
 
+        # Bulk fetch fees to ensure fast response
+        st_ids = [s.id for s in students]
+        sf_list = StudentFees.objects.filter(student_id__in=st_ids)
+        sf_map = {sf.student_id: sf for sf in sf_list}
+        sf_ids = [sf.id for sf in sf_list]
+
+        sem_fee_list = StudentSemesterFee.objects.filter(student_fees_id__in=sf_ids, semester__semester_number=sem_num).select_related('semester')
+        sem_fee_map = {sm.student_fees_id: sm for sm in sem_fee_list}
+
+        fs_list = FeesStructure.objects.all()
+        fs_map = {(fs.department_id, fs.batch_id, fs.quota_id): fs for fs in fs_list}
+
         records = []
         tot_fee = 0.0
         tot_paid = 0.0
@@ -3354,13 +3374,8 @@ class StudentViewSet(viewsets.ModelViewSet):
             reg_no = st.register_number or st.roll_number or '—'
             quota_name = st.quota.quota_name if st.quota else 'Regular'
 
-            sf = StudentFees.objects.filter(student=st).first()
-            sem_fee = None
-            if sf:
-                sem_fee = StudentSemesterFee.objects.filter(student_fees=sf, semester__semester_number=sem_num).first()
-                if not sem_fee:
-                    StudentViewSet._reconcile_student_semester_fees(sf)
-                    sem_fee = StudentSemesterFee.objects.filter(student_fees=sf, semester__semester_number=sem_num).first()
+            sf = sf_map.get(st.id)
+            sem_fee = sem_fee_map.get(sf.id) if sf else None
 
             if sem_fee:
                 cur_total = float(sem_fee.total_amount or 0)
@@ -3368,21 +3383,25 @@ class StudentViewSet(viewsets.ModelViewSet):
                 cur_concession = float(sem_fee.concession_amount or 0)
                 cur_bal = float(sem_fee.balance_amount or 0)
                 cur_status = sem_fee.status
-            elif sf:
+            elif sf and sf.total_fees:
                 cur_total = float(sf.total_fees or 0) / 8.0
                 cur_paid = 0.0
                 cur_concession = 0.0
                 cur_bal = cur_total
-                cur_status = 'PENDING'
-            else:
-                fs = FeesStructure.objects.filter(department=st.department, batch=st.batch, quota=st.quota).first()
-                if not fs and st.department and st.batch:
-                    fs = FeesStructure.objects.filter(department=st.department, batch=st.batch).first()
-                cur_total = float(fs.total_fees or 0) / 8.0 if fs else 0.0
+                cur_status = 'PENDING' if cur_total > 0 else 'NOT SET'
+            elif st.quota_id:
+                fs = fs_map.get((st.department_id, st.batch_id, st.quota_id))
+                cur_total = float(fs.fees or 0) / 8.0 if fs else 0.0
                 cur_paid = 0.0
                 cur_concession = 0.0
                 cur_bal = cur_total
                 cur_status = 'PENDING' if cur_total > 0 else 'NOT SET'
+            else:
+                cur_total = 0.0
+                cur_paid = 0.0
+                cur_concession = 0.0
+                cur_bal = 0.0
+                cur_status = 'NOT SET'
 
             tot_fee += cur_total
             tot_paid += cur_paid
@@ -3585,9 +3604,9 @@ class StudentViewSet(viewsets.ModelViewSet):
         req_params = getattr(request, 'query_params', None) or getattr(request, 'GET', {})
 
         acad_year_param = req_data.get('academic_year') or req_params.get('academic_year')
-        dept_id = req_data.get('department') or req_params.get('department')
-        batch_id = req_data.get('batch') or req_params.get('batch')
-        section_id = req_data.get('section') or req_params.get('section')
+        dept_id = req_data.get('department') or req_params.get('department') or req_data.get('department_id') or req_params.get('department_id')
+        batch_id = req_data.get('batch') or req_params.get('batch') or req_data.get('batch_id') or req_params.get('batch_id')
+        section_id = req_data.get('section') or req_params.get('section') or req_data.get('section_id') or req_params.get('section_id')
         header_type = req_data.get('report_header') or req_params.get('report_header')
 
         # 1. Resolve Academic Year
@@ -3678,11 +3697,18 @@ class StudentViewSet(viewsets.ModelViewSet):
         if not college_header_obj:
             college_header_obj = CollegeHeader.objects.first()
 
-        # 7. Query Students
+        # 7. Query Students - Only students who have a quota assigned fetch fees
         students_qs = Student.objects.select_related(
             'department', 'department__program', 'batch', 'section', 'quota',
             'application', 'application__candidate'
-        ).all()
+        ).filter(quota__isnull=False)
+
+        quota_param = req_data.get('quota') or req_params.get('quota') or req_data.get('quota_id') or req_params.get('quota_id')
+        if quota_param and str(quota_param).strip().lower() not in ['', 'all', 'all_quotas', 'undefined', 'null']:
+            if str(quota_param).isdigit():
+                students_qs = students_qs.filter(quota_id=int(quota_param))
+            else:
+                students_qs = students_qs.filter(quota__quota_name__iexact=str(quota_param).strip())
 
         if department:
             students_qs = students_qs.filter(department=department)
@@ -3713,7 +3739,6 @@ class StudentViewSet(viewsets.ModelViewSet):
 
         fs_list = FeesStructure.objects.all()
         fs_map = {(fs.department_id, fs.batch_id, fs.quota_id): fs for fs in fs_list}
-        fs_dept_batch_map = {(fs.department_id, fs.batch_id): fs for fs in fs_list}
 
         records = []
         tot_fee_sum = 0.0
@@ -3740,23 +3765,17 @@ class StudentViewSet(viewsets.ModelViewSet):
 
             def _calc_sem(sem_num):
                 sm = sem_fee_map.get((sf.id, sem_num)) if sf else None
-                if not sm and sf:
-                    sm = StudentSemesterFee.objects.filter(student_fees=sf, semester__semester_number=sem_num).first()
-                    if not sm:
-                        StudentViewSet._reconcile_student_semester_fees(sf)
-                        sm = StudentSemesterFee.objects.filter(student_fees=sf, semester__semester_number=sem_num).first()
-                    if sm:
-                        sem_fee_map[(sf.id, sem_num)] = sm
-
                 if sm:
                     return float(sm.total_amount or 0), float(sm.paid_amount or 0), float(sm.concession_amount or 0), float(sm.balance_amount or 0), sm.status
-                elif sf:
+                elif sf and sf.total_fees:
                     t = float(sf.total_fees or 0) / 8.0
-                    return t, 0.0, 0.0, t, 'PENDING'
-                else:
-                    fs_entry = fs_map.get((st.department_id, st.batch_id, st.quota_id)) or fs_dept_batch_map.get((st.department_id, st.batch_id))
-                    t = float(fs_entry.total_fees or 0) / 8.0 if fs_entry else 0.0
                     return t, 0.0, 0.0, t, ('PENDING' if t > 0 else 'NOT SET')
+                elif st.quota_id:
+                    fs_entry = fs_map.get((st.department_id, st.batch_id, st.quota_id))
+                    t = float(fs_entry.fees or 0) / 8.0 if fs_entry else 0.0
+                    return t, 0.0, 0.0, t, ('PENDING' if t > 0 else 'NOT SET')
+                else:
+                    return 0.0, 0.0, 0.0, 0.0, 'NOT SET'
 
             s1_tot, s1_paid, s1_conc, s1_bal, s1_status = _calc_sem(s1)
             s2_tot, s2_paid, s2_conc, s2_bal, s2_status = _calc_sem(s2)
@@ -3887,11 +3906,12 @@ class StudentViewSet(viewsets.ModelViewSet):
             'total_balance_fees': tot_bal_sum,
         }
 
-        return meta, summary, records, groups_list, college_header_obj, department, batch, sec_name, acad_year_str
+        student_map = {s.id: s for s in students}
+        return meta, summary, records, groups_list, college_header_obj, department, batch, sec_name, acad_year_str, student_map
 
     def fees_academic_year_report(self, request, *args, **kwargs):
         """JSON endpoint returning filtered academic year fee records, grouped by department, batch, and section."""
-        meta, summary, records, groups_list, _, department, batch, sec_name, acad_year_str = self._get_fees_academic_year_data_helper(request)
+        meta, summary, records, groups_list, _, department, batch, sec_name, acad_year_str, *rest = self._get_fees_academic_year_data_helper(request)
         return Response({
             'success': True,
             'metadata': meta,
@@ -3902,7 +3922,7 @@ class StudentViewSet(viewsets.ModelViewSet):
 
     def fees_academic_year_report_pdf(self, request, *args, **kwargs):
         """Generates and streams an official PDF report of academic year fees, grouped by Department, Batch, and Section."""
-        meta, summary, records, groups_list, college_header_obj, department, batch, sec_name, acad_year_str = self._get_fees_academic_year_data_helper(request)
+        meta, summary, records, groups_list, college_header_obj, department, batch, sec_name, acad_year_str, *rest = self._get_fees_academic_year_data_helper(request)
 
         if not records:
             return HttpResponse("No students found matching the selected criteria.", status=400)
