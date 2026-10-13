@@ -1,4 +1,5 @@
-from django.http import Http404
+from io import BytesIO
+from django.http import Http404, HttpResponse
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from rest_framework import viewsets, status, filters
@@ -9,7 +10,14 @@ from django_filters.rest_framework import DjangoFilterBackend
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, PageBreak, HRFlowable
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+
 from common.pagination import CustomPageNumberPagination
+from common.report_utils import build_standard_college_header, build_centered_report_title, format_unicode_text
 from .models import (
     AssetCategory, Asset, AssetCondition, AssetAllocation, AssetStatus, AssetTransfer,
     AssetMaintenance, MaintenanceStatus, PreviousAssetStatus,
@@ -26,7 +34,7 @@ from .permissions import (
     AssetDisposalPermission
 )
 from users.models import User
-from institution.models import Department
+from institution.models import Department, CollegeHeader
 
 
 def broadcast_custom_ws_event(event_name, data):
@@ -724,6 +732,1001 @@ class AssetViewSet(viewsets.ModelViewSet):
                 "count": len(created_assets)
             }
         }, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='tracking-report')
+    def tracking_report(self, request):
+        asset_id = request.query_params.get('asset_id')
+        category_id = request.query_params.get('category')
+        status_filter = request.query_params.get('status')
+        condition_filter = request.query_params.get('condition')
+        search_query = request.query_params.get('search')
+        department_id = request.query_params.get('department')
+
+        qs = Asset.objects.select_related('category').prefetch_related(
+            'allocations__assigned_to__role',
+            'allocations__department__program',
+            'transfers__from_user',
+            'transfers__to_user',
+            'transfers__from_department__program',
+            'transfers__to_department__program',
+            'maintenance_records',
+            'disposal_records'
+        ).all().order_by('-created_at')
+
+        if asset_id and str(asset_id).lower() not in ('all', ''):
+            qs = qs.filter(pk=asset_id)
+
+        if category_id:
+            qs = qs.filter(category_id=category_id)
+
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+
+        if condition_filter:
+            qs = qs.filter(condition=condition_filter)
+
+        if search_query:
+            sq = search_query.strip()
+            qs = qs.filter(
+                models.Q(asset_code__icontains=sq) |
+                models.Q(asset_name__icontains=sq) |
+                models.Q(serial_number__icontains=sq) |
+                models.Q(brand__icontains=sq) |
+                models.Q(model_number__icontains=sq)
+            )
+
+        if department_id:
+            qs = qs.filter(allocations__department_id=department_id, allocations__is_current=True)
+
+        report_items = []
+        for asset in qs:
+            all_allocs = list(asset.allocations.all())
+            current_alloc = next((a for a in all_allocs if a.is_current), None)
+
+            current_custody = None
+            if current_alloc:
+                user = current_alloc.assigned_to
+                dept = current_alloc.department
+                prog_level = (dept.program.program_level if dept and dept.program else '').strip()
+                dept_name_str = f"{dept.department_name} ({prog_level})" if (dept and prog_level) else (dept.department_name if dept else '')
+
+                current_custody = {
+                    'allocation_id': current_alloc.id,
+                    'is_assigned': True,
+                    'assigned_to_id': user.id if user else None,
+                    'assigned_to_name': (user.name or user.username) if user else 'Unspecified',
+                    'assigned_to_username': user.username if user else None,
+                    'assigned_to_role': (user.role.role_name if user and user.role else '') or '',
+                    'department_id': dept.id if dept else None,
+                    'department_name': dept_name_str,
+                    'department_code': dept.department_code if dept else '',
+                    'location': current_alloc.location or '',
+                    'assigned_date': current_alloc.assigned_date.isoformat() if current_alloc.assigned_date else None,
+                    'remarks': current_alloc.remarks or '',
+                }
+            else:
+                current_custody = {
+                    'allocation_id': None,
+                    'is_assigned': False,
+                    'assigned_to_id': None,
+                    'assigned_to_name': 'Not Assigned (In Inventory / Available)',
+                    'assigned_to_username': None,
+                    'assigned_to_role': '',
+                    'department_id': None,
+                    'department_name': '—',
+                    'department_code': '',
+                    'location': 'Storage / Central Inventory',
+                    'assigned_date': None,
+                    'remarks': '',
+                }
+
+            transfers = list(asset.transfers.all())
+            transfers_history = []
+            for t in sorted(transfers, key=lambda x: x.transfer_date or timezone.now(), reverse=True):
+                from_u = t.from_user
+                to_u = t.to_user
+                from_d = t.from_department
+                to_d = t.to_department
+                transfers_history.append({
+                    'id': t.id,
+                    'transfer_date': t.transfer_date.isoformat() if t.transfer_date else None,
+                    'from_user_id': from_u.id if from_u else None,
+                    'from_user_name': (from_u.name or from_u.username) if from_u else 'Unassigned',
+                    'from_user_username': from_u.username if from_u else None,
+                    'to_user_id': to_u.id if to_u else None,
+                    'to_user_name': (to_u.name or to_u.username) if to_u else 'Unassigned',
+                    'to_user_username': to_u.username if to_u else None,
+                    'from_department_id': from_d.id if from_d else None,
+                    'from_department_name': from_d.department_name if from_d else '—',
+                    'from_department_code': from_d.department_code if from_d else '',
+                    'to_department_id': to_d.id if to_d else None,
+                    'to_department_name': to_d.department_name if to_d else '—',
+                    'to_department_code': to_d.department_code if to_d else '',
+                    'from_location': t.from_location or '—',
+                    'to_location': t.to_location or '—',
+                    'remarks': t.remarks or '',
+                })
+
+            allocations_history = []
+            for a in sorted(all_allocs, key=lambda x: x.assigned_date or timezone.now(), reverse=True):
+                u = a.assigned_to
+                d = a.department
+                allocations_history.append({
+                    'id': a.id,
+                    'assigned_to_id': u.id if u else None,
+                    'assigned_to_name': (u.name or u.username) if u else 'Unassigned',
+                    'assigned_to_username': u.username if u else None,
+                    'department_id': d.id if d else None,
+                    'department_name': d.department_name if d else '—',
+                    'department_code': d.department_code if d else '',
+                    'location': a.location or '—',
+                    'assigned_date': a.assigned_date.isoformat() if a.assigned_date else None,
+                    'returned_date': a.returned_date.isoformat() if a.returned_date else None,
+                    'is_current': a.is_current,
+                    'remarks': a.remarks or '',
+                })
+
+            maintenances = list(asset.maintenance_records.all())
+            maintenance_history = []
+            for m in maintenances:
+                maintenance_history.append({
+                    'id': m.id,
+                    'maintenance_type': m.get_maintenance_type_display(),
+                    'issue_description': m.issue_description,
+                    'maintenance_date': m.maintenance_date.isoformat() if m.maintenance_date else None,
+                    'vendor_name': m.vendor_name or '',
+                    'technician_name': m.technician_name or '',
+                    'cost': float(m.cost) if m.cost is not None else None,
+                    'status': m.get_status_display(),
+                    'completion_date': m.completion_date.isoformat() if m.completion_date else None,
+                    'remarks': m.remarks or '',
+                })
+
+            timeline_events = []
+            if asset.created_at:
+                timeline_events.append({
+                    'event_type': 'REGISTERED',
+                    'title': 'Asset Registered',
+                    'date': asset.created_at.isoformat(),
+                    'details': f"Asset {asset.asset_name} ({asset.asset_code}) registered into inventory.",
+                    'badge': 'Registered',
+                    'badge_color': 'blue'
+                })
+
+            for a in sorted(all_allocs, key=lambda x: x.assigned_date or timezone.now()):
+                uname = (a.assigned_to.name or a.assigned_to.username) if a.assigned_to else 'Unassigned'
+                dname = a.department.department_name if a.department else 'General'
+                loc = f" at {a.location}" if a.location else ""
+                timeline_events.append({
+                    'event_type': 'ALLOCATED',
+                    'title': f"Allocated to {uname}",
+                    'date': a.assigned_date.isoformat() if a.assigned_date else None,
+                    'details': f"Allocated to {uname} ({dname}){loc}." + (f" Remarks: {a.remarks}" if a.remarks else ""),
+                    'badge': 'Active Holder' if a.is_current else 'Allocated',
+                    'badge_color': 'indigo' if a.is_current else 'slate'
+                })
+                if a.returned_date:
+                    timeline_events.append({
+                        'event_type': 'RETURNED',
+                        'title': f"Returned from {uname}",
+                        'date': a.returned_date.isoformat(),
+                        'details': f"Returned back to central inventory." + (f" Remarks: {a.remarks}" if a.remarks else ""),
+                        'badge': 'Returned',
+                        'badge_color': 'amber'
+                    })
+
+            for t in sorted(transfers, key=lambda x: x.transfer_date or timezone.now()):
+                from_desc = f"{(t.from_user.name or t.from_user.username) if t.from_user else 'Unassigned'}"
+                if t.from_department:
+                    from_desc += f" ({t.from_department.department_code or t.from_department.department_name})"
+                to_desc = f"{(t.to_user.name or t.to_user.username) if t.to_user else 'Unassigned'}"
+                if t.to_department:
+                    to_desc += f" ({t.to_department.department_code or t.to_department.department_name})"
+
+                timeline_events.append({
+                    'event_type': 'TRANSFERRED',
+                    'title': f"Transfer: {from_desc} → {to_desc}",
+                    'date': t.transfer_date.isoformat() if t.transfer_date else None,
+                    'details': f"Transferred custody from {from_desc} to {to_desc}. Location shift: {t.from_location or '—'} → {t.to_location or '—'}." + (f" Remarks: {t.remarks}" if t.remarks else ""),
+                    'badge': 'Transferred',
+                    'badge_color': 'purple'
+                })
+
+            for m in maintenances:
+                timeline_events.append({
+                    'event_type': 'MAINTENANCE',
+                    'title': f"Maintenance: {m.get_maintenance_type_display()}",
+                    'date': m.maintenance_date.isoformat() if m.maintenance_date else None,
+                    'details': f"{m.issue_description} (Cost: ₹{m.cost or 0})",
+                    'badge': 'Maintenance',
+                    'badge_color': 'rose'
+                })
+
+            timeline_events.sort(key=lambda ev: str(ev['date'] or ''))
+
+            report_items.append({
+                'id': asset.id,
+                'asset_code': asset.asset_code,
+                'asset_name': asset.asset_name,
+                'category_id': asset.category_id,
+                'category_name': asset.category.name if asset.category else '',
+                'brand': asset.brand or '',
+                'model_number': asset.model_number or '',
+                'serial_number': asset.serial_number or '',
+                'condition': asset.condition,
+                'condition_display': asset.get_condition_display(),
+                'status': asset.status,
+                'status_display': asset.get_status_display(),
+                'purchase_date': asset.purchase_date.isoformat() if asset.purchase_date else None,
+                'purchase_price': float(asset.purchase_price) if asset.purchase_price is not None else None,
+                'vendor_name': asset.vendor_name or '',
+                'invoice_number': asset.invoice_number or '',
+                'warranty_expiry': asset.warranty_expiry.isoformat() if asset.warranty_expiry else None,
+                'description': asset.description or '',
+                'current_custody': current_custody,
+                'transfers_history': transfers_history,
+                'allocations_history': allocations_history,
+                'maintenance_history': maintenance_history,
+                'timeline': timeline_events,
+                'total_transfers': len(transfers_history),
+                'total_allocations': len(allocations_history),
+            })
+
+        return Response({
+            "code": 200,
+            "message": "Asset tracking report generated successfully.",
+            "data": {
+                "generated_at": timezone.now().isoformat(),
+                "total_assets": len(report_items),
+                "assets": report_items,
+            }
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='tracking-report/pdf')
+    def export_tracking_report_pdf(self, request):
+        header_type = request.query_params.get('header_type') or request.query_params.get('college_header')
+        college_header_obj = None
+        if header_type:
+            if str(header_type).isdigit():
+                college_header_obj = CollegeHeader.objects.filter(id=int(header_type)).first()
+            if not college_header_obj:
+                college_header_obj = CollegeHeader.objects.filter(header_type__iexact=str(header_type)).first()
+        if not college_header_obj:
+            college_header_obj = CollegeHeader.objects.first()
+
+        asset_id = request.query_params.get('asset_id')
+        category_id = request.query_params.get('category')
+        status_filter = request.query_params.get('status')
+        condition_filter = request.query_params.get('condition')
+        search_query = request.query_params.get('search')
+        department_id = request.query_params.get('department')
+
+        qs = Asset.objects.select_related('category').prefetch_related(
+            'allocations__assigned_to__role',
+            'allocations__department__program',
+            'transfers__from_user',
+            'transfers__to_user',
+            'transfers__from_department__program',
+            'transfers__to_department__program',
+            'maintenance_records',
+            'disposal_records'
+        ).all().order_by('-created_at')
+
+        is_single_asset = False
+        if asset_id and str(asset_id).lower() not in ('all', ''):
+            qs = qs.filter(pk=asset_id)
+            is_single_asset = True
+
+        if category_id:
+            qs = qs.filter(category_id=category_id)
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        if condition_filter:
+            qs = qs.filter(condition=condition_filter)
+        if search_query:
+            sq = search_query.strip()
+            qs = qs.filter(
+                models.Q(asset_code__icontains=sq) |
+                models.Q(asset_name__icontains=sq) |
+                models.Q(serial_number__icontains=sq) |
+                models.Q(brand__icontains=sq) |
+                models.Q(model_number__icontains=sq)
+            )
+        if department_id:
+            qs = qs.filter(allocations__department_id=department_id, allocations__is_current=True)
+
+        assets_list = list(qs)
+        if not assets_list:
+            return HttpResponse("No asset records found matching the criteria.", status=404)
+
+        buffer = BytesIO()
+        styles = getSampleStyleSheet()
+
+        th_style = ParagraphStyle(
+            'PDF_TH',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=8,
+            leading=10,
+            textColor=colors.white,
+            alignment=TA_CENTER
+        )
+        tb_cell = ParagraphStyle(
+            'PDF_TD',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=7.5,
+            leading=9.5,
+            textColor=colors.HexColor('#1E293B')
+        )
+        tb_bold = ParagraphStyle(
+            'PDF_TDBold',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=7.5,
+            leading=9.5,
+            textColor=colors.HexColor('#0F172A')
+        )
+        tb_center = ParagraphStyle(
+            'PDF_TDCenter',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=7.5,
+            leading=9.5,
+            textColor=colors.HexColor('#1E293B'),
+            alignment=TA_CENTER
+        )
+        sec_heading = ParagraphStyle(
+            'PDF_SecHeading',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=9.5,
+            leading=12,
+            textColor=colors.HexColor('#0F172A'),
+            spaceAfter=3,
+            spaceBefore=6
+        )
+
+        def fmt_dt(dt_val):
+            if not dt_val:
+                return '—'
+            try:
+                return dt_val.strftime('%d-%b-%Y %I:%M %p')
+            except Exception:
+                return str(dt_val).split('T')[0]
+
+        def fmt_d(d_val):
+            if not d_val:
+                return '—'
+            try:
+                return d_val.strftime('%d-%b-%Y')
+            except Exception:
+                return str(d_val)
+
+        story = []
+
+        if is_single_asset and len(assets_list) == 1:
+            asset = assets_list[0]
+            doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
+            page_w = 545.27
+
+            # 1. College Header
+            header_table = build_standard_college_header(college_header_obj, page_w=page_w, logo_size=55)
+            if header_table:
+                story.append(header_table)
+                story.append(Spacer(1, 6))
+
+            # 2. Report Title
+            story.append(build_centered_report_title("ASSET CUSTODY & TRACKING AUDIT REPORT", font_size=12, leading=15))
+            story.append(Spacer(1, 6))
+
+            # 3. Asset Specification Card
+            spec_data = [
+                [
+                    Paragraph("<b>Asset Code:</b>", tb_bold),
+                    Paragraph(str(asset.asset_code), tb_bold),
+                    Paragraph("<b>Asset Name:</b>", tb_bold),
+                    Paragraph(str(asset.asset_name), tb_cell),
+                ],
+                [
+                    Paragraph("<b>Category:</b>", tb_bold),
+                    Paragraph(str(asset.category.name if asset.category else '—'), tb_cell),
+                    Paragraph("<b>Brand & Model:</b>", tb_bold),
+                    Paragraph(f"{asset.brand or '—'} {asset.model_number or ''}".strip(), tb_cell),
+                ],
+                [
+                    Paragraph("<b>Serial Number:</b>", tb_bold),
+                    Paragraph(str(asset.serial_number or '—'), tb_cell),
+                    Paragraph("<b>Condition:</b>", tb_bold),
+                    Paragraph(str(asset.get_condition_display()), tb_cell),
+                ],
+                [
+                    Paragraph("<b>Purchase Date:</b>", tb_bold),
+                    Paragraph(fmt_d(asset.purchase_date), tb_cell),
+                    Paragraph("<b>Purchase Price:</b>", tb_bold),
+                    Paragraph(f"₹{asset.purchase_price:,.2f}" if asset.purchase_price else "—", tb_cell),
+                ],
+                [
+                    Paragraph("<b>Vendor / Supplier:</b>", tb_bold),
+                    Paragraph(str(asset.vendor_name or '—'), tb_cell),
+                    Paragraph("<b>Current Status:</b>", tb_bold),
+                    Paragraph(f"<b>{asset.get_status_display().upper()}</b>", tb_bold),
+                ],
+            ]
+            spec_table = Table(spec_data, colWidths=[95, 175, 100, 175])
+            spec_table.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F8FAFC')),
+                ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#F8FAFC')),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+            ]))
+            story.append(spec_table)
+            story.append(Spacer(1, 8))
+
+            # 4. Current Custodian Card (Highlight)
+            all_allocs = list(asset.allocations.all())
+            current_alloc = next((a for a in all_allocs if a.is_current), None)
+
+            story.append(Paragraph("<b>CURRENT CUSTODIAN & LOCATION</b>", sec_heading))
+            if current_alloc:
+                u = current_alloc.assigned_to
+                u_name = (u.name or u.username) if u else 'Unspecified'
+                r_name = f" ({u.role.role_name})" if u and u.role else ""
+                d = current_alloc.department
+                d_name = d.department_name if d else '—'
+                loc = current_alloc.location or '—'
+                holding_since = fmt_dt(current_alloc.assigned_date)
+                rem = current_alloc.remarks or 'Allocated for official institutional use'
+
+                custody_data = [
+                    [
+                        Paragraph("<b>Current Holder:</b>", tb_bold),
+                        Paragraph(f"<b>{u_name}</b>{r_name}", tb_cell),
+                        Paragraph("<b>Holding Since:</b>", tb_bold),
+                        Paragraph(holding_since, tb_cell),
+                    ],
+                    [
+                        Paragraph("<b>Department:</b>", tb_bold),
+                        Paragraph(d_name, tb_cell),
+                        Paragraph("<b>Physical Location:</b>", tb_bold),
+                        Paragraph(loc, tb_cell),
+                    ],
+                    [
+                        Paragraph("<b>Allocation Remarks:</b>", tb_bold),
+                        Paragraph(rem, tb_cell),
+                        Paragraph("<b>Status:</b>", tb_bold),
+                        Paragraph("<b>ACTIVE CUSTODIAN</b>", tb_bold),
+                    ]
+                ]
+            else:
+                custody_data = [
+                    [
+                        Paragraph("<b>Current Holder:</b>", tb_bold),
+                        Paragraph("<b>NOT CURRENTLY ASSIGNED</b>", tb_bold),
+                        Paragraph("<b>Storage Location:</b>", tb_bold),
+                        Paragraph("Central Storage / Inventory", tb_cell),
+                    ],
+                    [
+                        Paragraph("<b>Status Note:</b>", tb_bold),
+                        Paragraph(f"Asset is currently {asset.get_status_display().lower()} in inventory repository.", tb_cell),
+                        Paragraph("<b>Availability:</b>", tb_bold),
+                        Paragraph("Available for assignment", tb_cell),
+                    ]
+                ]
+
+            custody_table = Table(custody_data, colWidths=[95, 175, 100, 175])
+            custody_table.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#93C5FD')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#EFF6FF')),
+                ('TOPPADDING', (0, 0), (-1, -1), 3.5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3.5),
+                ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+            ]))
+            story.append(custody_table)
+            story.append(Spacer(1, 8))
+
+            # 5. Asset Transfers & Movements History
+            transfers = list(asset.transfers.all().order_by('-transfer_date'))
+            story.append(Paragraph("<b>ASSET TRACKING & TRANSFER HISTORY (CHAIN OF CUSTODY)</b>", sec_heading))
+            if transfers:
+                tx_rows = [[
+                    Paragraph("<b>#</b>", th_style),
+                    Paragraph("<b>Transfer Date</b>", th_style),
+                    Paragraph("<b>From (Holder & Dept)</b>", th_style),
+                    Paragraph("<b>To (Holder & Dept)</b>", th_style),
+                    Paragraph("<b>Location Shift</b>", th_style),
+                    Paragraph("<b>Remarks / Purpose</b>", th_style),
+                ]]
+                for idx, t in enumerate(transfers, 1):
+                    fu_name = (t.from_user.name or t.from_user.username) if t.from_user else 'None'
+                    fd_name = f" ({t.from_department.department_code or t.from_department.department_name})" if t.from_department else ""
+                    tu_name = (t.to_user.name or t.to_user.username) if t.to_user else 'None'
+                    td_name = f" ({t.to_department.department_code or t.to_department.department_name})" if t.to_department else ""
+                    loc_shift = f"{t.from_location or '—'} → {t.to_location or '—'}"
+
+                    bg_color = colors.HexColor('#F8FAFC') if idx % 2 == 0 else colors.white
+                    tx_rows.append([
+                        Paragraph(str(idx), tb_center),
+                        Paragraph(fmt_dt(t.transfer_date), tb_center),
+                        Paragraph(f"{fu_name}{fd_name}", tb_cell),
+                        Paragraph(f"<b>{tu_name}</b>{td_name}", tb_cell),
+                        Paragraph(loc_shift, tb_cell),
+                        Paragraph(t.remarks or '—', tb_cell),
+                    ])
+                tx_table = Table(tx_rows, colWidths=[20, 75, 125, 125, 100, 100])
+                tx_table.setStyle(TableStyle([
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1E293B')),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                ]))
+                story.append(tx_table)
+            else:
+                no_tx = Table([[Paragraph("<i>No transfer records on file. This asset remains with initial custodian or in central inventory.</i>", tb_cell)]], colWidths=[page_w])
+                no_tx.setStyle(TableStyle([
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+                    ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F8FAFC')),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ]))
+                story.append(no_tx)
+
+            story.append(Spacer(1, 8))
+
+            # 6. Allocation History
+            story.append(Paragraph("<b>ALLOCATION & POSSESSION HISTORY RECORDS</b>", sec_heading))
+            if all_allocs:
+                alloc_rows = [[
+                    Paragraph("<b>#</b>", th_style),
+                    Paragraph("<b>Custodian</b>", th_style),
+                    Paragraph("<b>Department</b>", th_style),
+                    Paragraph("<b>Location</b>", th_style),
+                    Paragraph("<b>Allocated Date</b>", th_style),
+                    Paragraph("<b>Returned Date</b>", th_style),
+                    Paragraph("<b>Status</b>", th_style),
+                ]]
+                for idx, a in enumerate(all_allocs, 1):
+                    au_name = (a.assigned_to.name or a.assigned_to.username) if a.assigned_to else 'Unassigned'
+                    ad_name = a.department.department_name if a.department else '—'
+                    status_text = "CURRENT" if a.is_current else "RETURNED"
+
+                    alloc_rows.append([
+                        Paragraph(str(idx), tb_center),
+                        Paragraph(au_name, tb_cell),
+                        Paragraph(ad_name, tb_cell),
+                        Paragraph(a.location or '—', tb_cell),
+                        Paragraph(fmt_dt(a.assigned_date), tb_center),
+                        Paragraph(fmt_dt(a.returned_date) if a.returned_date else '—', tb_center),
+                        Paragraph(f"<b>{status_text}</b>", tb_center),
+                    ])
+                alloc_table = Table(alloc_rows, colWidths=[20, 105, 115, 95, 75, 75, 60])
+                alloc_table.setStyle(TableStyle([
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#334155')),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                ]))
+                story.append(alloc_table)
+            else:
+                no_alloc = Table([[Paragraph("<i>No allocation records found for this asset.</i>", tb_cell)]], colWidths=[page_w])
+                no_alloc.setStyle(TableStyle([
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+                    ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F8FAFC')),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ]))
+                story.append(no_alloc)
+
+            # 7. Signature Block
+            story.append(Spacer(1, 20))
+            sig_table = Table([
+                [
+                    Paragraph("<b>_____________________________</b><br/>Current Custodian Signature", tb_center),
+                    Paragraph("<b>_____________________________</b><br/>Lab / Dept In-Charge", tb_center),
+                    Paragraph("<b>_____________________________</b><br/>Principal / Approving Authority", tb_center)
+                ]
+            ], colWidths=[180, 185, 180])
+            sig_table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ]))
+            story.append(KeepTogether(sig_table))
+
+            doc.build(story)
+            filename = f"Asset_Tracking_Report_{asset.asset_code}.pdf"
+
+        else:
+            # Overall All-Assets Custody & Tracking Audit Report (Portrait A4)
+            doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
+            page_w = 545.27
+
+            # 1. College Header
+            header_table = build_standard_college_header(college_header_obj, page_w=page_w, logo_size=55)
+            if header_table:
+                story.append(header_table)
+                story.append(Spacer(1, 6))
+
+            # 2. Overall Report Title
+            story.append(build_centered_report_title("OVERALL ASSET CUSTODY & LIFECYCLE TRACKING AUDIT REPORT", font_size=12, leading=15))
+            story.append(Spacer(1, 6))
+
+            # 3. Summary Metadata Bar
+            total_count = len(assets_list)
+            assigned_count = sum(1 for a in assets_list if any(al.is_current for al in a.allocations.all()))
+            available_count = total_count - assigned_count
+            total_transfers = sum(a.transfers.count() for a in assets_list)
+
+            summary_data = [
+                [
+                    Paragraph("<b>Total Assets Tracked:</b>", tb_bold),
+                    Paragraph(str(total_count), tb_cell),
+                    Paragraph("<b>Currently Held:</b>", tb_bold),
+                    Paragraph(str(assigned_count), tb_cell),
+                    Paragraph("<b>In Central Store:</b>", tb_bold),
+                    Paragraph(str(available_count), tb_cell),
+                    Paragraph("<b>Total Transfers:</b>", tb_bold),
+                    Paragraph(str(total_transfers), tb_cell),
+                ]
+            ]
+            summary_table = Table(summary_data, colWidths=[95, 45, 80, 45, 85, 45, 90, 60.27])
+            summary_table.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F8FAFC')),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ]))
+            story.append(summary_table)
+            story.append(Spacer(1, 10))
+
+            # 4. Master Register Overview Table on Page 1
+            story.append(Paragraph("<b>INSTITUTIONAL ASSETS MASTER OVERVIEW REGISTER</b>", sec_heading))
+            overview_rows = [[
+                Paragraph("<b>#</b>", th_style),
+                Paragraph("<b>Asset Code</b>", th_style),
+                Paragraph("<b>Asset Name</b>", th_style),
+                Paragraph("<b>Category</b>", th_style),
+                Paragraph("<b>Current Custodian</b>", th_style),
+                Paragraph("<b>Status</b>", th_style),
+                Paragraph("<b>Transfers</b>", th_style),
+            ]]
+
+            for o_idx, o_a in enumerate(assets_list, 1):
+                o_current_alloc = next((al for al in o_a.allocations.all() if al.is_current), None)
+                if o_current_alloc:
+                    o_u = (o_current_alloc.assigned_to.name or o_current_alloc.assigned_to.username) if o_current_alloc.assigned_to else 'Unspecified'
+                    o_dept = o_current_alloc.department.department_code if (o_current_alloc.department and o_current_alloc.department.department_code) else (o_current_alloc.department.department_name if o_current_alloc.department else '')
+                    o_holder = f"<b>{o_u}</b>" + (f"<br/>{o_dept}" if o_dept else "")
+                else:
+                    o_holder = "<font color='#64748B'><i>Central Storage</i></font>"
+
+                overview_rows.append([
+                    Paragraph(str(o_idx), tb_center),
+                    Paragraph(f"<b>{o_a.asset_code}</b>", tb_center),
+                    Paragraph(str(o_a.asset_name), tb_cell),
+                    Paragraph(str(o_a.category.name if o_a.category else '—'), tb_cell),
+                    Paragraph(o_holder, tb_cell),
+                    Paragraph(f"<b>{o_a.get_status_display()}</b>", tb_center),
+                    Paragraph(str(o_a.transfers.count()), tb_center),
+                ])
+
+            overview_table = Table(overview_rows, colWidths=[20, 75, 120, 85, 135, 60, 50])
+            overview_table.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1E293B')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ]))
+            story.append(overview_table)
+            story.append(PageBreak())
+
+            # 5. Comprehensive Per-Asset Audit Reports (Exact Same Full Data as Separate Report)
+            asset_banner_style = ParagraphStyle(
+                'PDF_AssetBanner',
+                parent=styles['Normal'],
+                fontName='Helvetica-Bold',
+                fontSize=10,
+                leading=13,
+                textColor=colors.white,
+                alignment=TA_LEFT
+            )
+
+            for idx, asset in enumerate(assets_list, 1):
+                asset_story = []
+
+                # Section Banner for this Asset
+                banner_table = Table([
+                    [
+                        Paragraph(f"<b>ASSET #{idx}: &nbsp; {asset.asset_code} — {asset.asset_name}</b>", asset_banner_style),
+                        Paragraph(f"<font color='#E2E8F0'>Status: <b>{asset.get_status_display().upper()}</b></font>", ParagraphStyle('PDF_AB_R', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8.5, leading=11, textColor=colors.white, alignment=TA_RIGHT))
+                    ]
+                ], colWidths=[385, 160.27])
+                banner_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#1E293B')),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 4),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                ]))
+                asset_story.append(banner_table)
+                asset_story.append(Spacer(1, 6))
+
+                # 5a. Asset Specification Card
+                spec_data = [
+                    [
+                        Paragraph("<b>Asset Code:</b>", tb_bold),
+                        Paragraph(str(asset.asset_code), tb_bold),
+                        Paragraph("<b>Asset Name:</b>", tb_bold),
+                        Paragraph(str(asset.asset_name), tb_cell),
+                    ],
+                    [
+                        Paragraph("<b>Category:</b>", tb_bold),
+                        Paragraph(str(asset.category.name if asset.category else '—'), tb_cell),
+                        Paragraph("<b>Brand & Model:</b>", tb_bold),
+                        Paragraph(f"{asset.brand or '—'} {asset.model_number or ''}".strip(), tb_cell),
+                    ],
+                    [
+                        Paragraph("<b>Serial Number:</b>", tb_bold),
+                        Paragraph(str(asset.serial_number or '—'), tb_cell),
+                        Paragraph("<b>Condition:</b>", tb_bold),
+                        Paragraph(str(asset.get_condition_display()), tb_cell),
+                    ],
+                    [
+                        Paragraph("<b>Purchase Date:</b>", tb_bold),
+                        Paragraph(fmt_d(asset.purchase_date), tb_cell),
+                        Paragraph("<b>Purchase Price:</b>", tb_bold),
+                        Paragraph(f"₹{asset.purchase_price:,.2f}" if asset.purchase_price else "—", tb_cell),
+                    ],
+                    [
+                        Paragraph("<b>Vendor / Supplier:</b>", tb_bold),
+                        Paragraph(str(asset.vendor_name or '—'), tb_cell),
+                        Paragraph("<b>Current Status:</b>", tb_bold),
+                        Paragraph(f"<b>{asset.get_status_display().upper()}</b>", tb_bold),
+                    ],
+                ]
+                spec_table = Table(spec_data, colWidths=[95, 175, 100, 175])
+                spec_table.setStyle(TableStyle([
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F8FAFC')),
+                    ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#F8FAFC')),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+                ]))
+                asset_story.append(spec_table)
+                asset_story.append(Spacer(1, 6))
+
+                # 5b. Current Custodian Card (Highlight)
+                all_allocs = list(asset.allocations.all())
+                current_alloc = next((a for a in all_allocs if a.is_current), None)
+
+                asset_story.append(Paragraph("<b>CURRENT CUSTODIAN & LOCATION</b>", sec_heading))
+                if current_alloc:
+                    u = current_alloc.assigned_to
+                    u_name = (u.name or u.username) if u else 'Unspecified'
+                    r_name = f" ({u.role.role_name})" if u and u.role else ""
+                    d = current_alloc.department
+                    d_name = d.department_name if d else '—'
+                    loc = current_alloc.location or '—'
+                    holding_since = fmt_dt(current_alloc.assigned_date)
+                    rem = current_alloc.remarks or 'Allocated for official institutional use'
+
+                    custody_data = [
+                        [
+                            Paragraph("<b>Current Holder:</b>", tb_bold),
+                            Paragraph(f"<b>{u_name}</b>{r_name}", tb_cell),
+                            Paragraph("<b>Holding Since:</b>", tb_bold),
+                            Paragraph(holding_since, tb_cell),
+                        ],
+                        [
+                            Paragraph("<b>Department:</b>", tb_bold),
+                            Paragraph(d_name, tb_cell),
+                            Paragraph("<b>Physical Location:</b>", tb_bold),
+                            Paragraph(loc, tb_cell),
+                        ],
+                        [
+                            Paragraph("<b>Allocation Remarks:</b>", tb_bold),
+                            Paragraph(rem, tb_cell),
+                            Paragraph("<b>Status:</b>", tb_bold),
+                            Paragraph("<b>ACTIVE CUSTODIAN</b>", tb_bold),
+                        ]
+                    ]
+                else:
+                    custody_data = [
+                        [
+                            Paragraph("<b>Current Holder:</b>", tb_bold),
+                            Paragraph("<b>NOT CURRENTLY ASSIGNED</b>", tb_bold),
+                            Paragraph("<b>Storage Location:</b>", tb_bold),
+                            Paragraph("Central Storage / Inventory", tb_cell),
+                        ],
+                        [
+                            Paragraph("<b>Status Note:</b>", tb_bold),
+                            Paragraph(f"Asset is currently {asset.get_status_display().lower()} in inventory repository.", tb_cell),
+                            Paragraph("<b>Availability:</b>", tb_bold),
+                            Paragraph("Available for assignment", tb_cell),
+                        ]
+                    ]
+
+                custody_table = Table(custody_data, colWidths=[95, 175, 100, 175])
+                custody_table.setStyle(TableStyle([
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#93C5FD')),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#EFF6FF')),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+                ]))
+                asset_story.append(custody_table)
+                asset_story.append(Spacer(1, 6))
+
+                # 5c. Asset Transfers & Movements History (Chain of Custody)
+                transfers = list(asset.transfers.all().order_by('-transfer_date'))
+                asset_story.append(Paragraph("<b>ASSET TRACKING & TRANSFER HISTORY (CHAIN OF CUSTODY)</b>", sec_heading))
+                if transfers:
+                    tx_rows = [[
+                        Paragraph("<b>#</b>", th_style),
+                        Paragraph("<b>Transfer Date</b>", th_style),
+                        Paragraph("<b>From (Holder & Dept)</b>", th_style),
+                        Paragraph("<b>To (Holder & Dept)</b>", th_style),
+                        Paragraph("<b>Location Shift</b>", th_style),
+                        Paragraph("<b>Remarks / Purpose</b>", th_style),
+                    ]]
+                    for t_i, t in enumerate(transfers, 1):
+                        fu_name = (t.from_user.name or t.from_user.username) if t.from_user else 'None'
+                        fd_name = f" ({t.from_department.department_code or t.from_department.department_name})" if t.from_department else ""
+                        tu_name = (t.to_user.name or t.to_user.username) if t.to_user else 'None'
+                        td_name = f" ({t.to_department.department_code or t.to_department.department_name})" if t.to_department else ""
+                        loc_shift = f"{t.from_location or '—'} → {t.to_location or '—'}"
+
+                        tx_rows.append([
+                            Paragraph(str(t_i), tb_center),
+                            Paragraph(fmt_dt(t.transfer_date), tb_center),
+                            Paragraph(f"{fu_name}{fd_name}", tb_cell),
+                            Paragraph(f"<b>{tu_name}</b>{td_name}", tb_cell),
+                            Paragraph(loc_shift, tb_cell),
+                            Paragraph(t.remarks or '—', tb_cell),
+                        ])
+                    tx_table = Table(tx_rows, colWidths=[20, 75, 125, 125, 100, 100])
+                    tx_table.setStyle(TableStyle([
+                        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1E293B')),
+                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                        ('TOPPADDING', (0, 0), (-1, -1), 2.5),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
+                        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                    ]))
+                    asset_story.append(tx_table)
+                else:
+                    no_tx = Table([[Paragraph("<i>No transfer records on file. This asset remains with initial custodian or in central inventory.</i>", tb_cell)]], colWidths=[page_w])
+                    no_tx.setStyle(TableStyle([
+                        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+                        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F8FAFC')),
+                        ('TOPPADDING', (0, 0), (-1, -1), 4),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                        ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                    ]))
+                    asset_story.append(no_tx)
+
+                asset_story.append(Spacer(1, 6))
+
+                # 5d. Allocation History
+                asset_story.append(Paragraph("<b>ALLOCATION & POSSESSION HISTORY RECORDS</b>", sec_heading))
+                if all_allocs:
+                    alloc_rows = [[
+                        Paragraph("<b>#</b>", th_style),
+                        Paragraph("<b>Custodian</b>", th_style),
+                        Paragraph("<b>Department</b>", th_style),
+                        Paragraph("<b>Location</b>", th_style),
+                        Paragraph("<b>Allocated Date</b>", th_style),
+                        Paragraph("<b>Returned Date</b>", th_style),
+                        Paragraph("<b>Status</b>", th_style),
+                    ]]
+                    for al_i, al in enumerate(all_allocs, 1):
+                        au_name = (al.assigned_to.name or al.assigned_to.username) if al.assigned_to else 'Unassigned'
+                        ad_name = al.department.department_name if al.department else '—'
+                        status_text = "CURRENT" if al.is_current else "RETURNED"
+
+                        alloc_rows.append([
+                            Paragraph(str(al_i), tb_center),
+                            Paragraph(au_name, tb_cell),
+                            Paragraph(ad_name, tb_cell),
+                            Paragraph(al.location or '—', tb_cell),
+                            Paragraph(fmt_dt(al.assigned_date), tb_center),
+                            Paragraph(fmt_dt(al.returned_date) if al.returned_date else '—', tb_center),
+                            Paragraph(f"<b>{status_text}</b>", tb_center),
+                        ])
+                    alloc_table = Table(alloc_rows, colWidths=[20, 105, 115, 95, 75, 75, 60])
+                    alloc_table.setStyle(TableStyle([
+                        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#334155')),
+                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                        ('TOPPADDING', (0, 0), (-1, -1), 2.5),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
+                        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                    ]))
+                    asset_story.append(alloc_table)
+                else:
+                    no_alloc = Table([[Paragraph("<i>No allocation records found for this asset.</i>", tb_cell)]], colWidths=[page_w])
+                    no_alloc.setStyle(TableStyle([
+                        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+                        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F8FAFC')),
+                        ('TOPPADDING', (0, 0), (-1, -1), 4),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                        ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                    ]))
+                    asset_story.append(no_alloc)
+
+                asset_story.append(Spacer(1, 8))
+
+                # Verification Line for this asset
+                v_table = Table([
+                    [
+                        Paragraph(f"<b>Audit Verified for {asset.asset_code}</b>", ParagraphStyle('PDF_V1', parent=styles['Normal'], fontSize=7.5, leading=9, textColor=colors.HexColor('#64748B'))),
+                        Paragraph(f"Generated: {timezone.now().strftime('%d-%b-%Y %I:%M %p')}", ParagraphStyle('PDF_V2', parent=styles['Normal'], fontSize=7.5, leading=9, textColor=colors.HexColor('#64748B'), alignment=TA_RIGHT))
+                    ]
+                ], colWidths=[270, 275.27])
+                v_table.setStyle(TableStyle([
+                    ('LINEABOVE', (0, 0), (-1, -1), 0.5, colors.HexColor('#E2E8F0')),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ]))
+                asset_story.append(v_table)
+
+                # Append asset story to main story
+                story.extend(asset_story)
+
+                # Page break between assets so each asset is cleanly presented on A4
+                if idx < len(assets_list):
+                    story.append(PageBreak())
+
+            # 6. Overall Report Signature Block
+            story.append(Spacer(1, 15))
+            sig_table = Table([
+                [
+                    Paragraph("<b>_____________________________</b><br/>Asset Officer Signature", tb_center),
+                    Paragraph("<b>_____________________________</b><br/>Accounts / Store Superintendent", tb_center),
+                    Paragraph("<b>_____________________________</b><br/>Principal / Authorized Officer", tb_center)
+                ]
+            ], colWidths=[180, 185, 180])
+            sig_table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ]))
+            story.append(KeepTogether(sig_table))
+
+            doc.build(story)
+            filename = f"Overall_Asset_Tracking_Report_{timezone.now().strftime('%Y%m%d')}.pdf"
+
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        response['Access-Control-Expose-Headers'] = 'Content-Disposition'
+        return response
 
 
 class AssetAllocationViewSet(viewsets.ModelViewSet):
