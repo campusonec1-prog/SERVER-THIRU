@@ -22,12 +22,21 @@ class CustomJWTAuthentication(JWTAuthentication):
             return None
 
     def get_user(self, validated_token):
+        from django.core.cache import cache
         try:
             user_id = validated_token['user_id']
             if validated_token.get('user_type') == 'candidate':
                 from dynamic_forms.models import ApplicationUser
                 return ApplicationUser.objects.get(id=user_id)
-            return User.objects.select_related('role').get(id=user_id)
+
+            cache_key = f'jwt_auth_user_{user_id}'
+            cached_user = cache.get(cache_key)
+            if cached_user is not None:
+                return cached_user
+
+            user = User.objects.select_related('role').get(id=user_id)
+            cache.set(cache_key, user, timeout=60)
+            return user
         except User.DoesNotExist:
             raise AuthenticationFailed('User not found', code='user_not_found')
         except Exception:
