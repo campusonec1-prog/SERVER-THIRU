@@ -1055,6 +1055,21 @@ class StudentViewSet(viewsets.ModelViewSet):
 
         data = request.data
         user = self.request.user if self.request.user and self.request.user.is_authenticated else None
+        if not user:
+            return Response({"code": 401, "message": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        user_role = getattr(user, 'role', None)
+        can_edit = (
+            getattr(user, 'is_superuser', False) or
+            getattr(user, 'is_staff', False) or
+            bool(getattr(user_role, 'can_edit_student_profile', False))
+        )
+        if not can_edit:
+            return Response({
+                "code": 403,
+                "message": "Your role does not have permission to edit student profiles. Please contact an Administrator or Tech Supporter."
+            }, status=status.HTTP_403_FORBIDDEN)
+
         from users.models import User as StandardUser
         tracking_user = user if isinstance(user, StandardUser) else None
 

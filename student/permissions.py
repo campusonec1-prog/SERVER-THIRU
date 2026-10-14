@@ -10,6 +10,27 @@ class StudentPermission(BaseRolePermission):
     read_roles = ['authenticated']
     write_roles = ['admin', 'administrator', 'office', 'manager', 'tech_supporter', 'administration_officer', 'administrative_officer', 'principal', 'vice_principal', 'hod', 'admissions_officer']
 
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return bool(request.user and request.user.is_authenticated)
+
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        if getattr(request.user, 'is_superuser', False) or getattr(request.user, 'is_staff', False):
+            return True
+
+        user_role = getattr(request.user, 'role', None)
+        if not user_role:
+            return False
+
+        if hasattr(user_role, 'can_edit_student_profile'):
+            return bool(user_role.can_edit_student_profile)
+
+        user_role_name = getattr(user_role, 'role_name', '').upper().replace(' ', '_')
+        norm_write = [r.upper().replace(' ', '_') for r in self.write_roles]
+        return user_role_name in norm_write
+
 
 class MarksPermission(BaseRolePermission):
     read_roles = ['authenticated']

@@ -6,7 +6,7 @@ class RoleSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = Role
         fields = [
-            'role_id', 'role_name',
+            'role_id', 'role_name', 'can_edit_student_profile',
             'created_at', 'updated_at', 'created_by', 'updated_by',
             'created_by_name', 'created_by_username', 'created_by_role',
             'updated_by_name', 'updated_by_username', 'updated_by_role',
