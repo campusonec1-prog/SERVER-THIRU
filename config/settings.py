@@ -179,9 +179,19 @@ STORAGES = {
 }
 
 # CORS Configuration
-CORS_ALLOWED_ORIGINS = [
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:3000",
+    "https://localhost",
+    "capacitor://localhost",
+    "http://localhost",
+]
+env_origins = [
     origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "").split(",") if origin.strip()
 ]
+CORS_ALLOWED_ORIGINS = list(dict.fromkeys(DEFAULT_CORS_ORIGINS + env_origins))
+CORS_ALLOW_CREDENTIALS = True
 
 
 # REST Framework configuration

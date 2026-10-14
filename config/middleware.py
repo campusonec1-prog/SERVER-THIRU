@@ -9,7 +9,9 @@ class CorsBlockMiddleware:
         origin = request.META.get('HTTP_ORIGIN')
         if origin:
             allowed_origins = getattr(settings, 'CORS_ALLOWED_ORIGINS', [])
-            if origin not in allowed_origins:
+            clean_origin = origin.strip().rstrip('/')
+            clean_allowed = [o.strip().rstrip('/') for o in allowed_origins if o]
+            if clean_origin not in clean_allowed:
                 return JsonResponse({'message': 'access denied'}, status=403)
         return self.get_response(request)
 
