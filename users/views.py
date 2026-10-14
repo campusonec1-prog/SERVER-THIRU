@@ -324,6 +324,40 @@ class UserViewSet(viewsets.ModelViewSet):
                         'user_image': getattr(hod_detail, 'user_image', '') if hod_detail else '',
                     })
 
+            # 6. Library Books catalog count (strictly ACTIVE records)
+            from library.models import LibraryBook
+            total_library_books = LibraryBook.objects.filter(is_active=True).count()
+
+            # 7. Academic Cohort / Batch Distribution (for ACTIVE students)
+            cohort_data = list(active_students_qs.values('batch__batch').annotate(count=Count('id')).order_by('-count'))
+            cohort_distribution = [
+                {
+                    'batch': c['batch__batch'] or 'Unassigned',
+                    'count': c['count'],
+                    'percentage': round(c['count'] / total_students * 100, 1) if total_students else 0
+                }
+                for c in cohort_data
+            ]
+
+            # 8. Program Level Distribution (UG vs PG for ACTIVE students)
+            program_data = list(
+                active_students_qs.values(
+                    'department__program__program_name',
+                    'department__program__program_level'
+                ).annotate(count=Count('id')).order_by('-count')
+            )
+            program_distribution = [
+                {
+                    'program_name': p['department__program__program_name'] or 'General',
+                    'program_level': p['department__program__program_level'] or 'UG',
+                    'count': p['count'],
+                    'percentage': round(p['count'] / total_students * 100, 1) if total_students else 0
+                }
+                for p in program_data
+            ]
+            ug_count = sum(p['count'] for p in program_distribution if p['program_level'] == 'UG')
+            pg_count = sum(p['count'] for p in program_distribution if p['program_level'] == 'PG')
+
             # Department student distribution sorted by student count descending
             dept_distribution = sorted(
                 [
@@ -356,9 +390,14 @@ class UserViewSet(viewsets.ModelViewSet):
                         "total_active_batches": total_active_batches,
                         "total_active_sections": total_active_sections,
                         "student_faculty_ratio": f"{round(total_students / teaching_faculty_count, 1)}:1" if teaching_faculty_count else "0:1",
+                        "total_library_books": total_library_books,
+                        "total_ug_students": ug_count,
+                        "total_pg_students": pg_count,
                     },
                     "departments": departments_list,
                     "dept_distribution": dept_distribution,
+                    "cohort_distribution": cohort_distribution,
+                    "program_distribution": program_distribution,
                     "faculty_roles_breakdown": roles_list,
                     "faculty_designation_breakdown": designations_list,
                     "hods_list": hods_list,
