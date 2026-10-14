@@ -10,6 +10,12 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 django.setup()
 
 from django.conf import settings
+# Allow test client host and bypass redirect during local benchmark
+if 'testserver' not in settings.ALLOWED_HOSTS:
+    settings.ALLOWED_HOSTS.append('testserver')
+if '*' not in settings.ALLOWED_HOSTS:
+    settings.ALLOWED_HOSTS.append('*')
+
 from users.models import User
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.test import APIClient
@@ -47,7 +53,7 @@ def run_api_call(idx):
     client.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
     t_start = time.time()
     try:
-        response = client.get('/api/users/online-users')
+        response = client.get('/api/users/online-users', secure=True)
         latency = time.time() - t_start
         return (response.status_code == 200, latency, response.status_code)
     except Exception as e:
@@ -82,20 +88,20 @@ print(f"\n[Test 2] Running 500 Indexed Catalog Searches across {CONCURRENCY} con
 print("Endpoint: /api/library/books/quick-search?search=engineering&limit=30")
 
 def run_catalog_call(idx):
-    from django.db import close_old_connections
-    close_old_connections()
+    from django.db import connections
+    connections.close_all()
     client = APIClient()
     client.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
     t_start = time.time()
     try:
-        response = client.get('/api/library/books/quick-search', {'search': 'engineering', 'limit': 30})
+        response = client.get('/api/library/books/quick-search', {'search': 'engineering', 'limit': 30}, secure=True)
         latency = time.time() - t_start
         return (response.status_code == 200, latency, response.status_code)
     except Exception as e:
         latency = time.time() - t_start
         return (False, latency, str(e))
     finally:
-        close_old_connections()
+        connections.close_all()
 
 t_bench_start = time.time()
 with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENCY) as executor:
