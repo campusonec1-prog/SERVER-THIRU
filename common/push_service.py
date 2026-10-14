@@ -27,6 +27,17 @@ def get_firebase_app():
             _firebase_app = firebase_admin.get_app()
             return _firebase_app
 
+        # 1. Option: Credentials passed directly via environment variable JSON string (cloud/PaaS/Docker)
+        raw_json = getattr(settings, 'FIREBASE_CREDENTIALS_JSON', None) or os.environ.get('FIREBASE_CREDENTIALS_JSON')
+        if raw_json:
+            import json
+            cred_dict = json.loads(raw_json) if isinstance(raw_json, str) else raw_json
+            cred = credentials.Certificate(cred_dict)
+            _firebase_app = firebase_admin.initialize_app(cred)
+            logger.info("[FCM] Firebase Admin SDK initialized from FIREBASE_CREDENTIALS_JSON environment variable.")
+            return _firebase_app
+
+        # 2. Option: Credentials file path (VPS / dedicated server / local file)
         cred_path = getattr(settings, 'FIREBASE_SERVICE_ACCOUNT_PATH', None)
         if not cred_path:
             cred_path = os.environ.get('FIREBASE_CREDENTIALS')
@@ -41,7 +52,7 @@ def get_firebase_app():
             logger.info(f"[FCM] Firebase Admin SDK initialized with credentials from: {cred_path}")
             return _firebase_app
         else:
-            logger.warning("[FCM] No firebase-service-account.json found. Push notifications will run in mock/log mode.")
+            logger.warning("[FCM] No firebase-service-account.json or credentials found. Push notifications will run in mock/log mode.")
             return None
     except Exception as e:
         logger.error(f"[FCM] Error initializing Firebase Admin: {e}")
