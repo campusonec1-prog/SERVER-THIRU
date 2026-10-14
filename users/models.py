@@ -82,3 +82,25 @@ class UserDetails(TrackingModel):
     def __str__(self):
         return f"{self.user.name} - {self.faculty_code}"
 
+
+class DeviceToken(TrackingModel):
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        db_column='user_id',
+        related_name='device_tokens'
+    )
+    token = models.CharField(max_length=500, db_index=True)
+    device_type = models.CharField(max_length=20, default='android')
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'device_tokens'
+        unique_together = ('user', 'token')
+        indexes = [
+            models.Index(fields=['user', 'is_active']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} ({self.device_type}) - {self.token[:20]}..."
+

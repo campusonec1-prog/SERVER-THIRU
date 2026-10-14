@@ -49,6 +49,7 @@ staticfiles/
 .env
 .env.*
 !.env.example
+firebase-service-account.json
 
 # IDE & OS files
 .vscode/*

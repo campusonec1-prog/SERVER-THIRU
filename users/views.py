@@ -1350,3 +1350,33 @@ class UserDetailsViewSet(viewsets.ModelViewSet):
         return super().handle_exception(exc)
 
 
+class DeviceTokenView(APIView):
+    """
+    Registers or unregisters a mobile device push notification token.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        token = request.data.get('token')
+        device_type = request.data.get('device_type', 'android')
+        if not token:
+            return Response({'code': 400, 'message': 'Device token is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from common.push_service import register_device
+        device = register_device(request.user, token, device_type)
+        return Response({
+            'code': 200,
+            'message': 'Device registered for push notifications successfully.',
+            'data': {'id': device.id, 'device_type': device.device_type}
+        }, status=status.HTTP_200_OK)
+
+    def delete(self, request):
+        token = request.data.get('token')
+        from common.push_service import unregister_device
+        unregister_device(request.user, token)
+        return Response({
+            'code': 200,
+            'message': 'Device unregistered successfully.'
+        }, status=status.HTTP_200_OK)
+
+

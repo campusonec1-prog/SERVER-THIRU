@@ -82,6 +82,15 @@ def broadcast_post_save(sender, instance, created, **kwargs):
 
     transaction.on_commit(lambda: _send_realtime_broadcast(data))
 
+    # Dispatch native mobile push notification for inbox notifications (Leave, Substitutions, etc.)
+    if model_name == 'Notification' and created:
+        try:
+            from common.push_service import send_push_notification_for_inbox_notification
+            transaction.on_commit(lambda: send_push_notification_for_inbox_notification(instance))
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"[PushNotification Trigger Error] {e}")
+
 
 @receiver(post_delete)
 def broadcast_post_delete(sender, instance, **kwargs):
