@@ -30,6 +30,25 @@ def _send_realtime_broadcast(data):
         pass
 
 
+def send_targeted_broadcast(group_name, data):
+    """
+    Sends WebSocket message to a targeted room (e.g. 'user_12', 'task_123', 'dept_3', or 'role_admin').
+    """
+    try:
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            event_type = 'task_progress' if data.get('type') in ('import_progress', 'sms_progress') else 'broadcast_update'
+            async_to_sync(channel_layer.group_send)(
+                group_name,
+                {
+                    'type': event_type,
+                    'data': data
+                }
+            )
+    except Exception:
+        pass
+
+
 @receiver(post_save)
 def broadcast_post_save(sender, instance, created, **kwargs):
     # Skip django internal models, sessions, contenttypes, authtoken

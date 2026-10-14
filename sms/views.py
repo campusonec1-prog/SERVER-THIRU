@@ -9,6 +9,7 @@ from rest_framework.viewsets import ReadOnlyModelViewSet
 
 from student.models import Student, StudentAttendance, FacultyActivity
 from users.models import User as StandardUser
+from common.signals import send_targeted_broadcast
 from .models import SMSLog
 from .serializers import (
     SMSLogSerializer,
@@ -239,8 +240,10 @@ class SendFullDayAbsentSMSView(APIView):
         results = []
         success_count = 0
         failed_count = 0
+        task_id = request.data.get('task_id')
+        total_count = len(students)
 
-        for student in students:
+        for idx, student in enumerate(students, start=1):
             # Check if SMS is already sent and locked for this student on this date
             if SMSLog.objects.filter(student=student, sent_date=target_date, sms_type='FULL_DAY_ABSENT', status='SUCCESS').exists():
                 results.append({
@@ -271,6 +274,18 @@ class SendFullDayAbsentSMSView(APIView):
                     'student_name': student.name,
                     'status': 'FAILED',
                     'error': str(e)
+                })
+
+            if task_id and (idx % 2 == 0 or idx == total_count):
+                send_targeted_broadcast(f'task_{task_id}', {
+                    'type': 'sms_progress',
+                    'task_id': task_id,
+                    'progress': round((idx / total_count) * 100) if total_count else 100,
+                    'processed': idx,
+                    'total': total_count,
+                    'success': success_count,
+                    'failed': failed_count,
+                    'status': f'Sending {idx} of {total_count} absentee alerts...'
                 })
 
         already_sent_count = sum(1 for r in results if r['status'] == 'ALREADY_SENT')
@@ -799,10 +814,12 @@ class SendFeesPendingSMSView(APIView):
         success_count = 0
         failed_count = 0
         already_sent_count = 0
+        task_id = request.data.get('task_id')
+        total_students = len(students_qs)
 
         today = datetime.date.today()
 
-        for student in students_qs:
+        for idx, student in enumerate(students_qs, start=1):
             bal_amt = target_student_map.get(student.id, 0.0) or 0.0
 
             if not force and SMSLog.objects.filter(student=student, sent_date=today, sms_type='FEES_PENDING', status='SUCCESS').exists():
@@ -838,6 +855,19 @@ class SendFeesPendingSMSView(APIView):
                     'amount': bal_amt,
                     'status': 'FAILED',
                     'error': str(e)
+                })
+
+            if task_id and (idx % 2 == 0 or idx == total_students):
+                send_targeted_broadcast(f'task_{task_id}', {
+                    'type': 'sms_progress',
+                    'task_id': task_id,
+                    'progress': round((idx / total_students) * 100) if total_students else 100,
+                    'processed': idx,
+                    'total': total_students,
+                    'success': success_count,
+                    'failed': failed_count,
+                    'already_sent': already_sent_count,
+                    'status': f'Sent {idx} of {total_students} fees alerts...'
                 })
 
         return Response({

@@ -10,6 +10,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from student.models import Student
+from common.signals import send_targeted_broadcast
 from .permissions import LibraryPermission
 
 from .models import LibraryBook, LibraryMember, LibraryTransaction
@@ -159,6 +160,19 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
 
         if not books_data:
             return Response({'code': 400, 'message': 'No book data provided.'}, status=400)
+
+        task_id = request.data.get('task_id') if isinstance(request.data, dict) else None
+        total_rows = len(books_data)
+
+        if task_id:
+            send_targeted_broadcast(f'task_{task_id}', {
+                'type': 'import_progress',
+                'task_id': task_id,
+                'progress': 10,
+                'processed': 0,
+                'total': total_rows,
+                'status': 'Validating book records...'
+            })
 
         errors = []
         validated_books = []
@@ -374,11 +388,33 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
                     existing_by_acc_no[acc_key] = new_book
 
         # Execute high-speed chunked database transactions
+        if task_id:
+            send_targeted_broadcast(f'task_{task_id}', {
+                'type': 'import_progress',
+                'task_id': task_id,
+                'progress': 75,
+                'processed': len(validated_books),
+                'total': total_rows,
+                'status': 'Saving book records to database...'
+            })
+
         with transaction.atomic():
             if books_to_update:
                 LibraryBook.objects.bulk_update(books_to_update, fields=updatable_fields, batch_size=2000)
             if books_to_create:
                 LibraryBook.objects.bulk_create(books_to_create, batch_size=2000)
+
+        if task_id:
+            send_targeted_broadcast(f'task_{task_id}', {
+                'type': 'import_progress',
+                'task_id': task_id,
+                'progress': 100,
+                'processed': total_rows,
+                'total': total_rows,
+                'created': len(books_to_create),
+                'updated': len(books_to_update),
+                'status': 'Completed successfully!'
+            })
 
         return self._success('Books imported successfully', {
             'count': len(books_to_create) + len(books_to_update),
