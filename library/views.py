@@ -15,7 +15,9 @@ from .permissions import LibraryPermission
 from .models import LibraryBook, LibraryMember, LibraryTransaction
 from .serializers import (
     LibraryBookSerializer,
+    LibraryBookQuickSerializer,
     LibraryMemberSerializer,
+    LibraryMemberQuickSerializer,
     LibraryTransactionSerializer,
     StudentLookupSerializer,
 )
@@ -71,6 +73,78 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         response = super().create(request, *args, **kwargs)
         return self._success('Book added successfully', response.data, status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='barcode-lookup')
+    def barcode_lookup(self, request):
+        barcode = (
+            request.query_params.get('barcode')
+            or request.query_params.get('acc_no')
+            or request.query_params.get('q')
+            or ''
+        ).strip()
+        if not barcode:
+            return Response({'code': 400, 'message': 'Barcode / Accession number parameter is required.'}, status=400)
+
+        # 1. Exact match on acc_no
+        book = LibraryBook.objects.filter(acc_no__iexact=barcode).first()
+
+        # 2. Match on isbn
+        if not book:
+            book = LibraryBook.objects.filter(isbn__iexact=barcode).first()
+
+        # 3. Match numeric ID
+        if not book and barcode.isdigit():
+            book = LibraryBook.objects.filter(id=int(barcode)).first()
+
+        # 4. Match call_no
+        if not book:
+            book = LibraryBook.objects.filter(call_no__iexact=barcode).first()
+
+        if not book:
+            return Response({'code': 404, 'message': f'No book found matching barcode "{barcode}".'}, status=404)
+
+        data = LibraryBookSerializer(book, context={'request': request}).data
+
+        # Check for active loan on this book
+        active_loan = LibraryTransaction.objects.filter(book=book, returned_on__isnull=True).select_related(
+            'book', 'member__student__application', 'member__student__application__candidate', 'member__student__department'
+        ).first()
+
+        if active_loan:
+            data['active_loan'] = LibraryTransactionSerializer(active_loan, context={'request': request}).data
+            data['has_active_loan'] = True
+        else:
+            data['active_loan'] = None
+            data['has_active_loan'] = False
+
+        return self._success('Book found successfully', data)
+
+    @action(detail=False, methods=['get'], url_path='quick-search')
+    def quick_search(self, request):
+        query = (request.query_params.get('search') or request.query_params.get('query') or request.query_params.get('q') or '').strip()
+        limit = min(int(request.query_params.get('limit', 25)), 100)
+        only_available = request.query_params.get('only_available') in ('true', '1')
+
+        qs = LibraryBook.objects.filter(is_active=True)
+        if only_available:
+            qs = qs.filter(available_copies__gt=0)
+
+        if query:
+            qs = qs.filter(
+                Q(acc_no__icontains=query)
+                | Q(title__icontains=query)
+                | Q(author__icontains=query)
+                | Q(isbn__icontains=query)
+                | Q(call_no__icontains=query)
+            )
+
+        results = qs.only(
+            'id', 'title', 'author', 'acc_no', 'call_no', 'isbn',
+            'status', 'total_copies', 'available_copies', 'shelf_location', 'department', 'is_active'
+        ).order_by('title')[:limit]
+
+        data = LibraryBookQuickSerializer(results, many=True).data
+        return self._success('Books searched successfully', data)
 
     @action(detail=False, methods=['post'], url_path='bulk-import')
     def bulk_import(self, request):
@@ -363,6 +437,48 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         response = super().create(request, *args, **kwargs)
         return self._success('Library member added successfully', response.data, status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=['get'], url_path='barcode-lookup')
+    def barcode_lookup(self, request):
+        barcode = (request.query_params.get('barcode') or request.query_params.get('q') or '').strip()
+        if not barcode:
+            return Response({'code': 400, 'message': 'Barcode / Membership ID is required.'}, status=400)
+
+        member = LibraryMember.objects.select_related(
+            'student__application', 'student__application__candidate', 'student__department', 'student__batch', 'student__section'
+        ).filter(
+            Q(membership_number__iexact=barcode)
+            | Q(student__roll_number__iexact=barcode)
+            | Q(student__register_number__iexact=barcode)
+        ).first()
+
+        if not member:
+            return Response({'code': 404, 'message': f'No member found matching "{barcode}".'}, status=404)
+
+        data = LibraryMemberSerializer(member, context={'request': request}).data
+        data['active_loans_count'] = LibraryTransaction.objects.filter(member=member, returned_on__isnull=True).count()
+        return self._success('Member found successfully', data)
+
+    @action(detail=False, methods=['get'], url_path='quick-search')
+    def quick_search(self, request):
+        query = (request.query_params.get('search') or request.query_params.get('query') or request.query_params.get('q') or '').strip()
+        limit = min(int(request.query_params.get('limit', 25)), 100)
+
+        qs = LibraryMember.objects.select_related(
+            'student__application', 'student__application__candidate', 'student__department'
+        ).filter(is_active=True)
+
+        if query:
+            qs = qs.filter(
+                Q(membership_number__icontains=query)
+                | Q(student__roll_number__icontains=query)
+                | Q(student__register_number__icontains=query)
+                | Q(student__application__candidate__name__icontains=query)
+            )
+
+        results = qs.order_by('membership_number')[:limit]
+        data = LibraryMemberQuickSerializer(results, many=True).data
+        return self._success('Members searched successfully', data)
+
     def update(self, request, *args, **kwargs):
         response = super().update(request, *args, **kwargs)
         return self._success('Library member updated successfully', response.data)
@@ -508,6 +624,119 @@ class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         
         loan.save()
         return self._success('Book renewed successfully', self.get_serializer(loan).data)
+
+    @action(detail=False, methods=['get'], url_path='lookup-by-barcode')
+    def lookup_by_barcode(self, request):
+        barcode = (request.query_params.get('barcode') or request.query_params.get('q') or '').strip()
+        if not barcode:
+            return Response({'code': 400, 'message': 'Barcode is required.'}, status=400)
+
+        # 1. Search for book by acc_no, isbn, id, or call_no
+        book = LibraryBook.objects.filter(
+            Q(acc_no__iexact=barcode)
+            | Q(isbn__iexact=barcode)
+            | (Q(id=int(barcode)) if barcode.isdigit() else Q(pk__isnull=True))
+            | Q(call_no__iexact=barcode)
+        ).first()
+
+        if book:
+            active_loan = LibraryTransaction.objects.filter(book=book, returned_on__isnull=True).select_related(
+                'book', 'member__student__application', 'member__student__application__candidate', 'member__student__department'
+            ).first()
+
+            return self._success('Barcode lookup result', {
+                'match_type': 'book',
+                'book': LibraryBookQuickSerializer(book).data,
+                'active_loan': LibraryTransactionSerializer(active_loan, context={'request': request}).data if active_loan else None,
+                'has_active_loan': bool(active_loan),
+                'available_copies': book.available_copies,
+            })
+
+        # 2. If not a book, check if it is a member barcode (membership_number, student roll, student register)
+        member = LibraryMember.objects.select_related(
+            'student__application', 'student__application__candidate', 'student__department'
+        ).filter(
+            Q(membership_number__iexact=barcode)
+            | Q(student__roll_number__iexact=barcode)
+            | Q(student__register_number__iexact=barcode)
+        ).first()
+
+        if member:
+            active_loans = LibraryTransaction.objects.filter(member=member, returned_on__isnull=True).select_related('book')
+            return self._success('Member lookup result', {
+                'match_type': 'member',
+                'member': LibraryMemberSerializer(member, context={'request': request}).data,
+                'active_loans': LibraryTransactionSerializer(active_loans, many=True, context={'request': request}).data,
+            })
+
+        return Response({'code': 404, 'message': f'No book or member found matching barcode "{barcode}".'}, status=404)
+
+    @action(detail=False, methods=['post'], url_path='scan-action')
+    @transaction.atomic
+    def scan_action(self, request):
+        barcode = (request.data.get('barcode') or '').strip()
+        action_type = (request.data.get('action') or '').upper()
+
+        if not barcode:
+            return Response({'code': 400, 'message': 'Barcode is required.'}, status=400)
+        if action_type not in ('RETURN', 'RENEW'):
+            return Response({'code': 400, 'message': 'Action must be RETURN or RENEW.'}, status=400)
+
+        book = LibraryBook.objects.select_for_update().filter(
+            Q(acc_no__iexact=barcode)
+            | Q(isbn__iexact=barcode)
+            | (Q(id=int(barcode)) if barcode.isdigit() else Q(pk__isnull=True))
+            | Q(call_no__iexact=barcode)
+        ).first()
+
+        if not book:
+            return Response({'code': 404, 'message': f'Book with barcode "{barcode}" was not found.'}, status=404)
+
+        loan = LibraryTransaction.objects.select_for_update().filter(book=book, returned_on__isnull=True).first()
+        if not loan:
+            return Response({
+                'code': 400,
+                'message': f'Book "{book.title}" (ACC: {book.acc_no or book.id}) has no active circulation loan to {action_type.lower()}. It is currently available.'
+            }, status=400)
+
+        tracking_user = self._tracking_user()
+        user_name = getattr(tracking_user, 'name', 'System') if tracking_user else 'System'
+
+        if action_type == 'RETURN':
+            loan.returned_on = timezone.localdate()
+            loan.status = 'RETURNED'
+            loan.updated_by = tracking_user
+            loan.history.append({
+                'action': 'Returned via Barcode Scan',
+                'date': str(timezone.localdate()),
+                'user': user_name,
+            })
+            loan.save()
+
+            book.available_copies = min(book.total_copies, book.available_copies + 1)
+            book.save(update_fields=['available_copies', 'updated_at'])
+
+            return self._success(
+                f'Book "{book.title}" returned successfully via Barcode scan.',
+                LibraryTransactionSerializer(loan, context={'request': request}).data
+            )
+
+        elif action_type == 'RENEW':
+            loan.due_on = loan.due_on + timedelta(days=14)
+            loan.renewal_count += 1
+            loan.updated_by = tracking_user
+            loan.history.append({
+                'action': 'Renewed via Barcode Scan',
+                'date': str(timezone.localdate()),
+                'new_due_on': str(loan.due_on),
+                'user': user_name,
+            })
+            loan.save()
+
+            return self._success(
+                f'Book "{book.title}" renewed successfully until {loan.due_on}.',
+                LibraryTransactionSerializer(loan, context={'request': request}).data
+            )
 
 
 class LibraryDashboardViewSet(LibraryViewSetMixin, viewsets.ViewSet):

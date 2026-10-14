@@ -46,6 +46,11 @@ class LibraryBook(TrackingModel):
         indexes = [
             models.Index(fields=['status', 'is_active']),
             models.Index(fields=['department']),
+            models.Index(fields=['acc_no']),
+            models.Index(fields=['isbn']),
+            models.Index(fields=['call_no']),
+            models.Index(fields=['title']),
+            models.Index(fields=['author']),
         ]
 
     def __str__(self):
@@ -94,6 +99,7 @@ class LibraryTransaction(TrackingModel):
         indexes = [
             models.Index(fields=['status', 'due_on']),
             models.Index(fields=['member', 'status']),
+            models.Index(fields=['book', 'returned_on']),
         ]
 
     def save(self, *args, **kwargs):

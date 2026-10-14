@@ -6,6 +6,30 @@ from student.models import Student
 from .models import LibraryBook, LibraryMember, LibraryTransaction
 
 
+class LibraryBookQuickSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LibraryBook
+        fields = [
+            'id', 'call_no', 'acc_no', 'title', 'author', 'isbn',
+            'status', 'total_copies', 'available_copies', 'shelf_location',
+            'department', 'is_active',
+        ]
+
+
+class LibraryMemberQuickSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='student.application.candidate.name', read_only=True, default='')
+    roll_number = serializers.CharField(source='student.roll_number', read_only=True)
+    register_number = serializers.CharField(source='student.register_number', read_only=True)
+    department_name = serializers.CharField(source='student.department.department_name', read_only=True)
+
+    class Meta:
+        model = LibraryMember
+        fields = [
+            'id', 'student', 'student_name', 'roll_number', 'register_number',
+            'department_name', 'membership_number', 'is_active',
+        ]
+
+
 class LibraryBookSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     issued_copies = serializers.SerializerMethodField()
     next_due_on = serializers.SerializerMethodField()
@@ -34,9 +58,14 @@ class LibraryBookSerializer(TrackingModelSerializerMixin, serializers.ModelSeria
 
     def get_next_due_on(self, obj):
         if obj.available_copies < 1:
-            active_loan = obj.transactions.filter(returned_on__isnull=True).order_by('due_on').first()
-            if active_loan and active_loan.due_on:
-                return str(active_loan.due_on)
+            if hasattr(obj, '_prefetched_objects_cache') and 'transactions' in obj._prefetched_objects_cache:
+                for loan in obj.transactions.all():
+                    if not loan.returned_on:
+                        return str(loan.due_on)
+            else:
+                due = obj.transactions.filter(returned_on__isnull=True).order_by('due_on').values_list('due_on', flat=True).first()
+                if due:
+                    return str(due)
         return None
 
     def create(self, validated_data):
@@ -96,6 +125,9 @@ class LibraryMemberSerializer(TrackingModelSerializerMixin, serializers.ModelSer
 
 class LibraryTransactionSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     book_title = serializers.CharField(source='book.title', read_only=True)
+    book_acc_no = serializers.CharField(source='book.acc_no', read_only=True)
+    book_call_no = serializers.CharField(source='book.call_no', read_only=True)
+    book_author = serializers.CharField(source='book.author', read_only=True)
     member_number = serializers.CharField(source='member.membership_number', read_only=True)
     student_name = serializers.CharField(source='member.student.application.candidate.name', read_only=True, default='')
     roll_number = serializers.CharField(source='member.student.roll_number', read_only=True)
@@ -104,8 +136,9 @@ class LibraryTransactionSerializer(TrackingModelSerializerMixin, serializers.Mod
     class Meta:
         model = LibraryTransaction
         fields = [
-            'id', 'book', 'book_title', 'member', 'member_number', 'student_name',
-            'roll_number', 'issued_on', 'due_on', 'returned_on', 'renewal_count',
+            'id', 'book', 'book_title', 'book_acc_no', 'book_call_no', 'book_author',
+            'member', 'member_number', 'student_name', 'roll_number',
+            'issued_on', 'due_on', 'returned_on', 'renewal_count',
             'status', 'is_overdue', 'notes', 'history', 'created_at', 'updated_at',
         ] + TrackingModelSerializerMixin.TRACKING_FIELDS
         extra_kwargs = {
