@@ -111,33 +111,37 @@ def resolve_user_presence_data(user, role_name=None, request=None):
     }
 
 
-def broadcast_user_online(online_info):
+def broadcast_user_online(online_info, force_broadcast=False):
     try:
         from django.core.cache import cache
         from channels.layers import get_channel_layer
         from asgiref.sync import async_to_sync
 
         user_id = online_info['id']
-        cache.set(f'online_user_{user_id}', online_info, timeout=90)
+        cache.set(f'online_user_{user_id}', online_info, timeout=120)
         user_ids = cache.get('online_user_ids', set())
         if not isinstance(user_ids, set):
             user_ids = set(user_ids) if isinstance(user_ids, (list, tuple)) else set()
-        user_ids.add(user_id)
-        cache.set('online_user_ids', user_ids, timeout=None)
 
-        layer = get_channel_layer()
-        if layer:
-            async_to_sync(layer.group_send)(
-                'realtime_updates',
-                {
-                    'type': 'broadcast_update',
-                    'data': {
-                        'model': 'OnlineUser',
-                        'action': 'online',
-                        'user': online_info
+        is_new_transition = (user_id not in user_ids) or force_broadcast
+        if is_new_transition:
+            user_ids.add(user_id)
+            cache.set('online_user_ids', user_ids, timeout=None)
+
+            # High-scale optimization: Only broadcast to WebSocket group on state transition (offline -> online)
+            layer = get_channel_layer()
+            if layer:
+                async_to_sync(layer.group_send)(
+                    'realtime_updates',
+                    {
+                        'type': 'broadcast_update',
+                        'data': {
+                            'model': 'OnlineUser',
+                            'action': 'online',
+                            'user': online_info
+                        }
                     }
-                }
-            )
+                )
     except Exception:
         pass
 
@@ -747,9 +751,24 @@ class UserViewSet(viewsets.ModelViewSet):
                 
             return Response({"code": 200, "message": "Marked offline", "status": "offline"})
 
-        # Enrich and broadcast presence
+        # High-scale optimization: Check cache first to avoid heavy DB queries on routine heartbeats
+        cached_online = cache.get(f'online_user_{user_id}')
+        if cached_online and isinstance(cached_online, dict):
+            cached_online['last_seen'] = timezone.now().isoformat()
+            cache.set(f'online_user_{user_id}', cached_online, timeout=120)
+            if user_id not in user_ids:
+                user_ids.add(user_id)
+                cache.set('online_user_ids', user_ids, timeout=None)
+            return Response({
+                "code": 200,
+                "message": "Heartbeat updated",
+                "status": "online",
+                "data": cached_online
+            }, status=status.HTTP_200_OK)
+
+        # Initial resolution (runs on login or when cache expired)
         online_data = resolve_user_presence_data(user, None, request)
-        broadcast_user_online(online_data)
+        broadcast_user_online(online_data, force_broadcast=True)
 
         return Response({
             "code": 200,

@@ -195,6 +195,15 @@ REST_FRAMEWORK = {
     'DEFAULT_FILTER_BACKENDS': (
         'common.filters.DynamicFilterBackend',
     ),
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': os.getenv('THROTTLE_ANON', '300/minute'),
+        'user': os.getenv('THROTTLE_USER', '2000/minute'),
+        'login': os.getenv('THROTTLE_LOGIN', '30/minute'),
+    },
 }
 
 # SimpleJWT Configuration
