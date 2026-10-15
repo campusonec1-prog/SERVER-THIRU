@@ -147,8 +147,8 @@ def send_push_notification(user, title, body, data=None):
             sound='default',
             default_sound=True,
             default_vibrate_timings=True,
-            notification_priority=messaging.NotificationPriority.PRIORITY_MAX,
-            visibility=messaging.NotificationVisibility.PUBLIC,
+            priority='high',
+            visibility='public',
         )
 
         message = messaging.MulticastMessage(
@@ -162,8 +162,8 @@ def send_push_notification(user, title, body, data=None):
                 priority='high',
                 notification=android_notification,
             ),
-            apns=messaging.ApnsConfig(
-                payload=messaging.ApnsPayload(
+            apns=messaging.APNSConfig(
+                payload=messaging.APNSPayload(
                     aps=messaging.Aps(
                         alert=messaging.ApsAlert(title=title, body=body),
                         sound='default',
@@ -173,7 +173,11 @@ def send_push_notification(user, title, body, data=None):
             )
         )
 
-        response = messaging.send_multicast(message)
+        # Use send_each_for_multicast (supported in firebase-admin 6.2+ & 7.0+)
+        if hasattr(messaging, 'send_each_for_multicast'):
+            response = messaging.send_each_for_multicast(message)
+        else:
+            response = messaging.send_multicast(message)
 
         print(f"  [FCM GOOGLE RESPONSE]", flush=True)
         print(f"    Success Deliveries : {response.success_count}", flush=True)
