@@ -142,7 +142,7 @@ def send_push_notification(user, title, body, data=None):
         from firebase_admin import messaging
 
         android_notification = messaging.AndroidNotification(
-            channel_id='ims_tec_notifications',
+            channel_id='ims_tec_alerts',
             color='#4f46e5',
             sound='default',
             default_sound=True,
