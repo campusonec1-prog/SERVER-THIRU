@@ -1357,6 +1357,15 @@ class DeviceTokenView(APIView):
     """
     permission_classes = [permissions.IsAuthenticated]
 
+    def get(self, request):
+        from users.models import DeviceToken
+        devices = DeviceToken.objects.filter(user=request.user, is_active=True).values('id', 'device_type', 'created_at', 'updated_at')
+        return Response({
+            'code': 200,
+            'count': len(devices),
+            'devices': list(devices)
+        }, status=status.HTTP_200_OK)
+
     def post(self, request):
         token = request.data.get('token')
         device_type = request.data.get('device_type', 'android')
@@ -1379,5 +1388,31 @@ class DeviceTokenView(APIView):
             'code': 200,
             'message': 'Device unregistered successfully.'
         }, status=status.HTTP_200_OK)
+
+
+class TestPushNotificationView(APIView):
+    """
+    Dispatches an instant test push notification to the logged-in user's mobile devices.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from common.push_service import send_push_notification
+        title = request.data.get('title', 'IMS TEC Alert Test')
+        body = request.data.get('body', 'Push notification is active and working on your mobile screen!')
+        route = request.data.get('route', '/faculty/leave')
+
+        result = send_push_notification(
+            user=request.user,
+            title=title,
+            body=body,
+            data={'route': route, 'type': 'TEST'}
+        )
+        return Response({
+            'code': 200,
+            'message': 'Test push notification dispatched.',
+            'result': result
+        }, status=status.HTTP_200_OK)
+
 
 

@@ -107,7 +107,10 @@ def send_push_notification(user, title, body, data=None):
     tokens = list(DeviceToken.objects.filter(user=user, is_active=True).values_list('token', flat=True))
 
     # Ensure all data values are strings (required by FCM data payload)
-    fcm_data = {}
+    fcm_data = {
+        'title': str(title) if title else 'IMS TEC Alert',
+        'body': str(body) if body else '',
+    }
     if data and isinstance(data, dict):
         for k, v in data.items():
             fcm_data[str(k)] = str(v) if v is not None else ''
@@ -138,6 +141,16 @@ def send_push_notification(user, title, body, data=None):
     try:
         from firebase_admin import messaging
 
+        android_notification = messaging.AndroidNotification(
+            channel_id='ims_tec_notifications',
+            color='#4f46e5',
+            sound='default',
+            default_sound=True,
+            default_vibrate_timings=True,
+            notification_priority=messaging.NotificationPriority.PRIORITY_MAX,
+            visibility=messaging.NotificationVisibility.PUBLIC,
+        )
+
         message = messaging.MulticastMessage(
             tokens=tokens,
             notification=messaging.Notification(
@@ -147,11 +160,15 @@ def send_push_notification(user, title, body, data=None):
             data=fcm_data,
             android=messaging.AndroidConfig(
                 priority='high',
-                notification=messaging.AndroidNotification(
-                    icon='ic_stat_name', # Standard Capacitor push icon
-                    color='#4f46e5',
-                    sound='default',
-                    click_action='FLUTTER_NOTIFICATION_CLICK'
+                notification=android_notification,
+            ),
+            apns=messaging.ApnsConfig(
+                payload=messaging.ApnsPayload(
+                    aps=messaging.Aps(
+                        alert=messaging.ApsAlert(title=title, body=body),
+                        sound='default',
+                        badge=1,
+                    )
                 )
             )
         )

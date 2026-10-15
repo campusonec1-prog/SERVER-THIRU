@@ -1,6 +1,6 @@
 
 from django.urls import path, re_path
-from .views import UserViewSet, UserDetailsViewSet, DeviceTokenView
+from .views import UserViewSet, UserDetailsViewSet, DeviceTokenView, TestPushNotificationView
 
 urlpatterns = [
     re_path(r'^create/?$', UserViewSet.as_view({'post': 'create'}), name='user-create'),
@@ -15,6 +15,7 @@ urlpatterns = [
     re_path(r'^dashboard-analytics/?$', UserViewSet.as_view({'get': 'dashboard_analytics'}), name='user-dashboard-analytics'),
     re_path(r'^bulk-import/?$', UserViewSet.as_view({'post': 'bulk_import'}), name='user-bulk-import'),
     re_path(r'^device-token/?$', DeviceTokenView.as_view(), name='device-token'),
+    re_path(r'^test-push/?$', TestPushNotificationView.as_view(), name='test-push'),
 
     # User Details endpoints
     re_path(r'^details/create/?$', UserDetailsViewSet.as_view({'post': 'create'}), name='user-details-create'),
