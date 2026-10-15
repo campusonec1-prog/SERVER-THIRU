@@ -144,6 +144,79 @@ def _notify_department_hods_for_approval(leave_app, sub_summary=None):
             pass
 
 
+def _notify_principals_for_approval(leave_app, recommended_by=None, sub_summary=None):
+    from common.push_service import send_push_notification
+    applicant_name = leave_app.applicant.name or leave_app.applicant.username
+    dept = leave_app.department
+    dept_code = dept.department_code if dept else ''
+
+    # Strictly find Principal and Vice Principal users
+    principal_qs = User.objects.filter(
+        status='ACTIVE'
+    ).filter(
+        Q(role__role_name__icontains='PRINCIPAL') |
+        Q(role__role_name__in=['PRINCIPAL', 'VICE_PRINCIPAL', 'VICE PRINCIPAL', 'Principal', 'Vice Principal', 'Vice_Principal'])
+    ).exclude(id=leave_app.applicant.id).distinct()
+
+    # Fallback to Admin / Superuser if neither Principal nor VP is registered
+    if not principal_qs.exists():
+        principal_qs = User.objects.filter(
+            status='ACTIVE',
+            role__role_name__in=['ADMIN', 'ADMINISTRATOR']
+        ).exclude(id=leave_app.applicant.id).distinct()
+
+    date_str = f"{leave_app.from_date.strftime('%d-%m-%Y')}"
+    if leave_app.from_date != leave_app.to_date:
+        date_str += f" to {leave_app.to_date.strftime('%d-%m-%Y')}"
+
+    leave_type_label = leave_app.get_leave_type_display()
+
+    if recommended_by:
+        rec_name = recommended_by.name or recommended_by.username
+        rec_role = getattr(recommended_by.role, 'role_name', 'HOD')
+        header_title = f"Leave Approval Required: {applicant_name}"
+        body_text = (
+            f"{applicant_name} ({dept_code}) requested {leave_type_label} for {date_str}.\n"
+            f"Approved/Recommended by {rec_role} ({rec_name}).\n"
+            f"Reason: {leave_app.reason}\n\n"
+            f"Please review and grant final approval."
+        )
+        push_body = f"{applicant_name} ({dept_code}) leave ({date_str}) recommended by HOD {rec_name}. Approval required."
+    else:
+        # HOD applying directly or direct escalation
+        header_title = f"HOD Leave Approval Required: {applicant_name}"
+        sub_info = f"\nSubstitutions:\n{sub_summary}\n" if sub_summary else ""
+        body_text = (
+            f"HOD {applicant_name} ({dept_code}) has applied for {leave_type_label} from {date_str}.\n"
+            f"{sub_info}"
+            f"Reason: {leave_app.reason}\n\n"
+            f"Please review and grant approval."
+        )
+        push_body = f"HOD {applicant_name} ({dept_code}) applied for {leave_type_label} ({date_str}). Approval required."
+
+    for p in principal_qs:
+        Notification.objects.create(
+            user=p,
+            sender=recommended_by or leave_app.applicant,
+            title=header_title,
+            message=body_text,
+            notification_type='LEAVE_APPROVAL_REQUEST',
+            related_leave=leave_app,
+            created_by=leave_app.applicant,
+            updated_by=leave_app.applicant
+        )
+        _broadcast_realtime({'leave_id': leave_app.id}, 'notification_received', target_user_id=p.id)
+        try:
+            send_push_notification(
+                user=p,
+                title=header_title,
+                body=push_body,
+                data={'type': 'leave_approval', 'leave_id': str(leave_app.id), 'stage': 'principal'}
+            )
+        except Exception:
+            pass
+
+
 class LeavePolicyViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = LeavePolicy.objects.select_related('academic_year', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('-id')
     serializer_class = LeavePolicySerializer
@@ -260,7 +333,7 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         # 2. Check for Overlapping / Duplicate Leave Application on the same dates
         overlapping_leaves = FacultyLeave.objects.filter(
             applicant=user,
-            status__in=['PENDING_SUBSTITUTION', 'PENDING_APPROVAL', 'APPROVED'],
+            status__in=['PENDING_SUBSTITUTION', 'PENDING_APPROVAL', 'PENDING_PRINCIPAL_APPROVAL', 'APPROVED'],
             from_date__lte=d_to,
             to_date__gte=d_from
         )
@@ -300,7 +373,7 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
         existing_leaves_qs = FacultyLeave.objects.filter(
             applicant=user,
-            status__in=['PENDING_SUBSTITUTION', 'PENDING_APPROVAL', 'APPROVED']
+            status__in=['PENDING_SUBSTITUTION', 'PENDING_APPROVAL', 'PENDING_PRINCIPAL_APPROVAL', 'APPROVED']
         )
         if acad_year:
             existing_leaves_qs = existing_leaves_qs.filter(academic_year=acad_year)
@@ -368,7 +441,17 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         if not dept:
             dept = Department.objects.first()
 
-        initial_status = 'PENDING_SUBSTITUTION' if len(valid_subs) > 0 else 'PENDING_APPROVAL'
+        # Check if applicant is an HOD
+        is_applicant_hod = (
+            getattr(user.role, 'role_name', '').upper() == 'HOD' or
+            (hasattr(user, 'hod_departments') and user.hod_departments.exists())
+        )
+
+        if len(valid_subs) > 0:
+            initial_status = 'PENDING_SUBSTITUTION'
+        else:
+            # If applicant is HOD, pass straight to Principal / Vice Principal
+            initial_status = 'PENDING_PRINCIPAL_APPROVAL' if is_applicant_hod else 'PENDING_APPROVAL'
 
         leave_app = FacultyLeave.objects.create(
             applicant=user,
@@ -460,8 +543,10 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
             except Exception:
                 pass
 
-        # If no substitutions were required, immediately notify Department HOD
-        if initial_status == 'PENDING_APPROVAL':
+        # If no substitutions were required, immediately notify Department HOD or Principal/VP
+        if initial_status == 'PENDING_PRINCIPAL_APPROVAL':
+            _notify_principals_for_approval(leave_app)
+        elif initial_status == 'PENDING_APPROVAL':
             _notify_department_hods_for_approval(leave_app)
 
         serializer = self.get_serializer(leave_app)
@@ -488,7 +573,7 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
         leaves_qs = FacultyLeave.objects.filter(
             applicant=user,
-            status__in=['PENDING_SUBSTITUTION', 'PENDING_APPROVAL', 'APPROVED']
+            status__in=['PENDING_SUBSTITUTION', 'PENDING_APPROVAL', 'PENDING_PRINCIPAL_APPROVAL', 'APPROVED']
         )
         if acad_year:
             leaves_qs = leaves_qs.filter(academic_year=acad_year)
@@ -525,20 +610,70 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         leave_app = self.get_object()
         user = request.user
         role = getattr(user.role, 'role_name', '').upper() if hasattr(user, 'role') and user.role else ''
+        is_principal_or_vp = ('PRINCIPAL' in role) or getattr(user, 'is_superuser', False) or role in ['ADMIN', 'ADMINISTRATOR']
+        is_hod = (role == 'HOD') or (hasattr(user, 'hod_departments') and user.hod_departments.exists())
 
-        if not getattr(user, 'is_superuser', False) and role not in ['HOD', 'ADMIN', 'ADMINISTRATOR', 'PRINCIPAL', 'VICE_PRINCIPAL']:
-            return Response({"code": 403, "message": "Only HOD or Admin can approve leaves."}, status=status.HTTP_403_FORBIDDEN)
+        if not is_principal_or_vp and not is_hod:
+            return Response({"code": 403, "message": "Only HOD, Principal, or Admin can approve leaves."}, status=status.HTTP_403_FORBIDDEN)
 
+        # Stage 1: If current status is PENDING_APPROVAL and approver is HOD
+        # Forward to Principal & Vice Principal for final approval
+        if leave_app.status == 'PENDING_APPROVAL' and is_hod and not is_principal_or_vp:
+            leave_app.status = 'PENDING_PRINCIPAL_APPROVAL'
+            leave_app.save(update_fields=['status', 'updated_at'])
+
+            Notification.objects.filter(related_leave=leave_app, user=user).update(is_read=True)
+
+            # Notify Principal and Vice Principal with push notifications
+            _notify_principals_for_approval(leave_app, recommended_by=user)
+
+            # Inform applicant that HOD has recommended and forwarded
+            Notification.objects.create(
+                user=leave_app.applicant,
+                sender=user,
+                title="Leave Application Recommended by HOD",
+                message=(
+                    f"Your leave application from {leave_app.from_date.strftime('%d-%m-%Y')} "
+                    f"to {leave_app.to_date.strftime('%d-%m-%Y')} has been approved by your HOD "
+                    f"and forwarded to Principal & Vice Principal for final approval."
+                ),
+                notification_type='LEAVE_STATUS',
+                related_leave=leave_app,
+                created_by=user,
+                updated_by=user
+            )
+
+            try:
+                send_push_notification(
+                    user=leave_app.applicant,
+                    title="Leave Recommended by HOD",
+                    body=f"Your leave from {leave_app.from_date.strftime('%d-%m-%Y')} to {leave_app.to_date.strftime('%d-%m-%Y')} was recommended by HOD and sent to Principal.",
+                    data={'type': 'leave_status', 'leave_id': str(leave_app.id), 'status': 'PENDING_PRINCIPAL_APPROVAL'}
+                )
+            except Exception:
+                pass
+
+            _broadcast_realtime({'leave_id': leave_app.id}, 'leave_updated')
+            serializer = self.get_serializer(leave_app)
+            return Response({
+                "code": 200,
+                "message": "Leave application approved by HOD and forwarded to Principal & Vice Principal for final approval.",
+                "data": serializer.data
+            }, status=status.HTTP_200_OK)
+
+        # Stage 2: Final approval by Principal, Vice Principal, Admin, or Superuser
         leave_app.status = 'APPROVED'
         leave_app.approved_by = user
         leave_app.save(update_fields=['status', 'approved_by', 'updated_at'])
 
-        # Notify applicant
+        approver_title = "Principal / Vice Principal" if is_principal_or_vp else "HOD"
+
+        # Notify applicant of final approval
         Notification.objects.create(
             user=leave_app.applicant,
             sender=user,
             title="Leave Application Approved",
-            message=f"Your leave application from {leave_app.from_date.strftime('%d-%m-%Y')} to {leave_app.to_date.strftime('%d-%m-%Y')} has been approved by HOD.",
+            message=f"Your leave application from {leave_app.from_date.strftime('%d-%m-%Y')} to {leave_app.to_date.strftime('%d-%m-%Y')} has been granted final approval by {approver_title} ({user.name or user.username}).",
             notification_type='LEAVE_STATUS',
             related_leave=leave_app,
             created_by=user,
@@ -549,7 +684,7 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
             send_push_notification(
                 user=leave_app.applicant,
                 title="Leave Application Approved",
-                body=f"Your leave application from {leave_app.from_date.strftime('%d-%m-%Y')} to {leave_app.to_date.strftime('%d-%m-%Y')} has been approved.",
+                body=f"Your leave application from {leave_app.from_date.strftime('%d-%m-%Y')} to {leave_app.to_date.strftime('%d-%m-%Y')} has been approved by {approver_title}.",
                 data={'type': 'leave_status', 'leave_id': str(leave_app.id), 'status': 'APPROVED'}
             )
         except Exception:
@@ -566,6 +701,13 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         from common.push_service import send_push_notification
         leave_app = self.get_object()
         user = request.user
+        role = getattr(user.role, 'role_name', '').upper() if hasattr(user, 'role') and user.role else ''
+        is_principal_or_vp = ('PRINCIPAL' in role) or getattr(user, 'is_superuser', False) or role in ['ADMIN', 'ADMINISTRATOR']
+        is_hod = (role == 'HOD') or (hasattr(user, 'hod_departments') and user.hod_departments.exists())
+
+        if not is_principal_or_vp and not is_hod:
+            return Response({"code": 403, "message": "Only HOD, Principal, or Admin can reject leaves."}, status=status.HTTP_403_FORBIDDEN)
+
         reason = request.data.get('rejection_reason', '').strip()
 
         leave_app.status = 'REJECTED'
@@ -573,11 +715,13 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         leave_app.approved_by = user
         leave_app.save(update_fields=['status', 'rejection_reason', 'approved_by', 'updated_at'])
 
+        approver_title = "Principal / Vice Principal" if is_principal_or_vp else "HOD"
+
         Notification.objects.create(
             user=leave_app.applicant,
             sender=user,
             title="Leave Application Rejected",
-            message=f"Your leave application from {leave_app.from_date.strftime('%d-%m-%Y')} to {leave_app.to_date.strftime('%d-%m-%Y')} was rejected by HOD. Reason: {reason or 'N/A'}",
+            message=f"Your leave application from {leave_app.from_date.strftime('%d-%m-%Y')} to {leave_app.to_date.strftime('%d-%m-%Y')} was rejected by {approver_title} ({user.name or user.username}). Reason: {reason or 'N/A'}",
             notification_type='LEAVE_STATUS',
             related_leave=leave_app,
             created_by=user,
@@ -588,7 +732,7 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
             send_push_notification(
                 user=leave_app.applicant,
                 title="Leave Application Rejected",
-                body=f"Your leave application from {leave_app.from_date.strftime('%d-%m-%Y')} to {leave_app.to_date.strftime('%d-%m-%Y')} was rejected.",
+                body=f"Your leave application from {leave_app.from_date.strftime('%d-%m-%Y')} to {leave_app.to_date.strftime('%d-%m-%Y')} was rejected by {approver_title}.",
                 data={'type': 'leave_status', 'leave_id': str(leave_app.id), 'status': 'REJECTED'}
             )
         except Exception:
@@ -667,10 +811,6 @@ class ClassSubstitutionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
             leave_app = sub_obj.leave_application
             all_subs = leave_app.substitutions.all()
             if all_subs.exists() and all(s.status == 'ACCEPTED' for s in all_subs):
-                leave_app.status = 'PENDING_APPROVAL'
-                leave_app.save(update_fields=['status', 'updated_at'])
-
-                # Notify Department HOD(s) for final leave approval
                 applicant_name = leave_app.applicant.name or leave_app.applicant.username
                 sub_lines = []
                 for s in all_subs:
@@ -681,7 +821,20 @@ class ClassSubstitutionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
                     sub_lines.append(f"Period {p_num}: Transferred to {sub_fac_name} ({dept_code} Sec {sec_name})")
 
                 sub_summary = "\n".join(sub_lines)
-                _notify_department_hods_for_approval(leave_app, sub_summary=sub_summary)
+
+                is_applicant_hod = (
+                    getattr(leave_app.applicant.role, 'role_name', '').upper() == 'HOD' or
+                    (hasattr(leave_app.applicant, 'hod_departments') and leave_app.applicant.hod_departments.exists())
+                )
+
+                if is_applicant_hod:
+                    leave_app.status = 'PENDING_PRINCIPAL_APPROVAL'
+                    leave_app.save(update_fields=['status', 'updated_at'])
+                    _notify_principals_for_approval(leave_app, sub_summary=sub_summary)
+                else:
+                    leave_app.status = 'PENDING_APPROVAL'
+                    leave_app.save(update_fields=['status', 'updated_at'])
+                    _notify_department_hods_for_approval(leave_app, sub_summary=sub_summary)
 
             _broadcast_realtime({'substitution_id': sub_obj.id}, 'substitution_accepted')
             return Response({"code": 200, "message": "Substitution request accepted successfully.", "data": self.get_serializer(sub_obj).data}, status=status.HTTP_200_OK)

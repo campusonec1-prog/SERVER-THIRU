@@ -32,7 +32,8 @@ class FacultyLeave(TrackingModel):
 
     STATUS_CHOICES = [
         ('PENDING_SUBSTITUTION', 'Pending Substitutions'),
-        ('PENDING_APPROVAL', 'Pending Approval'),
+        ('PENDING_APPROVAL', 'Pending HOD Approval'),
+        ('PENDING_PRINCIPAL_APPROVAL', 'Pending Principal Approval'),
         ('APPROVED', 'Approved'),
         ('REJECTED', 'Rejected'),
         ('CANCELLED', 'Cancelled'),
