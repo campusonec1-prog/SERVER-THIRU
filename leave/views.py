@@ -81,6 +81,69 @@ def _broadcast_realtime(payload, event_name, target_user_id=None):
         pass
 
 
+def _notify_department_hods_for_approval(leave_app, sub_summary=None):
+    from common.push_service import send_push_notification
+    applicant_name = leave_app.applicant.name or leave_app.applicant.username
+    dept = leave_app.department
+    dept_code = dept.department_code if dept else ''
+
+    # Strictly find HODs belonging to this department
+    hod_qs = User.objects.filter(
+        status='ACTIVE'
+    ).filter(
+        Q(hod_departments=dept) |
+        Q(user_details__department=dept, role__role_name__iexact='HOD')
+    ).exclude(id=leave_app.applicant.id).distinct()
+
+    # Fallback to Admin / Principal only if no department HOD configured
+    if not hod_qs.exists():
+        hod_qs = User.objects.filter(
+            status='ACTIVE',
+            role__role_name__in=['ADMIN', 'ADMINISTRATOR', 'PRINCIPAL']
+        ).exclude(id=leave_app.applicant.id).distinct()
+
+    date_str = f"{leave_app.from_date.strftime('%d-%m-%Y')}"
+    if leave_app.from_date != leave_app.to_date:
+        date_str += f" to {leave_app.to_date.strftime('%d-%m-%Y')}"
+
+    leave_type_label = leave_app.get_leave_type_display()
+
+    if sub_summary:
+        body_text = (
+            f"{applicant_name} ({dept_code}) requested {leave_type_label} for {date_str}.\n"
+            f"All class substitutions accepted:\n{sub_summary}\n\n"
+            f"Please review and approve."
+        )
+    else:
+        body_text = (
+            f"{applicant_name} ({dept_code}) requested {leave_type_label} for {date_str}.\n"
+            f"Reason: {leave_app.reason}\n\n"
+            f"Please review and approve."
+        )
+
+    for hod in hod_qs:
+        Notification.objects.create(
+            user=hod,
+            sender=leave_app.applicant,
+            title=f"Leave Approval Required: {applicant_name}",
+            message=body_text,
+            notification_type='LEAVE_APPROVAL_REQUEST',
+            related_leave=leave_app,
+            created_by=leave_app.applicant,
+            updated_by=leave_app.applicant
+        )
+        _broadcast_realtime({'leave_id': leave_app.id}, 'notification_received', target_user_id=hod.id)
+        try:
+            send_push_notification(
+                user=hod,
+                title=f"Leave Approval Required: {applicant_name}",
+                body=f"{applicant_name} ({dept_code}) requested {leave_type_label} ({date_str}).",
+                data={'type': 'leave_approval', 'leave_id': str(leave_app.id)}
+            )
+        except Exception:
+            pass
+
+
 class LeavePolicyViewSet(AdminWriteMixin, viewsets.ModelViewSet):
     queryset = LeavePolicy.objects.select_related('academic_year', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('-id')
     serializer_class = LeavePolicySerializer
@@ -149,6 +212,7 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
+        from common.push_service import send_push_notification
         data = request.data
         user = request.user
 
@@ -173,6 +237,15 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         if d_to < d_from:
             return Response({"code": 400, "message": "To date must be after or equal to From date."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # 1. Enforce single-day restriction for Half-Day and Permissions
+        if leave_type in ['HALF_DAY_FN', 'HALF_DAY_AN', 'PERMISSION']:
+            if d_from != d_to:
+                label = "Half Day" if "HALF" in leave_type else "Hourly Permission"
+                return Response({
+                    "code": 400,
+                    "message": f"{label} can only be applied for a single day. From Date and To Date must be the same."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
         # Auto calculate total days
         if leave_type in ['HALF_DAY_FN', 'HALF_DAY_AN']:
             total_days = 0.5
@@ -181,6 +254,110 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         else:
             total_days = float((d_to - d_from).days + 1)
 
+        # Active Academic Year
+        acad_year = AcademicYear.objects.filter(is_display=True).first() or AcademicYear.objects.filter(is_active=True).first()
+
+        # 2. Check for Overlapping / Duplicate Leave Application on the same dates
+        overlapping_leaves = FacultyLeave.objects.filter(
+            applicant=user,
+            status__in=['PENDING_SUBSTITUTION', 'PENDING_APPROVAL', 'APPROVED'],
+            from_date__lte=d_to,
+            to_date__gte=d_from
+        )
+
+        for ex in overlapping_leaves:
+            is_same_day = (ex.from_date == ex.to_date == d_from == d_to)
+            is_non_conflicting_half_days = (
+                is_same_day and
+                (
+                    (ex.leave_type == 'HALF_DAY_FN' and leave_type in ['HALF_DAY_AN', 'PERMISSION']) or
+                    (ex.leave_type == 'HALF_DAY_AN' and leave_type in ['HALF_DAY_FN', 'PERMISSION']) or
+                    (ex.leave_type == 'PERMISSION' and leave_type in ['HALF_DAY_FN', 'HALF_DAY_AN'])
+                )
+            )
+
+            if not is_non_conflicting_half_days:
+                ex_from = ex.from_date.strftime('%d-%m-%Y')
+                ex_to = ex.to_date.strftime('%d-%m-%Y')
+                date_range_label = ex_from if ex_from == ex_to else f"{ex_from} to {ex_to}"
+                return Response({
+                    "code": 400,
+                    "message": (
+                        f"You already have an active/approved {ex.get_leave_type_display()} application "
+                        f"({ex.status.replace('_', ' ')}) for {date_range_label}. "
+                        f"Cannot apply for duplicate or overlapping dates."
+                    )
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 3. Leave Policy Quota Check (CL, OD, Permission)
+        policy = LeavePolicy.objects.filter(academic_year=acad_year, is_active=True).first() if acad_year else None
+        if not policy:
+            policy = LeavePolicy.objects.filter(is_active=True).first()
+
+        total_cl_allowed = float(policy.total_cl) if policy else 12.0
+        total_od_allowed = float(policy.total_od) if policy else 6.0
+        total_perm_allowed = int(policy.total_permissions) if policy else 12
+
+        existing_leaves_qs = FacultyLeave.objects.filter(
+            applicant=user,
+            status__in=['PENDING_SUBSTITUTION', 'PENDING_APPROVAL', 'APPROVED']
+        )
+        if acad_year:
+            existing_leaves_qs = existing_leaves_qs.filter(academic_year=acad_year)
+
+        if leave_type in ['FULL_DAY', 'HALF_DAY_FN', 'HALF_DAY_AN']:
+            used_cl = sum(float(l.total_days) for l in existing_leaves_qs if l.leave_type in ['FULL_DAY', 'HALF_DAY_FN', 'HALF_DAY_AN'])
+            if used_cl + total_days > total_cl_allowed:
+                rem = max(0.0, total_cl_allowed - used_cl)
+                return Response({
+                    "code": 400,
+                    "message": f"Casual Leave (CL) quota exceeded. You have {rem:.1f} day(s) remaining out of {total_cl_allowed} days."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        elif leave_type == 'OD':
+            used_od = sum(float(l.total_days) for l in existing_leaves_qs if l.leave_type == 'OD')
+            if used_od + total_days > total_od_allowed:
+                rem = max(0.0, total_od_allowed - used_od)
+                return Response({
+                    "code": 400,
+                    "message": f"On Duty (OD) quota exceeded. You have {rem:.1f} day(s) remaining out of {total_od_allowed} days."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        elif leave_type == 'PERMISSION':
+            used_perm = existing_leaves_qs.filter(leave_type='PERMISSION').count()
+            if used_perm + 1 > total_perm_allowed:
+                rem = max(0, total_perm_allowed - used_perm)
+                return Response({
+                    "code": 400,
+                    "message": f"Hourly permissions quota exceeded. You have {rem} permission(s) remaining out of {total_perm_allowed}."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 4. Check affected class timetable slots & enforce complete substitution
+        affected_count = 0
+        curr_d = d_from
+        while curr_d <= d_to:
+            c_evt = AcademicCalendarEvent.objects.filter(date=curr_d).first()
+            if not (c_evt and c_evt.event_type in ['HOLIDAY', 'SUSPENSION'] and c_evt.session_scope == 'FULL_DAY'):
+                d_c = curr_d.strftime('%A').upper()[:3]
+                if c_evt and c_evt.event_type in ['DAY_ORDER', 'DAY_ORDER_SWAP'] and c_evt.target_day:
+                    d_c = c_evt.target_day.day_code.upper()[:3]
+                d_obj = Day.objects.filter(day_code__iexact=d_c).first()
+                if d_obj:
+                    tt_qs = ClassTimetable.objects.filter(faculty=user, day=d_obj)
+                    if leave_type == 'HALF_DAY_FN':
+                        tt_qs = tt_qs.filter(period__period_no__lte=4)
+                    elif leave_type == 'HALF_DAY_AN':
+                        tt_qs = tt_qs.filter(period__period_no__gt=4)
+                    affected_count += tt_qs.count()
+            curr_d += timedelta(days=1)
+
+        valid_subs = [s for s in substitutions_input if s.get('substitute_faculty_id')]
+        if affected_count > 0 and len(valid_subs) < affected_count:
+            return Response({
+                "code": 400,
+                "message": f"You have {affected_count} class timetable slot(s) requiring substitution. You must assign a substitute faculty for all {affected_count} slot(s)."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         # Identify applicant's primary department
         dept = None
         if hasattr(user, 'hod_departments') and user.hod_departments.exists():
@@ -188,14 +365,10 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         elif hasattr(user, 'user_details') and user.user_details.exists() and user.user_details.first().department:
             dept = user.user_details.first().department
 
-        
         if not dept:
             dept = Department.objects.first()
 
-        # Active Academic Year
-        acad_year = AcademicYear.objects.filter(is_display=True).first() or AcademicYear.objects.filter(is_active=True).first()
-
-        initial_status = 'PENDING_SUBSTITUTION' if len(substitutions_input) > 0 else 'PENDING_APPROVAL'
+        initial_status = 'PENDING_SUBSTITUTION' if len(valid_subs) > 0 else 'PENDING_APPROVAL'
 
         leave_app = FacultyLeave.objects.create(
             applicant=user,
@@ -213,7 +386,7 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
         # Create substitutions and inbox notifications
         created_subs = []
-        for sub_item in substitutions_input:
+        for sub_item in valid_subs:
             sub_fac_id = sub_item.get('substitute_faculty_id')
             if not sub_fac_id:
                 continue
@@ -258,7 +431,6 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
             # Create Notification in Header Inbox for substitute faculty
             applicant_name = user.name or user.username
-
             p_time = f"{period_inst.start_time.strftime('%I:%M %p')}"
             notif_msg = (
                 f"{applicant_name} has requested you to substitute for Period {period_inst.period_no} ({p_time}) "
@@ -278,6 +450,19 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
             )
 
             _broadcast_realtime({'substitution_id': sub_obj.id}, 'notification_received', target_user_id=sub_fac.id)
+            try:
+                send_push_notification(
+                    user=sub_fac,
+                    title="Class Substitution Request",
+                    body=f"{applicant_name} requested you to substitute for Period {period_inst.period_no} on {sub_date.strftime('%d-%m-%Y')}.",
+                    data={'type': 'substitution_request', 'substitution_id': str(sub_obj.id), 'leave_id': str(leave_app.id)}
+                )
+            except Exception:
+                pass
+
+        # If no substitutions were required, immediately notify Department HOD
+        if initial_status == 'PENDING_APPROVAL':
+            _notify_department_hods_for_approval(leave_app)
 
         serializer = self.get_serializer(leave_app)
         _broadcast_realtime(serializer.data, 'leave_created')
@@ -288,8 +473,55 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
             "data": serializer.data
         }, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=['get'], url_path='my-balance')
+    def get_my_leave_balance(self, request):
+        user = request.user
+        acad_year = AcademicYear.objects.filter(is_display=True).first() or AcademicYear.objects.filter(is_active=True).first()
+
+        policy = LeavePolicy.objects.filter(academic_year=acad_year, is_active=True).first() if acad_year else None
+        if not policy:
+            policy = LeavePolicy.objects.filter(is_active=True).first()
+
+        total_cl = float(policy.total_cl) if policy else 12.0
+        total_od = float(policy.total_od) if policy else 6.0
+        total_perm = int(policy.total_permissions) if policy else 12
+
+        leaves_qs = FacultyLeave.objects.filter(
+            applicant=user,
+            status__in=['PENDING_SUBSTITUTION', 'PENDING_APPROVAL', 'APPROVED']
+        )
+        if acad_year:
+            leaves_qs = leaves_qs.filter(academic_year=acad_year)
+
+        used_cl = sum(float(l.total_days) for l in leaves_qs if l.leave_type in ['FULL_DAY', 'HALF_DAY_FN', 'HALF_DAY_AN'])
+        used_od = sum(float(l.total_days) for l in leaves_qs if l.leave_type == 'OD')
+        used_perm = leaves_qs.filter(leave_type='PERMISSION').count()
+
+        return Response({
+            "code": 200,
+            "message": "Leave balance fetched successfully.",
+            "data": {
+                "cl": {
+                    "total": total_cl,
+                    "used": used_cl,
+                    "remaining": max(0.0, total_cl - used_cl)
+                },
+                "od": {
+                    "total": total_od,
+                    "used": used_od,
+                    "remaining": max(0.0, total_od - used_od)
+                },
+                "permissions": {
+                    "total": total_perm,
+                    "used": used_perm,
+                    "remaining": max(0, total_perm - used_perm)
+                }
+            }
+        }, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['post'], url_path='approve')
     def approve_leave(self, request, pk=None):
+        from common.push_service import send_push_notification
         leave_app = self.get_object()
         user = request.user
         role = getattr(user.role, 'role_name', '').upper() if hasattr(user, 'role') and user.role else ''
@@ -313,6 +545,16 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
             updated_by=user
         )
 
+        try:
+            send_push_notification(
+                user=leave_app.applicant,
+                title="Leave Application Approved",
+                body=f"Your leave application from {leave_app.from_date.strftime('%d-%m-%Y')} to {leave_app.to_date.strftime('%d-%m-%Y')} has been approved.",
+                data={'type': 'leave_status', 'leave_id': str(leave_app.id), 'status': 'APPROVED'}
+            )
+        except Exception:
+            pass
+
         Notification.objects.filter(related_leave=leave_app, user=user).update(is_read=True)
         _broadcast_realtime({'leave_id': leave_app.id}, 'leave_updated')
 
@@ -321,6 +563,7 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='reject')
     def reject_leave(self, request, pk=None):
+        from common.push_service import send_push_notification
         leave_app = self.get_object()
         user = request.user
         reason = request.data.get('rejection_reason', '').strip()
@@ -340,6 +583,16 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
             created_by=user,
             updated_by=user
         )
+
+        try:
+            send_push_notification(
+                user=leave_app.applicant,
+                title="Leave Application Rejected",
+                body=f"Your leave application from {leave_app.from_date.strftime('%d-%m-%Y')} to {leave_app.to_date.strftime('%d-%m-%Y')} was rejected.",
+                data={'type': 'leave_status', 'leave_id': str(leave_app.id), 'status': 'REJECTED'}
+            )
+        except Exception:
+            pass
 
         Notification.objects.filter(related_leave=leave_app, user=user).update(is_read=True)
         _broadcast_realtime({'leave_id': leave_app.id}, 'leave_updated')
@@ -428,37 +681,13 @@ class ClassSubstitutionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
                     sub_lines.append(f"Period {p_num}: Transferred to {sub_fac_name} ({dept_code} Sec {sec_name})")
 
                 sub_summary = "\n".join(sub_lines)
-                
-                hod_qs = User.objects.filter(
-                    Q(hod_departments=leave_app.department) |
-                    Q(user_details__department=leave_app.department, role__role_name__iexact='HOD') |
-                    Q(role__role_name__iexact='HOD')
-                ).distinct()
-
-
-                for hod in hod_qs:
-                    Notification.objects.create(
-                        user=hod,
-                        sender=leave_app.applicant,
-                        title=f"Leave Application Approval Required: {applicant_name}",
-                        message=(
-                            f"{applicant_name} has requested leave from {leave_app.from_date.strftime('%d-%m-%Y')} "
-                            f"to {leave_app.to_date.strftime('%d-%m-%Y')}.\n"
-                            f"All class substitutions have been accepted:\n{sub_summary}\n\n"
-                            f"Please review and approve this leave application."
-                        ),
-                        notification_type='LEAVE_APPROVAL_REQUEST',
-                        related_leave=leave_app,
-                        created_by=user,
-                        updated_by=user
-                    )
-                    _broadcast_realtime({'leave_id': leave_app.id}, 'notification_received', target_user_id=hod.id)
+                _notify_department_hods_for_approval(leave_app, sub_summary=sub_summary)
 
             _broadcast_realtime({'substitution_id': sub_obj.id}, 'substitution_accepted')
             return Response({"code": 200, "message": "Substitution request accepted successfully.", "data": self.get_serializer(sub_obj).data}, status=status.HTTP_200_OK)
 
-
         else: # REJECT
+            from common.push_service import send_push_notification
             sub_obj.status = 'REJECTED'
             sub_obj.rejection_reason = rejection_reason
             sub_obj.save(update_fields=['status', 'rejection_reason', 'updated_at'])
@@ -474,6 +703,16 @@ class ClassSubstitutionViewSet(AdminWriteMixin, viewsets.ModelViewSet):
                 created_by=user,
                 updated_by=user
             )
+
+            try:
+                send_push_notification(
+                    user=orig_fac,
+                    title="Substitution Request Rejected",
+                    body=f"{sub_fac_name} rejected substitution for Period {sub_obj.period.period_no} on {sub_obj.date.strftime('%d-%m-%Y')}.",
+                    data={'type': 'substitution_rejected', 'substitution_id': str(sub_obj.id), 'leave_id': str(sub_obj.leave_application.id)}
+                )
+            except Exception:
+                pass
 
             Notification.objects.filter(related_substitution=sub_obj, user=user).update(is_read=True)
 
@@ -632,6 +871,7 @@ class LeaveHelperViewSet(viewsets.ViewSet):
         user = request.user
         from_date_str = request.query_params.get('from_date')
         to_date_str = request.query_params.get('to_date')
+        leave_type = request.query_params.get('leave_type', 'FULL_DAY')
 
         if not from_date_str or not to_date_str:
             return Response({"code": 400, "message": "from_date and to_date query parameters are required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -652,8 +892,8 @@ class LeaveHelperViewSet(viewsets.ViewSet):
                 continue
 
             day_code = curr_date.strftime('%A').upper()[:3]
-            if cal_evt and cal_evt.event_type in ['DAY_ORDER', 'DAY_ORDER_SWAP'] and cal_evt.target_day_code:
-                day_code = cal_evt.target_day_code.upper()[:3]
+            if cal_evt and cal_evt.event_type in ['DAY_ORDER', 'DAY_ORDER_SWAP'] and cal_evt.target_day:
+                day_code = cal_evt.target_day.day_code.upper()[:3]
 
             try:
                 day_inst = Day.objects.get(day_code__iexact=day_code)
@@ -668,6 +908,13 @@ class LeaveHelperViewSet(viewsets.ViewSet):
             ).select_related('period', 'department', 'batch', 'semester', 'section', 'subject').order_by('period__period_no')
 
             for tt in timetables:
+                # If Half Day FN, only include forenoon periods (1 to 4)
+                if leave_type == 'HALF_DAY_FN' and tt.period.period_no > 4:
+                    continue
+                # If Half Day AN, only include afternoon periods (5+)
+                if leave_type == 'HALF_DAY_AN' and tt.period.period_no <= 4:
+                    continue
+
                 p_time = f"{tt.period.start_time.strftime('%I:%M %p')} - {tt.period.end_time.strftime('%I:%M %p')}"
                 slots_data.append({
                     'date': curr_date.strftime('%Y-%m-%d'),
@@ -714,8 +961,8 @@ class LeaveHelperViewSet(viewsets.ViewSet):
         # Resolve day order code for target_date
         cal_evt = AcademicCalendarEvent.objects.filter(date=target_date).first()
         day_code = target_date.strftime('%A').upper()[:3]
-        if cal_evt and cal_evt.event_type in ['DAY_ORDER', 'DAY_ORDER_SWAP'] and cal_evt.target_day_code:
-            day_code = cal_evt.target_day_code.upper()[:3]
+        if cal_evt and cal_evt.event_type in ['DAY_ORDER', 'DAY_ORDER_SWAP'] and cal_evt.target_day:
+            day_code = cal_evt.target_day.day_code.upper()[:3]
 
         day_inst = Day.objects.filter(day_code__iexact=day_code).first()
 
