@@ -192,6 +192,7 @@ env_origins = [
 ]
 CORS_ALLOWED_ORIGINS = list(dict.fromkeys(DEFAULT_CORS_ORIGINS + env_origins))
 CORS_ALLOW_CREDENTIALS = True
+CORS_EXPOSE_HEADERS = ['Content-Disposition']
 
 
 # REST Framework configuration

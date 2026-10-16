@@ -86,6 +86,16 @@ class UserPermission(BaseRolePermission):
     def has_permission(self, request, view):
         if getattr(view, 'action', None) in ['login', 'change_password']:
             return True
+        if getattr(view, 'action', None) == 'faculty_report_pdf':
+            if not request.user or not request.user.is_authenticated:
+                return False
+            user_role = getattr(request.user.role, 'role_name', '').upper().replace(' ', '_')
+            allowed = {
+                'ADMIN', 'ADMINISTRATOR', 'SUPER_ADMIN', 'SUPERADMIN',
+                'ADMINISTRATION_OFFICER', 'ADMINISTRATIVE_OFFICER', 'AO',
+                'HOD', 'PRINCIPAL', 'VICE_PRINCIPAL', 'TS', 'TECH_SUPPORTER'
+            }
+            return user_role in allowed
         if getattr(view, 'action', None) == 'heartbeat':
             return bool(request.user and request.user.is_authenticated)
         if getattr(view, 'action', None) == 'online_users':

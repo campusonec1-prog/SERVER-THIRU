@@ -55,8 +55,9 @@ def format_unicode_text(text):
 
 def get_college_logo_bytes(college_header_obj=None):
     logo_url = college_header_obj.primary_logo if college_header_obj else None
-    if logo_url and logo_url in _cached_logo_bytes:
-        return _cached_logo_bytes[logo_url]
+    cache_key = logo_url if logo_url else '__default_fallback_logo__'
+    if cache_key in _cached_logo_bytes:
+        return _cached_logo_bytes[cache_key]
 
     logo_bytes = None
     if logo_url:
@@ -70,13 +71,11 @@ def get_college_logo_bytes(college_header_obj=None):
                     out_io = BytesIO()
                     pil_img.save(out_io, format='PNG')
                     logo_bytes = out_io.getvalue()
-                    _cached_logo_bytes[logo_url] = logo_bytes
             elif os.path.exists(logo_url):
                 pil_img = PILImage.open(logo_url)
                 out_io = BytesIO()
                 pil_img.save(out_io, format='PNG')
                 logo_bytes = out_io.getvalue()
-                _cached_logo_bytes[logo_url] = logo_bytes
         except Exception:
             pass
 
@@ -97,6 +96,9 @@ def get_college_logo_bytes(college_header_obj=None):
             except Exception:
                 pass
 
+    if logo_bytes:
+        _cached_logo_bytes[cache_key] = logo_bytes
+
     return logo_bytes
 
 
@@ -110,13 +112,11 @@ def build_standard_college_header(college_header_obj, page_w=555, logo_size=60):
     Note: The report name is intentionally NOT included in this box.
     """
     if not college_header_obj:
-        return Spacer(0, 0)
+        from institution.models import CollegeHeader
+        college_header_obj = CollegeHeader.objects.first()
 
-    college_name_str = college_header_obj.college_name.upper() if getattr(college_header_obj, 'college_name', None) else ""
-    college_addr_str = college_header_obj.address.strip() if getattr(college_header_obj, 'address', None) else ""
-
-    if not college_name_str and not college_addr_str:
-        return Spacer(0, 0)
+    college_name_str = college_header_obj.college_name.upper() if getattr(college_header_obj, 'college_name', None) else "THIRUMALAI ENGINEERING COLLEGE"
+    college_addr_str = college_header_obj.address.strip() if getattr(college_header_obj, 'address', None) else "Kilambi, Krishnapuram Post - 631 551, Kancheepuram Taluk & District, Tamil Nadu."
 
     logo_bytes = get_college_logo_bytes(college_header_obj)
     logo_flowable = RLImage(BytesIO(logo_bytes), width=logo_size, height=logo_size) if logo_bytes else None

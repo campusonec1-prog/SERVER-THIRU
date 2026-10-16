@@ -16,6 +16,7 @@ urlpatterns = [
     re_path(r'^bulk-import/?$', UserViewSet.as_view({'post': 'bulk_import'}), name='user-bulk-import'),
     re_path(r'^device-token/?$', DeviceTokenView.as_view(), name='device-token'),
     re_path(r'^test-push/?$', TestPushNotificationView.as_view(), name='test-push'),
+    re_path(r'^faculty-report/pdf/?$', UserViewSet.as_view({'post': 'faculty_report_pdf', 'get': 'faculty_report_pdf'}), name='faculty-report-pdf'),
 
     # User Details endpoints
     re_path(r'^details/create/?$', UserDetailsViewSet.as_view({'post': 'create'}), name='user-details-create'),

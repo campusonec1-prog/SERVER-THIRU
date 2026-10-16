@@ -1166,6 +1166,205 @@ class UserViewSet(viewsets.ModelViewSet):
             }
         }, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=['get', 'post'], url_path='faculty-report/pdf')
+    def faculty_report_pdf(self, request, *args, **kwargs):
+        from io import BytesIO
+        from django.http import HttpResponse
+        from django.db.models import Q
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
+        from reportlab.lib import colors
+        from reportlab.lib.styles import ParagraphStyle
+        from common.report_utils import build_standard_college_header, build_centered_report_title
+        from institution.models import CollegeHeader, Department
+        from role.models import Role
+
+        req_data = getattr(request, 'data', None) or {}
+        req_params = getattr(request, 'query_params', None) or getattr(request, 'GET', {})
+
+        # Roles filter (can be passed as array or comma-separated string)
+        raw_roles = (
+            req_data.get('roles') or
+            req_params.get('roles') or
+            req_data.get('role_ids') or
+            req_params.get('role_ids') or
+            req_data.get('role_names') or
+            req_params.get('role_names')
+        )
+
+        dept_param = (
+            req_data.get('department') or
+            req_params.get('department') or
+            req_data.get('department_id') or
+            req_params.get('department_id')
+        )
+
+        header_type = (
+            req_data.get('report_header') or
+            req_params.get('report_header') or
+            req_data.get('header_id') or
+            req_params.get('header_id')
+        )
+
+        roles_filter = []
+        if isinstance(raw_roles, str):
+            roles_filter = [r.strip() for r in raw_roles.split(',') if r.strip()]
+        elif isinstance(raw_roles, (list, tuple)):
+            roles_filter = [str(r).strip() for r in raw_roles if str(r).strip()]
+
+        # Query all non-student users
+        qs = User.objects.exclude(role__role_name__iexact='STUDENT').select_related(
+            'role'
+        ).prefetch_related(
+            'user_details',
+            'user_details__department'
+        )
+
+        if roles_filter:
+            id_list = [int(r) for r in roles_filter if str(r).isdigit()]
+            name_list = [r for r in roles_filter if not str(r).isdigit()]
+            role_q = Q()
+            if id_list:
+                role_q |= Q(role__role_id__in=id_list)
+            if name_list:
+                role_q |= Q(role__role_name__in=name_list)
+            qs = qs.filter(role_q)
+
+        # Department resolution
+        department_obj = None
+        if dept_param and str(dept_param).strip() and str(dept_param).lower() != 'all':
+            dept_str = str(dept_param).strip()
+            if dept_str.isdigit():
+                department_obj = Department.objects.filter(id=int(dept_str)).first()
+            if not department_obj:
+                department_obj = Department.objects.filter(department_code=dept_str).first()
+            if not department_obj:
+                department_obj = Department.objects.filter(department_name__iexact=dept_str).first()
+
+        current_user = request.user if hasattr(request, 'user') and request.user.is_authenticated else None
+        current_role = getattr(getattr(current_user, 'role', None), 'role_name', '').upper() if current_user else ''
+
+        # If HOD, confine to their handled departments
+        if current_role == 'HOD' and current_user:
+            hod_first_detail = getattr(current_user, 'user_details', None)
+            hod_dept_id = getattr(hod_first_detail.first(), 'department_id', None) if hod_first_detail and hasattr(hod_first_detail, 'first') else None
+            hod_depts = Department.objects.filter(Q(hod=current_user) | (Q(id=hod_dept_id) if hod_dept_id else Q()))
+            hod_dept_ids = list(hod_depts.values_list('id', flat=True))
+
+            if department_obj:
+                if department_obj.id in hod_dept_ids:
+                    qs = qs.filter(
+                        Q(user_details__department=department_obj) |
+                        Q(id__in=Department.objects.filter(id=department_obj.id, hod__isnull=False).values_list('hod_id', flat=True))
+                    )
+                else:
+                    return HttpResponse("You are not authorized to view this department.", status=403)
+            elif hod_dept_ids:
+                qs = qs.filter(
+                    Q(user_details__department_id__in=hod_dept_ids) |
+                    Q(id__in=Department.objects.filter(id__in=hod_dept_ids, hod__isnull=False).values_list('hod_id', flat=True))
+                )
+        elif department_obj:
+            qs = qs.filter(
+                Q(user_details__department=department_obj) |
+                Q(id__in=Department.objects.filter(id=department_obj.id, hod__isnull=False).values_list('hod_id', flat=True))
+            )
+
+        # College header resolution
+        college_header_obj = None
+        if header_type:
+            if str(header_type).isdigit():
+                college_header_obj = CollegeHeader.objects.filter(id=int(header_type)).first()
+            if not college_header_obj:
+                college_header_obj = CollegeHeader.objects.filter(header_type=header_type).first()
+        if not college_header_obj:
+            college_header_obj = CollegeHeader.objects.first()
+
+        faculty_users = list(qs.distinct().order_by('name'))
+
+        if not faculty_users:
+            return HttpResponse("No faculty/staff members found matching the selected criteria.", status=400)
+
+        # Pre-fetch HOD departments map in a single query to eliminate N+1 DB roundtrips
+        hod_depts_map = dict(Department.objects.filter(hod__isnull=False).values_list('hod_id', 'department_name'))
+
+        # ── PDF Generation ──
+        buffer = BytesIO()
+        page_size = A4
+        doc = SimpleDocTemplate(buffer, pagesize=page_size, leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
+        story = []
+
+        page_w = page_size[0] - 40  # 555.27 pt
+        col_widths = [35, 140, 150, 100, 130]  # Total = 555 pt (S.No, Department Name, Faculty Name, Faculty Code, Designation)
+
+        # 1. College Header
+        header_table = build_standard_college_header(college_header_obj, page_w=page_w, logo_size=62)
+        if header_table:
+            story.append(header_table)
+            story.append(Spacer(1, 6))
+
+        # 2. Report Title
+        story.append(build_centered_report_title("FACULTY REPORT", font_size=12, leading=15))
+        story.append(Spacer(1, 8))
+
+        # Styles
+        tbl_hdr = ParagraphStyle('FTH', fontName='Times-Bold', fontSize=10, leading=13, alignment=1, textColor=colors.black)
+        tbl_cell_center = ParagraphStyle('FTCC', fontName='Times-Roman', fontSize=9, leading=12, alignment=1, textColor=colors.black)
+        tbl_cell_left = ParagraphStyle('FTCL', fontName='Times-Roman', fontSize=9, leading=12, alignment=0, textColor=colors.black)
+
+        # 3. Table Rows
+        header_row = [
+            Paragraph("<b>S.No</b>", tbl_hdr),
+            Paragraph("<b>Department Name</b>", tbl_hdr),
+            Paragraph("<b>Faculty Name</b>", tbl_hdr),
+            Paragraph("<b>Faculty Code</b>", tbl_hdr),
+            Paragraph("<b>Designation</b>", tbl_hdr),
+        ]
+        table_rows = [header_row]
+
+        for i, u in enumerate(faculty_users, start=1):
+            # Access pre-fetched details from in-memory cache without hitting database
+            det = next(iter(u.user_details.all()), None)
+            dept_name = '—'
+            if det and getattr(det, 'department', None):
+                dept_name = det.department.department_name
+            elif u.id in hod_depts_map:
+                dept_name = hod_depts_map[u.id]
+
+            fac_code = getattr(det, 'faculty_code', '—') if det and det.faculty_code else '—'
+            desig = getattr(det, 'designation', '') if det and det.designation else (u.role.role_name.title() if u.role else 'Staff')
+
+            table_rows.append([
+                Paragraph(str(i), tbl_cell_center),
+                Paragraph(dept_name, tbl_cell_left),
+                Paragraph(u.name.upper(), tbl_cell_left),
+                Paragraph(fac_code, tbl_cell_center),
+                Paragraph(desig, tbl_cell_left),
+            ])
+
+        fac_table = Table(table_rows, colWidths=col_widths, repeatRows=1)
+        ts = [
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#64748B')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E2E8F0')),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+        ]
+        for r in range(1, len(table_rows)):
+            if r % 2 == 0:
+                ts.append(('BACKGROUND', (0, r), (-1, r), colors.HexColor('#F8FAFC')))
+        fac_table.setStyle(TableStyle(ts))
+        story.append(fac_table)
+
+        doc.build(story)
+        buffer.seek(0)
+
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="Faculty_Report.pdf"'
+        return response
+
 
 class UserDetailsViewSet(viewsets.ModelViewSet):
     queryset = UserDetails.objects.select_related('user', 'role', 'department').all().order_by('id')
