@@ -80,19 +80,22 @@ class DepartmentSerializer(TrackingModelSerializerMixin, serializers.ModelSerial
     # Read-only: allows frontend to disambiguate departments with the same name
     program_name = serializers.CharField(source='program.program_name', read_only=True)
     program_level = serializers.CharField(source='program.program_level', read_only=True)
+    hod_name = serializers.CharField(source='hod.name', read_only=True, default='')
+    hod_username = serializers.CharField(source='hod.username', read_only=True, default='')
 
     class Meta:
         model = Department
         fields = [
             'id', 'department_name', 'department_code', 'short_name',
             'program_id', 'program_name', 'program_level',
-            'hod_id', 'is_active', 'is_display',
+            'hod_id', 'hod_name', 'hod_username', 'is_active', 'is_display',
             'created_at', 'updated_at', 'created_by', 'updated_by',
             'created_by_name', 'created_by_username', 'created_by_role',
             'updated_by_name', 'updated_by_username', 'updated_by_role',
         ]
 
         read_only_fields = [
+            'hod_name', 'hod_username',
             'created_at', 'updated_at', 'created_by', 'updated_by',
             'created_by_name', 'created_by_username', 'created_by_role',
             'updated_by_name', 'updated_by_username', 'updated_by_role',

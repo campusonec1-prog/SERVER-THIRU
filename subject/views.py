@@ -160,15 +160,19 @@ class SubjectViewSet(viewsets.ModelViewSet):
         queryset = self.get_queryset()
         
         # Filtering parameters
-        department_id = request.query_params.get('department_id') or request.query_params.get('department')
+        dept_param = request.query_params.get('department_ids') or request.query_params.get('department_id') or request.query_params.get('department')
         regulation_id = request.query_params.get('regulation_id') or request.query_params.get('regulation')
         is_theory = request.query_params.get('is_theory')
         is_lab = request.query_params.get('is_lab')
         is_active = request.query_params.get('is_active')
         search = request.query_params.get('search')
 
-        if department_id:
-            queryset = queryset.filter(department_id=department_id)
+        if dept_param:
+            dept_id_list = [d.strip() for d in str(dept_param).split(',') if d.strip().isdigit()]
+            if len(dept_id_list) > 1:
+                queryset = queryset.filter(department_id__in=dept_id_list)
+            elif len(dept_id_list) == 1:
+                queryset = queryset.filter(department_id=dept_id_list[0])
         if regulation_id:
             queryset = queryset.filter(regulation_id=regulation_id)
         semester_val = request.query_params.get('semester_id') or request.query_params.get('semester_number') or request.query_params.get('semester')
