@@ -546,47 +546,76 @@ class ApplicationPDFDownloadView(APIView):
         logo_url = college_header_obj.primary_logo if college_header_obj else None
 
         # -------------------------------------------------------------
-        # Helper to load image securely & convert WebP/PNG for ReportLab
+        # Helper to load image securely & preserve aspect ratio without distortion
         # -------------------------------------------------------------
-        def load_image(url_or_path, width, height):
+        def load_image(url_or_path, max_width, max_height):
             if not url_or_path:
                 return None
             try:
+                pil_img = None
                 if isinstance(url_or_path, str) and url_or_path.startswith('http'):
                     headers = {'User-Agent': 'Mozilla/5.0'}
                     req = urllib.request.Request(url_or_path, headers=headers)
                     with urllib.request.urlopen(req, timeout=5) as response:
                         img_data = response.read()
                         pil_img = PILImage.open(BytesIO(img_data))
-                        # Convert WebP/etc to PNG in memory
-                        out_io = BytesIO()
-                        pil_img.save(out_io, format='PNG')
-                        out_io.seek(0)
-                        return RLImage(out_io, width=width, height=height)
                 else:
                     if os.path.exists(url_or_path):
                         pil_img = PILImage.open(url_or_path)
-                        out_io = BytesIO()
-                        pil_img.save(out_io, format='PNG')
-                        out_io.seek(0)
-                        return RLImage(out_io, width=width, height=height)
+
+                if not pil_img:
+                    return None
+
+                # Convert to RGBA for consistent handling
+                if pil_img.mode not in ('RGB', 'RGBA'):
+                    pil_img = pil_img.convert('RGBA')
+
+                # Autocrop transparent borders to center image content tightly
+                if pil_img.mode == 'RGBA':
+                    bbox = pil_img.getbbox()
+                    if bbox:
+                        w_orig, h_orig = pil_img.size
+                        pad = 4
+                        crop_box = (
+                            max(0, bbox[0] - pad),
+                            max(0, bbox[1] - pad),
+                            min(w_orig, bbox[2] + pad),
+                            min(h_orig, bbox[3] + pad)
+                        )
+                        pil_img = pil_img.crop(crop_box)
+
+                # Maintain exact proportional aspect ratio (no squishing/stretching)
+                orig_w, orig_h = pil_img.size
+                scale = min(max_width / orig_w, max_height / orig_h)
+                final_w = max(1, orig_w * scale)
+                final_h = max(1, orig_h * scale)
+
+                out_io = BytesIO()
+                pil_img.save(out_io, format='PNG')
+                out_io.seek(0)
+                return RLImage(out_io, width=final_w, height=final_h)
             except Exception as e:
                 print(f"[PDF Gen] Failed to load image {url_or_path}: {e}")
             return None
 
-        # Resolve primary college logo
+        # Resolve primary college logo (prefer official emblem crest)
         logo_flowable = None
         if logo_url:
-            logo_flowable = load_image(logo_url, 52, 52)
+            logo_flowable = load_image(logo_url, 72, 68)
         if not logo_flowable:
-            # Fallback to local logo path in frontend assets
-            fallback_logo_path = 'd:\\IMS-Thirumalai\\APP-THIRU\\src\\assets\\logo.webp'
-            logo_flowable = load_image(fallback_logo_path, 52, 52)
+            # Fallback to local official emblem in frontend assets
+            fallback_emblem_path = 'd:\\IMS-Thirumalai\\APP-THIRU\\src\\assets\\emblem.png'
+            if os.path.exists(fallback_emblem_path):
+                logo_flowable = load_image(fallback_emblem_path, 72, 68)
+            else:
+                fallback_logo_path = 'd:\\IMS-Thirumalai\\APP-THIRU\\src\\assets\\logo.webp'
+                logo_flowable = load_image(fallback_logo_path, 72, 68)
 
-        # Resolve secondary emblem (BMQR)
-        emblem_flowable = None
-        fallback_emblem_path = 'd:\\IMS-Thirumalai\\APP-THIRU\\src\\assets\\emblem.png'
-        emblem_flowable = load_image(fallback_emblem_path, 52, 17)
+        # Resolve secondary logo only if explicitly provided in database
+        secondary_logo_url = getattr(college_header_obj, 'secondary_logo', None) if college_header_obj else None
+        secondary_logo_flowable = None
+        if secondary_logo_url:
+            secondary_logo_flowable = load_image(secondary_logo_url, 50, 25)
 
         # Resolve candidate photo
         photo_url = get_val('photo')
@@ -664,18 +693,18 @@ class ApplicationPDFDownloadView(APIView):
         story.append(Spacer(1, 4))
 
         # 2. Header Grid (Logo, Titles, Photo Box)
-        # Left cell container for logo and emblem
+        # Left cell container for college logo
         logo_cells = []
         if logo_flowable:
             logo_cells.append([logo_flowable])
-        if emblem_flowable:
-            logo_cells.append([emblem_flowable])
+        if secondary_logo_flowable:
+            logo_cells.append([secondary_logo_flowable])
         
-        left_t = Table(logo_cells if logo_cells else [['']], colWidths=[55])
+        left_t = Table(logo_cells if logo_cells else [['']], colWidths=[72])
         left_t.setStyle(TableStyle([
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 0),
             ('TOPPADDING', (0,0), (-1,-1), 0),
             ('LEFTPADDING', (0,0), (-1,-1), 0),
             ('RIGHTPADDING', (0,0), (-1,-1), 0),
@@ -684,7 +713,7 @@ class ApplicationPDFDownloadView(APIView):
         # Middle Titles Container
         app_heading = Table(
             [[Paragraph('Application Form for Admission to B.E. / B.Tech. / M.E. / MBA / MCA Degree Course', app_title_style)]],
-            colWidths=[385],
+            colWidths=[380],
             rowHeights=[16]
         )
         app_heading.setStyle(TableStyle([
@@ -704,7 +733,7 @@ class ApplicationPDFDownloadView(APIView):
             [Spacer(1, 2)],
             [app_heading]
         ]
-        mid_t = Table(mid_cells, colWidths=[395])
+        mid_t = Table(mid_cells, colWidths=[388])
         mid_t.setStyle(TableStyle([
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -752,9 +781,10 @@ class ApplicationPDFDownloadView(APIView):
             ]))
 
         # Assemble Header
-        header_table = Table([[left_t, mid_t, photo_box_t]], colWidths=[60, 400, 75])
+        header_table = Table([[left_t, mid_t, photo_box_t]], colWidths=[72, 388, 75])
         header_table.setStyle(TableStyle([
-            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ALIGN', (0,0), (0,0), 'CENTER'),
             ('LEFTPADDING', (0,0), (-1,-1), 0),
             ('RIGHTPADDING', (0,0), (-1,-1), 0),
             ('TOPPADDING', (0,0), (-1,-1), 0),
