@@ -6,6 +6,8 @@ from .views import (
     SendAfternoonAbsentSMSView,
     FeesPendingStudentsListView,
     SendFeesPendingSMSView,
+    MarksStudentsListView,
+    SendMarksSMSView,
     SMSLogViewSet,
     SMSBalanceView,
     SMSDashboardStatsView
@@ -20,7 +22,10 @@ urlpatterns = [
     path('send-afternoon-absent', SendAfternoonAbsentSMSView.as_view(), name='sms-send-afternoon-absent'),
     path('fees/pending-students', FeesPendingStudentsListView.as_view(), name='sms-fees-pending-students'),
     path('send-fees-pending', SendFeesPendingSMSView.as_view(), name='sms-send-fees-pending'),
+    path('marks/students', MarksStudentsListView.as_view(), name='sms-marks-students'),
+    path('send-marks', SendMarksSMSView.as_view(), name='sms-send-marks'),
     path('logs', SMSLogViewSet.as_view({'get': 'list'}), name='sms-logs-list'),
     path('logs/<int:pk>', SMSLogViewSet.as_view({'get': 'retrieve'}), name='sms-logs-detail'),
 ]
+
 

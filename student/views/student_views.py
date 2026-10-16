@@ -1637,25 +1637,81 @@ class StudentViewSet(viewsets.ModelViewSet):
         def extract_sem_num(subject_obj):
             if not subject_obj:
                 return 1
+            # 1. If subject_obj is directly a Semester instance
+            if hasattr(subject_obj, 'semester_number') and subject_obj.semester_number:
+                try:
+                    num = int(subject_obj.semester_number)
+                    if 1 <= num <= 8:
+                        return num
+                except (ValueError, TypeError):
+                    pass
+            if hasattr(subject_obj, 'semester_name') and subject_obj.semester_name:
+                m = re.search(r'\d+', str(subject_obj.semester_name))
+                if m:
+                    try:
+                        num = int(m.group(0))
+                        if 1 <= num <= 8:
+                            return num
+                    except (ValueError, TypeError):
+                        pass
+
+            # 2. If subject_obj is a Subject instance with related semester
+            sem = getattr(subject_obj, 'semester', None)
+            if sem:
+                if hasattr(sem, 'semester_number') and sem.semester_number:
+                    try:
+                        num = int(sem.semester_number)
+                        if 1 <= num <= 8:
+                            return num
+                    except (ValueError, TypeError):
+                        pass
+                if hasattr(sem, 'semester_name') and sem.semester_name:
+                    m = re.search(r'\d+', str(sem.semester_name))
+                    if m:
+                        try:
+                            num = int(m.group(0))
+                            if 1 <= num <= 8:
+                                return num
+                        except (ValueError, TypeError):
+                            pass
+
+            # 3. If subject_obj has semester_id pointing to Semester model
+            sem_id = getattr(subject_obj, 'semester_id', None)
+            if sem_id:
+                try:
+                    from institution.models import Semester
+                    s_obj = Semester.objects.filter(id=int(sem_id)).first()
+                    if s_obj:
+                        if s_obj.semester_number and 1 <= int(s_obj.semester_number) <= 8:
+                            return int(s_obj.semester_number)
+                        m = re.search(r'\d+', str(s_obj.semester_name or ''))
+                        if m and 1 <= int(m.group(0)) <= 8:
+                            return int(m.group(0))
+                except Exception:
+                    pass
+
+            # 4. Fallback to parsing subject code only if no semester association found
+            # Matches traditional Anna University 4-digit code e.g. CS8201 (digit 2 is sem 2)
             code = getattr(subject_obj, 'subject_code', '') or ''
-            m = re.search(r'^[A-Za-z]+(\d)(\d)', code)
+            m = re.search(r'^[A-Za-z]{2,4}\d(\d)\d{2}$', code)
             if m:
                 try:
-                    sem_digit = int(m.group(2))
+                    sem_digit = int(m.group(1))
                     if 1 <= sem_digit <= 8:
                         return sem_digit
                 except (ValueError, TypeError):
                     pass
-            if hasattr(subject_obj, 'semester_id') and subject_obj.semester_id:
-                try:
-                    s_id = int(subject_obj.semester_id)
-                    if 1 <= s_id <= 8:
-                        return s_id
-                except (ValueError, TypeError):
-                    pass
+
             return 1
 
         def resolve_sem_label(subject_obj):
+            if not subject_obj:
+                return "Semester 1"
+            if hasattr(subject_obj, 'semester_name') and subject_obj.semester_name and str(subject_obj.semester_name).strip():
+                return str(subject_obj.semester_name).strip()
+            sem = getattr(subject_obj, 'semester', None)
+            if sem and hasattr(sem, 'semester_name') and sem.semester_name and str(sem.semester_name).strip():
+                return str(sem.semester_name).strip()
             sem_num = extract_sem_num(subject_obj)
             return f"Semester {sem_num}"
 

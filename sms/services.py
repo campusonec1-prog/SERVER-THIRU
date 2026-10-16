@@ -19,6 +19,7 @@ DEFAULT_SENDER_ID = getattr(settings, 'DIAL4SMS_SENDER_ID', os.getenv('DIAL4SMS_
 DEFAULT_FULLDAY_TEMPLATE_ID = getattr(settings, 'DIAL4SMS_FULLDAY_ABSENT_TEMPLATE_ID', os.getenv('DIAL4SMS_FULLDAY_ABSENT_TEMPLATE_ID', ''))
 DEFAULT_AFTERNOON_TEMPLATE_ID = getattr(settings, 'DIAL4SMS_AFTERNOON_ABSENT_TEMPLATE_ID', os.getenv('DIAL4SMS_AFTERNOON_ABSENT_TEMPLATE_ID', ''))
 DEFAULT_FEES_TEMPLATE_ID = getattr(settings, 'DIAL4SMS_FEES_TEMPLATE_ID', os.getenv('DIAL4SMS_FEES_TEMPLATE_ID', '1177179058551929973'))
+DEFAULT_MARKS_TEMPLATE_ID = getattr(settings, 'DIAL4SMS_MARKS_TEMPLATE_ID', os.getenv('DIAL4SMS_MARKS_TEMPLATE_ID', '1177179058575792171'))
 
 
 def sanitize_phone_number(phone_raw):
@@ -531,6 +532,154 @@ def send_fees_pending_sms_to_student(student, balance_amount, user=None, recipie
         'register_number': info['register_number'],
         'phone_number': target_phone,
         'amount': amount_str,
+        'status': gw_result['status'],
+        'response_id': gw_result['response_id'],
+        'error': gw_result['error'],
+        'log_id': log_entry.id,
+        'gateway_response': gw_result['gateway_response']
+    }
+
+
+def format_marks_message(exam_name, student_name, roll_no, subject_marks_list, total_marks, rank):
+    """
+    Formats Marks SMS to strictly match DLT registered template:
+    Template:
+    Dear Parent, {#var#} Marks Name: {#var#} Roll No: {#var#} Subject-wise Marks: {#var#}{#var#} Total: {#var#} Rank: {#var#} Regards, Principal - Thirumalai Engineering College
+
+    var1 - Exam Name (e.g. CAT-1, CAT-2, MODEL, NOV/DEC-25)
+    var2 - Student Name
+    var3 - Roll No
+    var4 - Subject-wise Marks Part 1 (e.g. cs2501: 80, cs2506: 75, )
+    var5 - Subject-wise Marks Part 2 (e.g. cs2502: 45, cs2508: 60)
+    var6 - Total
+    var7 - Rank
+    """
+    clean_exam = str(exam_name or 'EXAM').strip()
+    clean_name = str(student_name or 'Student').strip()
+    clean_roll = str(roll_no or '').strip()
+
+    # Split subject marks into var4 and var5
+    formatted_items = []
+    if isinstance(subject_marks_list, list):
+        for item in subject_marks_list:
+            if isinstance(item, dict):
+                code = str(item.get('code') or item.get('subject_code') or '').strip()
+                marks = str(item.get('marks') or item.get('marks_obtained') or '').strip()
+            elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                code = str(item[0]).strip()
+                marks = str(item[1]).strip()
+            else:
+                continue
+            if code:
+                formatted_items.append(f"{code}: {marks}")
+
+    if not formatted_items:
+        part1 = "-"
+        part2 = " "
+    elif len(formatted_items) == 1:
+        part1 = formatted_items[0]
+        part2 = " "
+    else:
+        mid = (len(formatted_items) + 1) // 2
+        part1_items = formatted_items[:mid]
+        part2_items = formatted_items[mid:]
+        part1 = ", ".join(part1_items) + ", "
+        part2 = ", ".join(part2_items)
+
+    total_str = str(total_marks if total_marks is not None else 0).strip()
+    rank_str = str(rank if rank is not None else 1).strip()
+
+    # Construct the DLT exact match text
+    message = (
+        f"Dear Parent, {clean_exam} Marks Name: {clean_name} Roll No: {clean_roll} "
+        f"Subject-wise Marks: {part1}{part2} Total: {total_str} Rank: {rank_str} "
+        f"Regards, Principal - Thirumalai Engineering College"
+    )
+
+    return message, part1, part2, total_str, rank_str
+
+
+def send_marks_sms_to_student(student, exam_name, subject_marks_list, total_marks, rank, recipient_type='PARENT', user=None, roll_no=None):
+    """
+    Sends Marks SMS using Dial4SMS HTTP API and logs to SMSLog table.
+    """
+    info = get_student_sms_info(student)
+    student_name = info['student_name']
+    parent_phone = info['parent_mobile']
+    student_phone = info['student_mobile']
+    clean_roll = roll_no or getattr(student, 'roll_number', '') or info.get('register_number') or ''
+
+    target_phone = parent_phone if recipient_type == 'PARENT' else (student_phone or parent_phone)
+
+    message, part1, part2, total_str, rank_str = format_marks_message(
+        exam_name=exam_name,
+        student_name=student_name,
+        roll_no=clean_roll,
+        subject_marks_list=subject_marks_list,
+        total_marks=total_marks,
+        rank=rank
+    )
+    template_id = getattr(settings, 'DIAL4SMS_MARKS_TEMPLATE_ID', os.getenv('DIAL4SMS_MARKS_TEMPLATE_ID', DEFAULT_MARKS_TEMPLATE_ID))
+    sent_date = datetime.date.today()
+
+    if not target_phone:
+        log_entry = SMSLog.objects.create(
+            student=student,
+            recipient_type=recipient_type,
+            phone_number='N/A',
+            student_name=student_name,
+            register_number=clean_roll,
+            sms_type='MARKS',
+            template_id=template_id,
+            message=message,
+            sent_date=sent_date,
+            status='FAILED',
+            gateway_response={'error': f'No {recipient_type.lower()} phone number available for student'},
+            error_message=f'No {recipient_type.lower()} phone number available for student',
+            created_by=user,
+            updated_by=user
+        )
+        return {
+            'student_id': student.id,
+            'student_name': student_name,
+            'register_number': clean_roll,
+            'phone_number': '',
+            'status': 'FAILED',
+            'error': f'No valid {recipient_type.lower()} phone number on file',
+            'log_id': log_entry.id
+        }
+
+    # Dispatch to Dial4SMS Gateway
+    gw_result = send_dial4sms_single(
+        phone_number=target_phone,
+        message=message,
+        template_id=template_id
+    )
+
+    # Save to SMSLog
+    log_entry = SMSLog.objects.create(
+        student=student,
+        recipient_type=recipient_type,
+        phone_number=target_phone,
+        student_name=student_name,
+        register_number=clean_roll,
+        sms_type='MARKS',
+        template_id=template_id,
+        message=message,
+        sent_date=sent_date,
+        status=gw_result['status'],
+        gateway_response=gw_result['gateway_response'],
+        response_id=gw_result['response_id'],
+        error_message=gw_result['error'],
+        created_by=user,
+        updated_by=user
+    )
+
+    return {
+        'student_id': student.id,
+        'student_name': student_name,
+        'register_number': clean_roll,
+        'phone_number': target_phone,
         'status': gw_result['status'],
         'response_id': gw_result['response_id'],
         'error': gw_result['error'],

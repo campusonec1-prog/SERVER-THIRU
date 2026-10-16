@@ -402,6 +402,20 @@ class MarksSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer)
         ] + TrackingModelSerializerMixin.TRACKING_FIELDS
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
+    def validate_marks_obtained(self, value):
+        val_str = str(value or '').strip()
+        if not val_str:
+            raise serializers.ValidationError("Marks obtained cannot be empty.")
+        val_upper = val_str.upper()
+        if val_upper not in ['AB', 'UA', 'ABSENT', 'A', '-', 'N/A', 'O', 'S', 'A+', 'B+', 'B', 'C+', 'C', 'P', 'U', 'RA', 'SA', 'W', 'F']:
+            try:
+                num = float(val_str)
+                if num < 0 or num > 100:
+                    raise serializers.ValidationError("Marks must be between 0 and 100.")
+            except ValueError:
+                pass
+        return val_str
+
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         
@@ -447,27 +461,40 @@ class MarksSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer)
             ret['credits'] = float(subject.credits) if subject.credits is not None else 0.0
             
             sem_num = 1
-            if hasattr(subject, 'semester_id') and subject.semester_id:
+            sem_name = "Semester 1"
+            sem_obj = getattr(subject, 'semester', None)
+            if sem_obj:
+                if getattr(sem_obj, 'semester_number', None) and 1 <= int(sem_obj.semester_number) <= 8:
+                    sem_num = int(sem_obj.semester_number)
+                elif getattr(sem_obj, 'semester_name', None):
+                    import re
+                    m = re.search(r'\d+', str(sem_obj.semester_name))
+                    if m and 1 <= int(m.group(0)) <= 8:
+                        sem_num = int(m.group(0))
+                sem_name = getattr(sem_obj, 'semester_name', None) or f"Semester {sem_num}"
+            elif hasattr(subject, 'semester_id') and subject.semester_id:
                 try:
-                    sem_num = int(subject.semester_id)
-                except (ValueError, TypeError):
-                    pass
-            elif subject.semester and hasattr(subject.semester, 'id') and subject.semester.id:
-                try:
-                    sem_num = int(subject.semester.id)
-                except (ValueError, TypeError):
+                    from institution.models import Semester
+                    s_rec = Semester.objects.filter(id=int(subject.semester_id)).first()
+                    if s_rec:
+                        if s_rec.semester_number and 1 <= int(s_rec.semester_number) <= 8:
+                            sem_num = int(s_rec.semester_number)
+                        sem_name = s_rec.semester_name or f"Semester {sem_num}"
+                except Exception:
                     pass
             elif subject.subject_code:
                 import re
-                m_code = re.search(r'^[A-Za-z]+(\d)(\d)', subject.subject_code)
+                m_code = re.search(r'^[A-Za-z]{2,4}\d(\d)\d{2}$', subject.subject_code)
                 if m_code:
                     try:
-                        sem_num = int(m_code.group(2))
+                        sem_num = int(m_code.group(1))
+                        sem_name = f"Semester {sem_num}"
                     except (ValueError, TypeError):
                         pass
+
             ret['semester_num'] = sem_num
-            ret['semester_name'] = f"Semester {sem_num}"
-            ret['semester_id'] = subject.semester.id if subject.semester else sem_num
+            ret['semester_name'] = sem_name
+            ret['semester_id'] = subject.semester.id if subject.semester else (getattr(subject, 'semester_id', None) or sem_num)
             
         if instance.created_by:
             ret['entered_by_name'] = instance.created_by.name

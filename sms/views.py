@@ -1,5 +1,6 @@
 import datetime
 import logging
+import re
 from django.conf import settings
 from django.db.models import Q, Max
 from rest_framework import status, permissions
@@ -19,6 +20,8 @@ from .serializers import (
     SendAfternoonAbsentSMSRequestSerializer,
     FeesPendingStudentSerializer,
     SendFeesPendingSMSRequestSerializer,
+    MarksStudentSerializer,
+    SendMarksSMSRequestSerializer,
 )
 from .services import (
     get_student_sms_info,
@@ -26,6 +29,8 @@ from .services import (
     send_afternoon_absent_sms_to_student,
     send_fees_pending_sms_to_student,
     format_fees_pending_message,
+    send_marks_sms_to_student,
+    format_marks_message,
     get_dial4sms_balance,
 )
 
@@ -883,6 +888,531 @@ class SendFeesPendingSMSView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+class MarksStudentsListView(APIView):
+    """
+    Returns list of students with entered marks for an exam.
+    Filters: exam_id, program_id, department_id, batch_id, section_id, search.
+    Computes total marks and class rank for each student based on their class group:
+    (batch, department, section).
+    Includes subject-wise marks, formatted DLT template preview, and live SMS delivery status.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from student.models import Marks
+        from institution.models import Exam, Section, Batch, Semester, Department, Program
+
+        exam_id = request.query_params.get('exam_id')
+        program_id = request.query_params.get('program_id')
+        department_id = request.query_params.get('department_id')
+        batch_id = request.query_params.get('batch_id')
+        section_id = request.query_params.get('section_id')
+        semester_id = request.query_params.get('semester_id')
+        search_query = (request.query_params.get('search') or '').strip().lower()
+
+        # Resolve exam
+        exam_obj = None
+        if exam_id:
+            exam_obj = Exam.objects.filter(id=exam_id).first()
+        if not exam_obj:
+            exam_obj = Exam.objects.filter(is_active=True).order_by('-id').first()
+            if exam_obj:
+                exam_id = exam_obj.id
+
+        if not exam_obj:
+            return Response({
+                "code": 200,
+                "message": "No active exams found",
+                "stats": {"total_students": 0, "sent_count": 0, "failed_count": 0, "not_sent_count": 0},
+                "data": []
+            }, status=status.HTTP_200_OK)
+
+        exam_name = exam_obj.exam_name
+
+        # 1. Fetch all marks entered for this exam to ensure accurate class ranking across the whole class group
+        marks_qs = Marks.objects.filter(exam_id=exam_obj.id).select_related(
+            'student',
+            'student__department',
+            'student__department__program',
+            'student__batch',
+            'student__section',
+            'student__application',
+            'student__application__candidate',
+            'subject',
+            'subject__semester',
+        ).order_by('student_id', 'subject__subject_code')
+
+        target_sem_num = None
+        if semester_id:
+            sem_clean = str(semester_id).strip()
+            if sem_clean.isdigit():
+                num = int(sem_clean)
+                if 1 <= num <= 8:
+                    target_sem_num = num
+                else:
+                    s_obj = Semester.objects.filter(id=num).first()
+                    if s_obj and s_obj.semester_number and 1 <= s_obj.semester_number <= 8:
+                        target_sem_num = s_obj.semester_number
+            else:
+                m_match = re.search(r'\d+', sem_clean)
+                if m_match and 1 <= int(m_match.group(0)) <= 8:
+                    target_sem_num = int(m_match.group(0))
+
+        if target_sem_num:
+            marks_qs = marks_qs.filter(
+                Q(subject__semester__semester_number=target_sem_num) |
+                Q(subject__semester__semester_name__iexact=f"Semester {target_sem_num}") |
+                Q(subject__semester__semester_name__iexact=f"Sem {target_sem_num}")
+            )
+
+        # Group all marks by student
+        all_students_map = {}
+        for m in marks_qs:
+            st = m.student
+            if not st:
+                continue
+            sid = st.id
+            if sid not in all_students_map:
+                all_students_map[sid] = {
+                    'student': st,
+                    'marks': []
+                }
+            all_students_map[sid]['marks'].append(m)
+
+        # 2. Compute total marks and group by class: (batch_id, department_id, section_id)
+        class_groups = {}  # (batch_id, dept_id, sec_id) -> list of (student_id, total_numeric)
+        student_totals = {}  # student_id -> { 'total_num': float, 'total_str': str, 'subject_items': list }
+
+        for sid, data in all_students_map.items():
+            st = data['student']
+            grp_key = (st.batch_id, st.department_id, st.section_id)
+            if grp_key not in class_groups:
+                class_groups[grp_key] = []
+
+            subj_items = []
+            tot_num = 0.0
+            for m in data['marks']:
+                val_clean = str(m.marks_obtained or '').strip()
+                code_str = m.subject.subject_code if m.subject else ''
+                name_str = m.subject.subject_name if m.subject else ''
+                sem_obj = getattr(m.subject, 'semester', None) if m.subject else None
+                subj_items.append({
+                    'code': code_str,
+                    'name': name_str,
+                    'marks': val_clean,
+                    'semester_id': sem_obj.id if sem_obj else None,
+                    'semester_name': sem_obj.semester_name if sem_obj else '',
+                })
+
+
+                # Numeric score parsing
+                if val_clean.upper() not in ['AB', 'UA', 'ABSENT', '-', '', 'N/A']:
+                    try:
+                        tot_num += float(val_clean)
+                    except ValueError:
+                        pass
+
+            tot_str = str(int(tot_num)) if tot_num.is_integer() else f"{tot_num:.1f}"
+            student_totals[sid] = {
+                'total_num': tot_num,
+                'total_str': tot_str,
+                'subject_items': subj_items
+            }
+            class_groups[grp_key].append((sid, tot_num))
+
+        # 3. Compute dense rank within each class group
+        rank_map = {}  # student_id -> rank
+        for grp_key, st_list in class_groups.items():
+            sorted_st = sorted(st_list, key=lambda x: x[1], reverse=True)
+            cur_rank = 0
+            prev_score = None
+            for s_id, score in sorted_st:
+                if prev_score is None or score != prev_score:
+                    cur_rank += 1
+                    prev_score = score
+                rank_map[s_id] = cur_rank
+
+        # Resolve section name target
+        sec_name_target = None
+        if section_id:
+            sec_clean = str(section_id).strip()
+            if sec_clean.isdigit():
+                sec_pk = int(sec_clean)
+                s_obj = None
+                if department_id and str(department_id).isdigit():
+                    s_obj = Section.objects.filter(id=sec_pk, department_id=int(department_id)).first()
+                if not s_obj:
+                    s_obj = Section.objects.filter(id=sec_pk).first()
+                if s_obj:
+                    sec_name_target = s_obj.sections.strip().upper()
+            else:
+                sec_name_target = sec_clean.upper()
+
+        # Resolve batch name target
+        batch_name_target = None
+        if batch_id:
+            batch_clean = str(batch_id).strip()
+            if batch_clean.isdigit():
+                b_pk = int(batch_clean)
+                b_obj = None
+                if department_id and str(department_id).isdigit():
+                    b_obj = Batch.objects.filter(id=b_pk, department_id=int(department_id)).first()
+                if not b_obj:
+                    b_obj = Batch.objects.filter(id=b_pk).first()
+                if b_obj:
+                    batch_name_target = b_obj.batch.strip().lower()
+            else:
+                batch_name_target = batch_clean.lower()
+
+        # 4. Filter students based on user query params
+        filtered_student_ids = []
+        for sid, data in all_students_map.items():
+            st = data['student']
+            if program_id:
+                prog_id = getattr(st.department, 'program_id', None)
+                if str(prog_id) != str(program_id):
+                    continue
+            if department_id and str(st.department_id) != str(department_id):
+                continue
+            if batch_id:
+                st_bname = (st.batch.batch if st.batch else '').strip().lower()
+                if str(st.batch_id) != str(batch_id) and (not batch_name_target or st_bname != batch_name_target):
+                    continue
+            if section_id:
+                st_sname = (st.section.sections if st.section else '').strip().upper()
+                if str(st.section_id) != str(section_id) and (not sec_name_target or st_sname != sec_name_target):
+                    continue
+            if search_query:
+                st_name = (st.student_name or st.name or '').lower()
+                roll = (st.roll_number or '').lower()
+                reg = (st.register_number or '').lower()
+                dept_name = (st.department.department_name if st.department else '').lower()
+                if search_query not in st_name and search_query not in roll and search_query not in reg and search_query not in dept_name:
+                    continue
+            filtered_student_ids.append(sid)
+
+        # 5. Query SMSLog for sms_type='MARKS' to get latest delivery status for these students
+        sms_logs = SMSLog.objects.filter(
+            student_id__in=filtered_student_ids,
+            sms_type='MARKS'
+        ).values('id', 'student_id', 'status', 'response_id', 'error_message', 'created_at', 'sent_date').order_by('-created_at')
+
+        latest_sms_map = {}
+        for log in sms_logs:
+            s_id = log['student_id']
+            if s_id and s_id not in latest_sms_map:
+                latest_sms_map[s_id] = log
+
+        # 6. Build enriched result list
+        enriched_students = []
+        sent_count = 0
+        failed_count = 0
+        not_sent_count = 0
+
+        for sid in filtered_student_ids:
+            st = all_students_map[sid]['student']
+            info = get_student_sms_info(st)
+            tot_info = student_totals.get(sid, {'total_num': 0.0, 'total_str': '0', 'subject_items': []})
+            s_rank = rank_map.get(sid, 1)
+
+            st_name = info['student_name']
+            clean_roll = getattr(st, 'roll_number', '') or info.get('register_number') or ''
+            subj_items = tot_info['subject_items']
+            total_str = tot_info['total_str']
+
+            msg_preview, part1, part2, _, _ = format_marks_message(
+                exam_name=exam_name,
+                student_name=st_name,
+                roll_no=clean_roll,
+                subject_marks_list=subj_items,
+                total_marks=total_str,
+                rank=s_rank
+            )
+
+            sms_log = latest_sms_map.get(sid)
+            if sms_log:
+                s_status = sms_log.get('status')
+                sms_sent_at = sms_log.get('created_at')
+                sms_log_id = sms_log.get('id')
+                sms_resp = {
+                    'response_id': sms_log.get('response_id'),
+                    'error_message': sms_log.get('error_message')
+                }
+                if s_status == 'SUCCESS':
+                    sent_count += 1
+                elif s_status == 'FAILED':
+                    failed_count += 1
+                else:
+                    not_sent_count += 1
+            else:
+                s_status = 'NOT_SENT'
+                sms_sent_at = None
+                sms_log_id = None
+                sms_resp = None
+                not_sent_count += 1
+
+            enriched = {
+                'student_id': sid,
+                'student_name': st_name,
+                'register_number': info.get('register_number') or '',
+                'roll_number': clean_roll,
+                'program_id': getattr(st.department, 'program_id', None) if st.department else None,
+                'program_name': getattr(st.department.program, 'program_name', '') if st.department and getattr(st.department, 'program', None) else '',
+                'department_id': st.department_id,
+                'department_name': st.department.department_name if st.department else '',
+                'department_code': st.department.department_code if st.department else '',
+                'batch_id': st.batch_id,
+                'batch_name': st.batch.batch if st.batch else '',
+                'section_id': st.section_id,
+                'section_name': st.section.sections if st.section else 'A',
+                'semester_id': next((sm['semester_id'] for sm in subj_items if sm.get('semester_id')), None),
+                'semester_name': next((sm['semester_name'] for sm in subj_items if sm.get('semester_name')), ''),
+                'exam_id': exam_obj.id,
+                'exam_name': exam_name,
+                'subject_marks': subj_items,
+                'marks_part_1': part1,
+                'marks_part_2': part2,
+                'total_marks': total_str,
+                'rank': s_rank,
+                'student_mobile': info.get('student_mobile') or '',
+                'parent_mobile': info.get('parent_mobile') or '',
+                'parent_name': info.get('parent_name') or '',
+                'sms_status': s_status,
+                'sms_sent_at': sms_sent_at,
+                'sms_log_id': sms_log_id,
+                'sms_response': sms_resp,
+                'message_preview': msg_preview,
+            }
+            enriched_students.append(enriched)
+
+        # Sort enriched students by department, batch, section, and rank
+        enriched_students.sort(key=lambda x: (x['department_name'], x['batch_name'], x['section_name'], x['rank']))
+
+        return Response({
+            "code": 200,
+            "message": "Marks entered students retrieved successfully",
+            "exam": {
+                "id": exam_obj.id,
+                "exam_name": exam_name,
+                "exam_type_id": exam_obj.exam_type_id if hasattr(exam_obj, 'exam_type_id') else None,
+            },
+            "stats": {
+                "total_students": len(enriched_students),
+                "sent_count": sent_count,
+                "failed_count": failed_count,
+                "not_sent_count": not_sent_count,
+            },
+            "template": {
+                "template_id": getattr(settings, 'DIAL4SMS_MARKS_TEMPLATE_ID', '1177179058575792171'),
+                "sender_id": getattr(settings, 'DIAL4SMS_SENDER_ID', 'TECKPM'),
+                "template_text": "Dear Parent, {#var#} Marks Name: {#var#} Roll No: {#var#} Subject-wise Marks: {#var#}{#var#} Total: {#var#} Rank: {#var#} Regards, Principal - Thirumalai Engineering College"
+            },
+            "data": enriched_students
+        }, status=status.HTTP_200_OK)
+
+
+class SendMarksSMSView(APIView):
+    """
+    Sends Marks SMS to selected students and logs gateway responses.
+    Template: Dear Parent, {#var#} Marks Name: {#var#} Roll No: {#var#} Subject-wise Marks: {#var#}{#var#} Total: {#var#} Rank: {#var#} Regards, Principal - Thirumalai Engineering College
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from student.models import Marks, Student
+        from institution.models import Exam, Semester
+
+        serializer = SendMarksSMSRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                "code": 400,
+                "message": "Invalid payload",
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        validated = serializer.validated_data
+        exam_id = validated['exam_id']
+        semester_id = validated.get('semester_id') or request.data.get('semester_id')
+        recipient_type = validated.get('recipient_type', 'PARENT')
+        force = validated.get('force', False)
+
+        exam_obj = Exam.objects.filter(id=exam_id).first()
+        if not exam_obj:
+            return Response({
+                "code": 404,
+                "message": f"Exam with id {exam_id} not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        exam_name = exam_obj.exam_name
+
+        # Target student IDs
+        target_student_ids = []
+        if validated.get('student_ids'):
+            target_student_ids = list(validated['student_ids'])
+        elif validated.get('students'):
+            target_student_ids = [item['student_id'] for item in validated['students']]
+
+        # Query all marks for this exam to ensure accurate ranking within class groups
+        marks_qs = Marks.objects.filter(exam_id=exam_id).select_related(
+            'student', 'subject', 'subject__semester', 'student__batch', 'student__department', 'student__section'
+        ).order_by('student_id', 'subject__subject_code')
+
+        target_sem_num = None
+        if semester_id:
+            sem_clean = str(semester_id).strip()
+            if sem_clean.isdigit():
+                num = int(sem_clean)
+                if 1 <= num <= 8:
+                    target_sem_num = num
+                else:
+                    s_obj = Semester.objects.filter(id=num).first()
+                    if s_obj and s_obj.semester_number and 1 <= s_obj.semester_number <= 8:
+                        target_sem_num = s_obj.semester_number
+            else:
+                m_match = re.search(r'\d+', sem_clean)
+                if m_match and 1 <= int(m_match.group(0)) <= 8:
+                    target_sem_num = int(m_match.group(0))
+
+        if target_sem_num:
+            marks_qs = marks_qs.filter(
+                Q(subject__semester__semester_number=target_sem_num) |
+                Q(subject__semester__semester_name__iexact=f"Semester {target_sem_num}") |
+                Q(subject__semester__semester_name__iexact=f"Sem {target_sem_num}")
+            )
+
+
+        all_students_map = {}
+        for m in marks_qs:
+            st = m.student
+            if not st:
+                continue
+            sid = st.id
+            if sid not in all_students_map:
+                all_students_map[sid] = {'student': st, 'marks': []}
+            all_students_map[sid]['marks'].append(m)
+
+        # Compute rank within class groups
+        class_groups = {}
+        student_totals = {}
+        for sid, data in all_students_map.items():
+            st = data['student']
+            grp_key = (st.batch_id, st.department_id, st.section_id)
+            if grp_key not in class_groups:
+                class_groups[grp_key] = []
+            subj_items = []
+            tot_num = 0.0
+            for m in data['marks']:
+                val_clean = str(m.marks_obtained or '').strip()
+                code_str = m.subject.subject_code if m.subject else ''
+                name_str = m.subject.subject_name if m.subject else ''
+                subj_items.append({'code': code_str, 'name': name_str, 'marks': val_clean})
+                if val_clean.upper() not in ['AB', 'UA', 'ABSENT', '-', '', 'N/A']:
+                    try:
+                        tot_num += float(val_clean)
+                    except ValueError:
+                        pass
+            tot_str = str(int(tot_num)) if tot_num.is_integer() else f"{tot_num:.1f}"
+            student_totals[sid] = {'total_num': tot_num, 'total_str': tot_str, 'subject_items': subj_items}
+            class_groups[grp_key].append((sid, tot_num))
+
+        rank_map = {}
+        for grp_key, st_list in class_groups.items():
+            sorted_st = sorted(st_list, key=lambda x: x[1], reverse=True)
+            cur_rank = 0
+            prev_score = None
+            for s_id, score in sorted_st:
+                if prev_score is None or score != prev_score:
+                    cur_rank += 1
+                    prev_score = score
+                rank_map[s_id] = cur_rank
+
+        # Check existing successful logs to avoid double sending unless force=True
+        already_sent_ids = set()
+        if not force and target_student_ids:
+            already_sent_ids = set(SMSLog.objects.filter(
+                student_id__in=target_student_ids,
+                sms_type='MARKS',
+                status='SUCCESS'
+            ).values_list('student_id', flat=True))
+
+        students_qs = Student.objects.filter(id__in=target_student_ids).select_related(
+            'department', 'batch', 'section', 'application', 'application__candidate'
+        )
+        student_map = {s.id: s for s in students_qs}
+
+        results = []
+        success_count = 0
+        failed_count = 0
+        already_sent_count = 0
+
+        total_to_send = len(target_student_ids)
+
+        for idx, sid in enumerate(target_student_ids, start=1):
+            if sid in already_sent_ids:
+                already_sent_count += 1
+                results.append({
+                    'student_id': sid,
+                    'status': 'SKIPPED',
+                    'message': 'Marks SMS already delivered successfully.'
+                })
+                continue
+
+            st = student_map.get(sid)
+            if not st:
+                failed_count += 1
+                results.append({
+                    'student_id': sid,
+                    'status': 'FAILED',
+                    'error': f'Student #{sid} not found'
+                })
+                continue
+
+            tot_data = student_totals.get(sid, {'total_num': 0.0, 'total_str': '0', 'subject_items': []})
+            s_rank = rank_map.get(sid, 1)
+
+            res = send_marks_sms_to_student(
+                student=st,
+                exam_name=exam_name,
+                subject_marks_list=tot_data['subject_items'],
+                total_marks=tot_data['total_str'],
+                rank=s_rank,
+                recipient_type=recipient_type,
+                user=request.user
+            )
+
+            if res['status'] == 'SUCCESS':
+                success_count += 1
+            else:
+                failed_count += 1
+
+            results.append(res)
+
+        # Notify via websocket broadcast
+        try:
+            send_targeted_broadcast('sms_updates', {
+                'type': 'sms_sent',
+                'sms_type': 'MARKS',
+                'exam_id': exam_id,
+                'success_count': success_count,
+                'failed_count': failed_count,
+                'total': total_to_send
+            })
+        except Exception:
+            pass
+
+        return Response({
+            "code": 200,
+            "message": f"Processed Marks SMS for {len(results)} students ({success_count} succeeded, {failed_count} failed, {already_sent_count} skipped/already sent).",
+            "data": {
+                "total": len(results),
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "already_sent_count": already_sent_count,
+                "results": results
+            }
+        }, status=status.HTTP_200_OK)
+
+
 class SMSLogViewSet(ReadOnlyModelViewSet):
     """
     Viewset to retrieve and filter SMS delivery logs.
@@ -1030,8 +1560,16 @@ class SMSDashboardStatsView(APIView):
                 'template_id': getattr(settings, 'DIAL4SMS_FEES_TEMPLATE_ID', '1177179058551929973'),
                 'sender_id': getattr(settings, 'DIAL4SMS_SENDER_ID', 'TECKPM'),
                 'template_text': 'Dear Parent, {#var#} Fees Pending {#var#}. ignore if already paid - PRINCIPAL, - Thirumlai Engineering College'
+            },
+            {
+                'type': 'MARKS',
+                'title': 'Student Marks & Rank Alert',
+                'template_id': getattr(settings, 'DIAL4SMS_MARKS_TEMPLATE_ID', '1177179058575792171'),
+                'sender_id': getattr(settings, 'DIAL4SMS_SENDER_ID', 'TECKPM'),
+                'template_text': 'Dear Parent, {#var#} Marks Name: {#var#} Roll No: {#var#} Subject-wise Marks: {#var#}{#var#} Total: {#var#} Rank: {#var#} Regards, Principal - Thirumalai Engineering College'
             }
         ]
+
 
         return Response({
             "code": 200,

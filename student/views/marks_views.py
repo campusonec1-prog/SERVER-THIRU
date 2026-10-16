@@ -242,6 +242,19 @@ class MarksViewSet(viewsets.ViewSet):
                     "message": "student_id and marks_obtained are required for each entry."
                 }, status=status.HTTP_400_BAD_REQUEST)
 
+            # Validate marks range 0-100 for numeric scores
+            val_upper = marks_obtained.upper()
+            if val_upper not in ['AB', 'UA', 'ABSENT', 'A', '-', 'N/A', 'O', 'S', 'A+', 'B+', 'B', 'C+', 'C', 'P', 'U', 'RA', 'SA', 'W', 'F']:
+                try:
+                    num_val = float(marks_obtained)
+                    if num_val < 0 or num_val > 100:
+                        return Response({
+                            "code": 400,
+                            "message": f"Marks must be in the range 0 to 100. Student ID {student_id} received {marks_obtained}."
+                        }, status=status.HTTP_400_BAD_REQUEST)
+                except ValueError:
+                    pass
+
             if student_id in seen_students:
                 return Response({
                     "code": 400,
