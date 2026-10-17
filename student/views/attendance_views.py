@@ -386,8 +386,8 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
         if not college_header_obj:
             college_header_obj = CollegeHeader.objects.first()
 
-        # Build students queryset
-        students_qs = Student.objects.all().select_related('application', 'application__candidate')
+        # Build students queryset (only active students)
+        students_qs = Student.objects.filter(status__is_active=True).select_related('application', 'application__candidate')
         if department:
             students_qs = students_qs.filter(department=department)
         if batch:
@@ -397,7 +397,7 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
 
         students = list(students_qs.order_by('roll_number', 'application__candidate__name'))
         if not students and department:
-            students = list(Student.objects.filter(department=department).select_related('application', 'application__candidate').order_by('roll_number', 'application__candidate__name'))
+            students = list(Student.objects.filter(department=department, status__is_active=True).select_related('application', 'application__candidate').order_by('roll_number', 'application__candidate__name'))
         if not students:
             return HttpResponse("No students found matching the selected criteria.", status=400)
 
@@ -672,7 +672,7 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
         if not college_header_obj:
             college_header_obj = CollegeHeader.objects.first()
 
-        students_qs = Student.objects.all().select_related('application', 'application__candidate')
+        students_qs = Student.objects.filter(status__is_active=True).select_related('application', 'application__candidate')
         if department:
             students_qs = students_qs.filter(department=department)
         if batch:
@@ -682,7 +682,7 @@ class StudentAttendanceViewSet(viewsets.ModelViewSet):
 
         students = list(students_qs.order_by('roll_number', 'application__candidate__name'))
         if not students and department:
-            students = list(Student.objects.filter(department=department).select_related('application', 'application__candidate').order_by('roll_number', 'application__candidate__name'))
+            students = list(Student.objects.filter(department=department, status__is_active=True).select_related('application', 'application__candidate').order_by('roll_number', 'application__candidate__name'))
         if not students:
             return HttpResponse("No students found matching the selected criteria.", status=400)
 

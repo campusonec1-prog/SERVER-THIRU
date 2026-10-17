@@ -597,7 +597,7 @@ class MarksViewSet(viewsets.ViewSet):
         year_str = year_names.get(sem_num, 'First Year')
         sec_name = section_obj.sections if section_obj else (str(section_id) if section_id else 'A')
         
-        students_qs = Student.objects.all().select_related('application', 'application__candidate')
+        students_qs = Student.objects.filter(status__is_active=True).select_related('application', 'application__candidate')
         if department:
             students_qs = students_qs.filter(department=department)
         if batch:
@@ -1076,7 +1076,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         subjects = list(subjects_qs.order_by('subject_code'))
 
-        students_qs = Student.objects.all().select_related('application', 'application__candidate')
+        students_qs = Student.objects.filter(status__is_active=True).select_related('application', 'application__candidate')
         if department:
             students_qs = students_qs.filter(department=department)
         if batch:
@@ -1571,7 +1571,7 @@ class MarksViewSet(viewsets.ViewSet):
 
         subjects = list(subjects_qs.order_by('subject_code'))
 
-        students_qs = Student.objects.all().select_related('application', 'application__candidate')
+        students_qs = Student.objects.filter(status__is_active=True).select_related('application', 'application__candidate')
         if department:
             students_qs = students_qs.filter(department=department)
         if batch:
@@ -2042,7 +2042,7 @@ class MarksViewSet(viewsets.ViewSet):
         if not subjects:
             return HttpResponse("No subjects found matching the selected criteria.", status=400)
 
-        students_qs = Student.objects.all().select_related('application', 'application__candidate')
+        students_qs = Student.objects.filter(status__is_active=True).select_related('application', 'application__candidate')
         if department:
             students_qs = students_qs.filter(department=department)
         if batch:
@@ -2595,7 +2595,7 @@ class MarksViewSet(viewsets.ViewSet):
         if not subjects:
             return HttpResponse("No subjects found matching the selected criteria.", status=400)
 
-        students_qs = Student.objects.all().select_related('application', 'application__candidate')
+        students_qs = Student.objects.filter(status__is_active=True).select_related('application', 'application__candidate')
         if department:
             students_qs = students_qs.filter(department=department)
         if batch:
@@ -2605,7 +2605,7 @@ class MarksViewSet(viewsets.ViewSet):
         students = list(students_qs.order_by('roll_number', 'application__candidate__name'))
 
         if not students and department:
-            students = list(Student.objects.filter(department=department).select_related('application', 'application__candidate').order_by('roll_number', 'application__candidate__name'))
+            students = list(Student.objects.filter(department=department, status__is_active=True).select_related('application', 'application__candidate').order_by('roll_number', 'application__candidate__name'))
 
         if not students:
             return HttpResponse("No students found matching the selected criteria.", status=400)
@@ -3103,7 +3103,7 @@ class MarksViewSet(viewsets.ViewSet):
         if not college_header_obj:
             college_header_obj = CollegeHeader.objects.first()
 
-        students_qs = Student.objects.all().select_related('application', 'application__candidate')
+        students_qs = Student.objects.filter(status__is_active=True).select_related('application', 'application__candidate')
         if department:
             students_qs = students_qs.filter(department=department)
         if batch:
@@ -3113,7 +3113,7 @@ class MarksViewSet(viewsets.ViewSet):
         students = list(students_qs.order_by('roll_number', 'application__candidate__name'))
 
         if not students and department:
-            students = list(Student.objects.filter(department=department).select_related('application', 'application__candidate').order_by('roll_number', 'application__candidate__name'))
+            students = list(Student.objects.filter(department=department, status__is_active=True).select_related('application', 'application__candidate').order_by('roll_number', 'application__candidate__name'))
         if not students:
             return HttpResponse("No students found matching the selected criteria.", status=400)
 
@@ -3439,7 +3439,7 @@ class MarksViewSet(viewsets.ViewSet):
         if not subject_obj:
             return HttpResponse("Please select a valid subject to generate CAPA Form.", status=400)
 
-        students_qs = Student.objects.all().select_related('application', 'application__candidate')
+        students_qs = Student.objects.filter(status__is_active=True).select_related('application', 'application__candidate')
         if department:
             students_qs = students_qs.filter(department=department)
         if batch:
@@ -3449,7 +3449,7 @@ class MarksViewSet(viewsets.ViewSet):
         students = list(students_qs.order_by('roll_number', 'application__candidate__name'))
 
         if not students and department:
-            students = list(Student.objects.filter(department=department).select_related('application', 'application__candidate').order_by('roll_number', 'application__candidate__name'))
+            students = list(Student.objects.filter(department=department, status__is_active=True).select_related('application', 'application__candidate').order_by('roll_number', 'application__candidate__name'))
 
         exams = []
         if exam_ids:

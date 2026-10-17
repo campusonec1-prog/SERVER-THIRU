@@ -132,6 +132,8 @@ class StudentViewSet(viewsets.ModelViewSet):
         is_hostler = request.query_params.get('is_hostler')
         bus_id = request.query_params.get('bus_id')
         route_id = request.query_params.get('route_id')
+        status_id = request.query_params.get('status_id') or request.query_params.get('status')
+        is_active = request.query_params.get('is_active')
         search = request.query_params.get('search')
         
         if department_id:
@@ -157,6 +159,16 @@ class StudentViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(bus_id=bus_id)
         if route_id:
             queryset = queryset.filter(route_id=route_id)
+        if status_id:
+            if str(status_id).isdigit():
+                queryset = queryset.filter(status_id=int(status_id))
+            else:
+                queryset = queryset.filter(status__status_name__iexact=str(status_id).strip())
+        elif is_active is not None:
+            if str(is_active).lower() in ['true', '1']:
+                queryset = queryset.filter(status__is_active=True)
+            elif str(is_active).lower() in ['false', '0']:
+                queryset = queryset.filter(status__is_active=False)
         if search:
             queryset = queryset.filter(
                 Q(student_name__icontains=search) |
@@ -3203,7 +3215,7 @@ class StudentViewSet(viewsets.ModelViewSet):
         students_qs = Student.objects.select_related(
             'department', 'department__program', 'batch', 'section', 'quota',
             'application', 'application__candidate'
-        ).all()
+        ).filter(status__is_active=True)
 
         if department:
             students_qs = students_qs.filter(department=department)
@@ -3396,11 +3408,11 @@ class StudentViewSet(viewsets.ModelViewSet):
         if not college_header_obj:
             college_header_obj = CollegeHeader.objects.first()
 
-        # Only students who have a quota assigned fetch fees
+        # Only active students who have a quota assigned fetch fees
         students_qs = Student.objects.select_related(
             'department', 'department__program', 'batch', 'section', 'quota',
             'application', 'application__candidate'
-        ).filter(quota__isnull=False)
+        ).filter(quota__isnull=False, status__is_active=True)
 
         quota_param = req_data.get('quota') or req_params.get('quota') or req_data.get('quota_id') or req_params.get('quota_id')
         if quota_param and str(quota_param).strip().lower() not in ['', 'all', 'all_quotas', 'undefined', 'null']:

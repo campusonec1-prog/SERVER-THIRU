@@ -234,7 +234,7 @@ class CounsellingReportViewSet(viewsets.ModelViewSet):
 
         students_qs = Student.objects.select_related(
             'department', 'department__program', 'batch', 'section'
-        ).all()
+        ).filter(status__is_active=True)
 
         if department:
             students_qs = students_qs.filter(department=department)

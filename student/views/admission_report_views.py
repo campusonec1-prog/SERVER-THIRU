@@ -95,11 +95,11 @@ def _filter_admissions_queryset(request):
     batch_param = req_data.get('batch') or req_params.get('batch')
     header_type = req_data.get('report_header') or req_params.get('report_header')
 
-    # Base Queryset with eager joins
+    # Base Queryset with eager joins (only active students)
     qs = Student.objects.select_related(
         'department', 'department__program', 'batch', 'section', 'quota',
         'admission_slip', 'application', 'application__candidate', 'application__status'
-    ).all()
+    ).filter(status__is_active=True)
 
     # 1. Resolve Academic Year
     acad_year_obj = None
@@ -327,6 +327,11 @@ class AdmissionReportPDFView(APIView):
     def _generate_pdf(self, request):
         register_unicode_fonts()
         qs, meta = _filter_admissions_queryset(request)
+        if not qs.exists():
+            return Response(
+                {"error": "For the selected criteria the report can't be generated"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         students = list(qs)
 
         # 1. Resolve College Header
