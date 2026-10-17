@@ -155,15 +155,19 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             pass
 
         if user.__class__.__name__ == 'ApplicationUser':
-            qs = Application.objects.filter(candidate=user).select_related('candidate', 'program', 'status', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role')
+            qs = Application.objects.filter(candidate=user).select_related('candidate', 'program', 'academic_year', 'status', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role')
         elif is_admin:
-            qs = Application.objects.all().select_related('candidate', 'program', 'status', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role')
+            qs = Application.objects.all().select_related('candidate', 'program', 'academic_year', 'status', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role')
         else:
             return Application.objects.none()
 
         status_id = self.request.query_params.get('status_id')
         if status_id:
             qs = qs.filter(status_id=status_id)
+
+        academic_year_id = self.request.query_params.get('academic_year_id') or self.request.query_params.get('academic_year')
+        if academic_year_id:
+            qs = qs.filter(academic_year_id=academic_year_id)
 
         payment_status = self.request.query_params.get('payment_status')
         if payment_status:
@@ -218,6 +222,26 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         from users.models import User as StandardUser
         tracking_user = user if isinstance(user, StandardUser) else None
         
+        # ── Resolve Academic Year ──
+        # Priority: explicit payload -> default where is_display=True -> default where is_active=True
+        academic_year = serializer.validated_data.get('academic_year')
+        if not academic_year:
+            from institution.models import AcademicYear
+            academic_year = (
+                AcademicYear.objects.filter(is_display=True).first() or 
+                AcademicYear.objects.filter(is_active=True).first() or
+                AcademicYear.objects.order_by('-id').first()
+            )
+
+        # Mirror academic year into form_data
+        form_data = serializer.validated_data.get('form_data') or {}
+        if academic_year and isinstance(form_data, dict):
+            if 'course_selection' in form_data and isinstance(form_data['course_selection'], dict):
+                form_data['course_selection']['academic_year'] = academic_year.academic_year
+                form_data['course_selection']['academic_year_id'] = academic_year.id
+            form_data['academic_year'] = academic_year.academic_year
+            form_data['academic_year_id'] = academic_year.id
+
         # Candidate is automatically assigned via validate method in serializer
         payment_id = self.request.data.get('payment_id') or self.request.data.get('razorpay_payment_id')
         order_id = self.request.data.get('razorpay_order_id') or self.request.data.get('order_id')
@@ -236,6 +260,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
 
         app_instance = serializer.save(
             application_no=app_no,
+            academic_year=academic_year,
+            form_data=form_data,
             payment_status=payment_status,
             paid_amount=paid_amount,
             paid_at=paid_at,

@@ -175,6 +175,14 @@ class Application(TrackingModel):
         db_column='program_id',
         related_name='applications'
     )
+    academic_year = models.ForeignKey(
+        'institution.AcademicYear',
+        on_delete=models.PROTECT,
+        db_column='academic_year_id',
+        related_name='applications',
+        null=True,
+        blank=True
+    )
     application_no = models.CharField(max_length=50, unique=True, blank=True)
     form_data = models.JSONField(default=dict)
     status = models.ForeignKey(

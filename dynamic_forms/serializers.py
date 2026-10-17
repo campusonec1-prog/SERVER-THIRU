@@ -399,9 +399,17 @@ class ApplicationSerializer(TrackingModelSerializerMixin, serializers.ModelSeria
         required=False,
         error_messages={'does_not_exist': 'Application status does not exist.'}
     )
+    academic_year_id = serializers.PrimaryKeyRelatedField(
+        source='academic_year',
+        queryset=AcademicYear.objects.all(),
+        required=False,
+        allow_null=True,
+        error_messages={'does_not_exist': 'Academic year does not exist.'}
+    )
     
     candidate_name = serializers.CharField(source='candidate.name', read_only=True)
     program_name = serializers.CharField(source='program.program_name', read_only=True)
+    academic_year_name = serializers.CharField(source='academic_year.academic_year', read_only=True, default='')
     status_name = serializers.CharField(source='status.status_name', read_only=True)
     readable_form_data = serializers.SerializerMethodField()
     payment_details = serializers.SerializerMethodField(read_only=True)
@@ -410,6 +418,7 @@ class ApplicationSerializer(TrackingModelSerializerMixin, serializers.ModelSeria
         model = Application
         fields = [
             'id', 'candidate_id', 'candidate_name', 'program_id', 'program_name', 
+            'academic_year_id', 'academic_year_name',
             'application_no', 'form_data', 'readable_form_data', 'status_id', 'status_name', 
             'payment_status', 'paid_amount', 'paid_at', 'payment_details',
             'created_at', 'updated_at', 'created_by', 'updated_by'

@@ -59,5 +59,9 @@ urlpatterns = [
     path('payments/create-order', CreateRazorpayOrderView.as_view(), name='payment-create-order'),
     path('payments/verify', VerifyRazorpayPaymentView.as_view(), name='payment-verify'),
     path('payments/webhook', RazorpayWebhookView.as_view(), name='payment-webhook'),
+
+    # Admission Report endpoints
+    path('admissions/report/data', __import__('student.views.admission_report_views', fromlist=['AdmissionReportDataView']).AdmissionReportDataView.as_view(), name='forms-admissions-report-data'),
+    path('admissions/report/pdf', __import__('student.views.admission_report_views', fromlist=['AdmissionReportPDFView']).AdmissionReportPDFView.as_view(), name='forms-admissions-report-pdf'),
 ]
 
