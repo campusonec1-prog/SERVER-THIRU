@@ -7,7 +7,7 @@ class LMSPermission(BaseRolePermission):
 class AssessmentQuestionPermission(BaseRolePermission):
     """
     Role-based permission for Question Bank / Assessment Questions.
-    Allowed roles: admin, hod, faculty.
+    Allowed roles: admin, hod, faculty, exam_cell.
     """
-    read_roles = ['admin', 'administrator', 'hod', 'faculty']
-    write_roles = ['admin', 'administrator', 'hod', 'faculty']
+    read_roles = ['admin', 'administrator', 'hod', 'faculty', 'exam_cell', 'exam cell', 'exam cell member', 'exam_officer']
+    write_roles = ['admin', 'administrator', 'hod', 'faculty', 'exam_cell', 'exam cell', 'exam cell member', 'exam_officer']

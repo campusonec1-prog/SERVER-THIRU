@@ -367,9 +367,9 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         if not policy:
             policy = LeavePolicy.objects.filter(is_active=True).first()
 
-        total_cl_allowed = float(policy.total_cl) if policy else 12.0
-        total_od_allowed = float(policy.total_od) if policy else 6.0
-        total_perm_allowed = int(policy.total_permissions) if policy else 12
+        total_cl_allowed = float(policy.total_cl) if policy else 0.0
+        total_od_allowed = float(policy.total_od) if policy else 0.0
+        total_perm_allowed = int(policy.total_permissions) if policy else 0
 
         existing_leaves_qs = FacultyLeave.objects.filter(
             applicant=user,
@@ -382,27 +382,42 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
             used_cl = sum(float(l.total_days) for l in existing_leaves_qs if l.leave_type in ['FULL_DAY', 'HALF_DAY_FN', 'HALF_DAY_AN'])
             if used_cl + total_days > total_cl_allowed:
                 rem = max(0.0, total_cl_allowed - used_cl)
+                msg = (
+                    f"Casual Leave (CL) quota exceeded. You have {rem:.1f} day(s) remaining out of {total_cl_allowed} days."
+                    if total_cl_allowed > 0
+                    else "Casual Leave (CL) quota is 0 or no active leave policy is configured for this academic year."
+                )
                 return Response({
                     "code": 400,
-                    "message": f"Casual Leave (CL) quota exceeded. You have {rem:.1f} day(s) remaining out of {total_cl_allowed} days."
+                    "message": msg
                 }, status=status.HTTP_400_BAD_REQUEST)
 
         elif leave_type == 'OD':
             used_od = sum(float(l.total_days) for l in existing_leaves_qs if l.leave_type == 'OD')
             if used_od + total_days > total_od_allowed:
                 rem = max(0.0, total_od_allowed - used_od)
+                msg = (
+                    f"On Duty (OD) quota exceeded. You have {rem:.1f} day(s) remaining out of {total_od_allowed} days."
+                    if total_od_allowed > 0
+                    else "On Duty (OD) quota is 0 or no active leave policy is configured for this academic year."
+                )
                 return Response({
                     "code": 400,
-                    "message": f"On Duty (OD) quota exceeded. You have {rem:.1f} day(s) remaining out of {total_od_allowed} days."
+                    "message": msg
                 }, status=status.HTTP_400_BAD_REQUEST)
 
         elif leave_type == 'PERMISSION':
             used_perm = existing_leaves_qs.filter(leave_type='PERMISSION').count()
             if used_perm + 1 > total_perm_allowed:
                 rem = max(0, total_perm_allowed - used_perm)
+                msg = (
+                    f"Hourly permissions quota exceeded. You have {rem} permission(s) remaining out of {total_perm_allowed}."
+                    if total_perm_allowed > 0
+                    else "Hourly permissions quota is 0 or no active leave policy is configured for this academic year."
+                )
                 return Response({
                     "code": 400,
-                    "message": f"Hourly permissions quota exceeded. You have {rem} permission(s) remaining out of {total_perm_allowed}."
+                    "message": msg
                 }, status=status.HTTP_400_BAD_REQUEST)
 
         # 4. Check affected class timetable slots & enforce complete substitution
@@ -567,9 +582,9 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         if not policy:
             policy = LeavePolicy.objects.filter(is_active=True).first()
 
-        total_cl = float(policy.total_cl) if policy else 12.0
-        total_od = float(policy.total_od) if policy else 6.0
-        total_perm = int(policy.total_permissions) if policy else 12
+        total_cl = float(policy.total_cl) if policy else 0.0
+        total_od = float(policy.total_od) if policy else 0.0
+        total_perm = int(policy.total_permissions) if policy else 0
 
         leaves_qs = FacultyLeave.objects.filter(
             applicant=user,
@@ -610,7 +625,7 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         leave_app = self.get_object()
         user = request.user
         role = getattr(user.role, 'role_name', '').upper() if hasattr(user, 'role') and user.role else ''
-        is_principal_or_vp = ('PRINCIPAL' in role) or getattr(user, 'is_superuser', False) or role in ['ADMIN', 'ADMINISTRATOR']
+        is_principal_or_vp = ('PRINCIPAL' in role) or getattr(user, 'is_superuser', False) or role in ['ADMIN', 'ADMINISTRATOR', 'TECH_SUPPORTER', 'TS', 'ADMINISTRATION_OFFICER', 'ADMINISTRATIVE_OFFICER', 'AO']
         is_hod = (role == 'HOD') or (hasattr(user, 'hod_departments') and user.hod_departments.exists())
 
         if not is_principal_or_vp and not is_hod:
@@ -702,7 +717,7 @@ class FacultyLeaveViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         leave_app = self.get_object()
         user = request.user
         role = getattr(user.role, 'role_name', '').upper() if hasattr(user, 'role') and user.role else ''
-        is_principal_or_vp = ('PRINCIPAL' in role) or getattr(user, 'is_superuser', False) or role in ['ADMIN', 'ADMINISTRATOR']
+        is_principal_or_vp = ('PRINCIPAL' in role) or getattr(user, 'is_superuser', False) or role in ['ADMIN', 'ADMINISTRATOR', 'TECH_SUPPORTER', 'TS', 'ADMINISTRATION_OFFICER', 'ADMINISTRATIVE_OFFICER', 'AO']
         is_hod = (role == 'HOD') or (hasattr(user, 'hod_departments') and user.hod_departments.exists())
 
         if not is_principal_or_vp and not is_hod:

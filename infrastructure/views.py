@@ -1,5 +1,6 @@
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
+from users.permissions import RestrictDeleteToTechSupporterPermission
 from .models import Block, Floor, Hall
 from .serializers import BlockSerializer, FloorSerializer, HallSerializer
 
@@ -7,7 +8,7 @@ from .serializers import BlockSerializer, FloorSerializer, HallSerializer
 class BlockViewSet(viewsets.ModelViewSet):
     queryset = Block.objects.select_related('created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('block_code')
     serializer_class = BlockSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RestrictDeleteToTechSupporterPermission]
     pagination_class = None
 
     def get_queryset(self):
@@ -21,7 +22,7 @@ class BlockViewSet(viewsets.ModelViewSet):
 class FloorViewSet(viewsets.ModelViewSet):
     queryset = Floor.objects.select_related('block', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('block__block_code', 'floor_name')
     serializer_class = FloorSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RestrictDeleteToTechSupporterPermission]
     pagination_class = None
 
     def get_queryset(self):
@@ -38,7 +39,7 @@ class FloorViewSet(viewsets.ModelViewSet):
 class HallViewSet(viewsets.ModelViewSet):
     queryset = Hall.objects.select_related('floor__block', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').all().order_by('floor__block__block_code', 'floor__floor_name', 'hall_no')
     serializer_class = HallSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RestrictDeleteToTechSupporterPermission]
     pagination_class = None
 
     def get_queryset(self):

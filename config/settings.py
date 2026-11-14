@@ -200,6 +200,9 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'users.authentication.CustomJWTAuthentication',
     ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'users.permissions.RestrictDeleteToTechSupporterPermission',
+    ),
     'EXCEPTION_HANDLER': 'common.exceptions.custom_exception_handler',
     'DEFAULT_PAGINATION_CLASS': 'common.pagination.CustomPageNumberPagination',
     'PAGE_SIZE': 10,

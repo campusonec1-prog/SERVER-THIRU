@@ -9,9 +9,9 @@ class LeavePolicy(TrackingModel):
         db_column='academic_year_id',
         related_name='leave_policy'
     )
-    total_cl = models.PositiveIntegerField(default=12)
-    total_od = models.PositiveIntegerField(default=6)
-    total_permissions = models.PositiveIntegerField(default=12)
+    total_cl = models.PositiveIntegerField(default=0)
+    total_od = models.PositiveIntegerField(default=0)
+    total_permissions = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
 
     class Meta:

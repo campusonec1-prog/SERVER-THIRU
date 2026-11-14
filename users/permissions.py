@@ -18,7 +18,27 @@ class BaseRolePermission(permissions.BasePermission):
         'ADMINISTRATION_OFFICER', 'ADMINISTRATIVE_OFFICER', 'AO'
     }
 
+    # Strict Delete Access: ONLY Tech Supporter and Superuser are permitted to delete records.
+    # ADMIN, AO, and other leadership roles have EDIT access only across all modules.
+    DELETE_ALLOWED_ROLES = {
+        'TECH_SUPPORTER', 'TS', 'TECHNICAL_SUPPORT', 'TECH SUPPORTER'
+    }
+
     def has_permission(self, request, view):
+        is_delete = (request.method == 'DELETE') or (getattr(view, 'action', None) in ['destroy', 'bulk_destroy', 'bulk_delete', 'remove', 'delete'])
+
+        # Check delete permissions first
+        if is_delete:
+            if not request.user or not request.user.is_authenticated:
+                return False
+            if getattr(request.user, 'is_superuser', False):
+                return True
+            try:
+                user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+                return user_role in self.DELETE_ALLOWED_ROLES
+            except Exception:
+                return False
+
         is_read = request.method in permissions.SAFE_METHODS
         
         # Normalize allowed roles
@@ -49,6 +69,60 @@ class BaseRolePermission(permissions.BasePermission):
             return user_role in norm_roles
         except AttributeError:
             return False
+
+    def has_object_permission(self, request, view, obj):
+        is_delete = (request.method == 'DELETE') or (getattr(view, 'action', None) in ['destroy', 'bulk_destroy', 'bulk_delete', 'remove', 'delete'])
+        if is_delete:
+            if not request.user or not request.user.is_authenticated:
+                return False
+            if getattr(request.user, 'is_superuser', False):
+                return True
+            try:
+                user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+                return user_role in self.DELETE_ALLOWED_ROLES
+            except Exception:
+                return False
+        return True
+
+
+class RestrictDeleteToTechSupporterPermission(permissions.BasePermission):
+    """
+    Global standalone permission rule:
+    DELETE / destroy requests are restricted strictly to TECH_SUPPORTER and Superuser.
+    All other roles (including ADMIN and AO) are blocked from DELETE (403 Forbidden).
+    Non-DELETE methods (GET, POST, PUT, PATCH, HEAD, OPTIONS) pass through unconditionally.
+    """
+    DELETE_ALLOWED_ROLES = {
+        'TECH_SUPPORTER', 'TS', 'TECHNICAL_SUPPORT', 'TECH SUPPORTER'
+    }
+
+    def has_permission(self, request, view):
+        is_delete = (request.method == 'DELETE') or (getattr(view, 'action', None) in ['destroy', 'bulk_destroy', 'bulk_delete', 'remove', 'delete'])
+        if not is_delete:
+            return True
+
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        if getattr(request.user, 'is_superuser', False):
+            return True
+
+        user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+        return user_role in self.DELETE_ALLOWED_ROLES
+
+    def has_object_permission(self, request, view, obj):
+        is_delete = (request.method == 'DELETE') or (getattr(view, 'action', None) in ['destroy', 'bulk_destroy', 'bulk_delete', 'remove', 'delete'])
+        if not is_delete:
+            return True
+
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        if getattr(request.user, 'is_superuser', False):
+            return True
+
+        user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+        return user_role in self.DELETE_ALLOWED_ROLES
 
 
 # ─── Legacy Permission Classes (Refactored to subclass BaseRolePermission) ────

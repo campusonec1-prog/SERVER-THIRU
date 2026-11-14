@@ -4,6 +4,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from users.permissions import RestrictDeleteToTechSupporterPermission
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.db import transaction
 from django.db.models import Count
@@ -32,7 +33,7 @@ class UniversityExamHallViewSet(viewsets.ModelViewSet):
         'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
     ).all().order_by('hall__floor__block__block_code', 'hall__floor__floor_name', 'hall__hall_no')
     serializer_class = UniversityExamHallSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RestrictDeleteToTechSupporterPermission]
     pagination_class = None
 
     def get_queryset(self):
@@ -52,7 +53,7 @@ class ExamHallDateViewSet(viewsets.ModelViewSet):
         'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
     ).all().order_by('-exam_date', 'session', 'exam_hall__hall__hall_no')
     serializer_class = ExamHallDateSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RestrictDeleteToTechSupporterPermission]
     pagination_class = None
 
     def get_queryset(self):
@@ -186,7 +187,7 @@ def parse_anna_university_pdf(file_bytes):
 class ExamAttendanceImportViewSet(viewsets.ModelViewSet):
     queryset = ExamAttendanceImport.objects.all().order_by('-id')
     serializer_class = ExamAttendanceImportSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RestrictDeleteToTechSupporterPermission]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
@@ -916,7 +917,7 @@ class UniversityExamScheduleViewSet(viewsets.ModelViewSet):
         student_count=Count('attendances')
     ).all().order_by('-exam_date', 'session')
     serializer_class = UniversityExamScheduleSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RestrictDeleteToTechSupporterPermission]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1143,7 +1144,7 @@ class UniversityExamAttendanceViewSet(viewsets.ModelViewSet):
         'exam_schedule', 'student', 'department'
     ).all().order_by('exam_schedule', 'student__register_number')
     serializer_class = UniversityExamAttendanceSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RestrictDeleteToTechSupporterPermission]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1164,7 +1165,7 @@ class ExamHallAllocationViewSet(viewsets.ModelViewSet):
         'exam_schedule', 'exam_hall__hall__floor__block'
     ).all().order_by('exam_schedule__exam_date', 'allocation_order')
     serializer_class = ExamHallAllocationSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RestrictDeleteToTechSupporterPermission]
     pagination_class = None
 
     def get_queryset(self):
@@ -1197,7 +1198,7 @@ class ExamSeatAllocationViewSet(viewsets.ModelViewSet):
         'student', 'department', 'subject'
     ).all().order_by('hall_allocation', 'seat_number')
     serializer_class = ExamSeatAllocationSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RestrictDeleteToTechSupporterPermission]
     pagination_class = None
 
     def get_queryset(self):

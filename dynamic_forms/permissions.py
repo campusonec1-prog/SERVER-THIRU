@@ -19,6 +19,16 @@ class ApplicationPermission(BaseRolePermission):
         if not request.user or not request.user.is_authenticated:
             return False
 
+        is_delete = (request.method == 'DELETE') or (getattr(view, 'action', None) in ['destroy', 'bulk_destroy', 'bulk_delete', 'remove', 'delete'])
+        if is_delete:
+            if getattr(request.user, 'is_superuser', False):
+                return True
+            try:
+                role_name = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+                return role_name in self.DELETE_ALLOWED_ROLES
+            except Exception:
+                return False
+
         if view.action == 'list':
             # Allow leadership, administration, office, manager, and candidates for their own
             if getattr(request.user, 'is_superuser', False) or getattr(request.user, 'is_staff', False):
@@ -56,7 +66,16 @@ class ApplicationUserPermission(BaseRolePermission):
         if not request.user or not request.user.is_authenticated:
             return False
 
-        if view.action in ['list', 'destroy']:
+        if view.action in ['destroy', 'remove', 'delete'] or request.method == 'DELETE':
+            if getattr(request.user, 'is_superuser', False):
+                return True
+            try:
+                role_name = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+                return role_name in self.DELETE_ALLOWED_ROLES
+            except Exception:
+                return False
+
+        if view.action == 'list':
             if getattr(request.user, 'is_superuser', False) or getattr(request.user, 'is_staff', False):
                 return True
             try:

@@ -16,6 +16,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 from common.pagination import CustomPageNumberPagination
+from users.permissions import RestrictDeleteToTechSupporterPermission
 from .models import Driver, Bus, TransportRoute, RouteStop, TransportExpense
 from .serializers import (
     DriverSerializer,
@@ -97,7 +98,16 @@ def extract_validation_message(exc):
 
 
 class BaseTransportViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RestrictDeleteToTechSupporterPermission]
+
+    def destroy(self, request, *args, **kwargs):
+        user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+        if not (getattr(request.user, 'is_superuser', False) or user_role in {'TECH_SUPPORTER', 'TS', 'TECHNICAL_SUPPORT', 'TECH SUPPORTER'}):
+            return Response({
+                "code": 403,
+                "message": "Delete action is restricted to Technical Supporter only. Admin and AO have Edit access only."
+            }, status=status.HTTP_403_FORBIDDEN)
+        return super().destroy(request, *args, **kwargs)
 
     def handle_exception(self, exc):
         if isinstance(exc, (Http404, NotFound)):
