@@ -1277,13 +1277,23 @@ class StudentViewSet(viewsets.ModelViewSet):
             if 'emis_number' in data:
                 admission_slip.emis_number = str(data['emis_number']).strip() or None
             if 'umis_number' in data:
-                admission_slip.umis_number = str(data['umis_number']).strip() or None
+                umis_val = str(data['umis_number']).strip()
+                if umis_val:
+                    admission_slip.umis_number = umis_val
+                elif not admission_slip.umis_number:
+                    admission_slip.umis_number = None
             if 'qualification' in data:
                 admission_slip.qualification = str(data['qualification']).strip() or None
             if 'community' in data:
                 admission_slip.community = str(data['community']).strip() or None
             if 'mode_of_admission' in data:
-                admission_slip.mode_of_admission = str(data['mode_of_admission']).strip() or 'Regular Entry'
+                raw_moa = str(data['mode_of_admission']).strip().lower()
+                if 'iii' in raw_moa or 'lateral' in raw_moa or '3' in raw_moa:
+                    admission_slip.mode_of_admission = 'III Sem'
+                elif 'i' in raw_moa or 'regular' in raw_moa or '1' in raw_moa:
+                    admission_slip.mode_of_admission = 'I Sem'
+                else:
+                    admission_slip.mode_of_admission = str(data['mode_of_admission']).strip() or 'I Sem'
             if 'recommendation_id' in data:
                 admission_slip.recommendation_id = int(data['recommendation_id']) if data['recommendation_id'] else None
 
