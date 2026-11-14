@@ -536,6 +536,10 @@ class StudentViewSet(viewsets.ModelViewSet):
                         if row.get('semester')
                     ]
 
+        other_rec = ''
+        if admission_slip and admission_slip.certificates_surrendered and isinstance(admission_slip.certificates_surrendered, dict):
+            other_rec = admission_slip.certificates_surrendered.get('other_recommendation', '') or ''
+
         if admission_slip:
             admission_data = {
                 'id': admission_slip.id,
@@ -552,7 +556,8 @@ class StudentViewSet(viewsets.ModelViewSet):
                 'mode_of_admission': admission_slip.mode_of_admission,
                 'certificates_surrendered': admission_slip.certificates_surrendered or {},
                 'recommendation_id': admission_slip.recommendation_id,
-                'recommendation_name': admission_slip.recommendation.name if admission_slip.recommendation else '',
+                'recommendation_name': admission_slip.recommendation.name if admission_slip.recommendation else other_rec,
+                'other_recommendation': other_rec,
                 'pg_semester_marks': pg_semester_marks,
             }
         else:
@@ -572,6 +577,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                 'certificates_surrendered': {},
                 'recommendation_id': None,
                 'recommendation_name': '',
+                'other_recommendation': '',
                 'pg_semester_marks': pg_semester_marks,
             }
 
@@ -702,7 +708,19 @@ class StudentViewSet(viewsets.ModelViewSet):
             user = self.request.user if self.request.user and self.request.user.is_authenticated else None
             from users.models import User as StandardUser
             tracking_user = user if isinstance(user, StandardUser) else None
-            serializer.save(updated_by=tracking_user)
+            saved_instance = serializer.save(updated_by=tracking_user)
+
+            # Persist custom/other recommendation if provided
+            other_rec = request.data.get('other_recommendation')
+            if other_rec is not None:
+                cs = saved_instance.certificates_surrendered or {}
+                clean_rec = str(other_rec).strip()
+                cs['other_recommendation'] = clean_rec
+                saved_instance.certificates_surrendered = cs
+                if clean_rec:
+                    saved_instance.recommendation = None
+                saved_instance.save(update_fields=['certificates_surrendered', 'recommendation'])
+
             return Response({
                 "code": 200,
                 "message": "Admission slip saved successfully",
@@ -1530,7 +1548,8 @@ class StudentViewSet(viewsets.ModelViewSet):
                 'marks_percentage': float(admission_slip.marks_percentage) if admission_slip.marks_percentage else None,
                 'cutoff_marks': cutoff_calc,
                 'mode_of_admission': resolve_admission_type(admission_slip.mode_of_admission),
-                'recommendation_name': admission_slip.recommendation.name if admission_slip.recommendation else '',
+                'recommendation_name': admission_slip.recommendation.name if admission_slip.recommendation else (admission_slip.certificates_surrendered.get('other_recommendation', '') if (admission_slip.certificates_surrendered and isinstance(admission_slip.certificates_surrendered, dict)) else ''),
+                'other_recommendation': admission_slip.certificates_surrendered.get('other_recommendation', '') if (admission_slip.certificates_surrendered and isinstance(admission_slip.certificates_surrendered, dict)) else '',
                 'certificates_surrendered': admission_slip.certificates_surrendered or {},
                 'uploaded_documents': certs_list,
             }
@@ -2157,9 +2176,11 @@ class StudentViewSet(viewsets.ModelViewSet):
                 pass
 
         # Mode of Admission — read from StudentAdmissionSlip
-        moa = admission_slip.mode_of_admission if admission_slip else 'I Sem'
-        sem1_chk = "[X]" if "I Sem" in moa or "1" in moa else "[   ]"
-        sem3_chk = "[X]" if "III Sem" in moa or "3" in moa or "Lateral" in moa else "[   ]"
+        moa = (admission_slip.mode_of_admission if admission_slip else 'I Sem') or 'I Sem'
+        moa_lower = moa.lower()
+        is_lateral = "iii" in moa_lower or "3" in moa_lower or "lateral" in moa_lower
+        sem1_chk = "[   ]" if is_lateral else "[X]"
+        sem3_chk = "[X]" if is_lateral else "[   ]"
 
         # Fees Details — read from StudentFees
         total_fees = float(fees_payment.total_fees) if fees_payment else 0.0
@@ -2189,8 +2210,11 @@ class StudentViewSet(viewsets.ModelViewSet):
 
         # Recommendation — read from StudentAdmissionSlip
         recommendation_name = ''
-        if admission_slip and admission_slip.recommendation:
-            recommendation_name = admission_slip.recommendation.name
+        if admission_slip:
+            if admission_slip.recommendation:
+                recommendation_name = admission_slip.recommendation.name
+            elif admission_slip.certificates_surrendered and isinstance(admission_slip.certificates_surrendered, dict):
+                recommendation_name = admission_slip.certificates_surrendered.get('other_recommendation', '') or ''
 
         # Payment Mode — read from StudentFees
         pay_mode = (fees_payment.payment_mode if fees_payment else 'Cash').upper()
@@ -2303,7 +2327,11 @@ class StudentViewSet(viewsets.ModelViewSet):
             except (ValueError, TypeError):
                 cutoff_str = '—'
                 
-            total_pct_val = Paragraph(cutoff_str, body_bold)
+            if cutoff_str == '—' and marks_percentage is not None:
+                total_pct_label = Paragraph("<b>Percentage:</b>", body_style)
+                total_pct_val = Paragraph(f"{float(marks_percentage):.2f}%", body_bold)
+            else:
+                total_pct_val = Paragraph(cutoff_str, body_bold)
 
         # Helper to load image
         def load_image(url_or_path, width, height):

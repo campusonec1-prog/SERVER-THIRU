@@ -268,6 +268,10 @@ class StudentSerializer(TrackingModelSerializerMixin, serializers.ModelSerialize
         # ── Admission slip fields (StudentAdmissionSlip) ────────────────
         admission_slip = getattr(instance, 'admission_slip', None)
         if admission_slip:
+            other_rec = ''
+            if admission_slip.certificates_surrendered and isinstance(admission_slip.certificates_surrendered, dict):
+                other_rec = admission_slip.certificates_surrendered.get('other_recommendation', '') or ''
+
             ret['admission_slip_id'] = admission_slip.id
             ret['aadhaar_number'] = admission_slip.aadhaar_number
             ret['emis_number'] = admission_slip.emis_number
@@ -282,7 +286,8 @@ class StudentSerializer(TrackingModelSerializerMixin, serializers.ModelSerialize
             ret['mode_of_admission'] = admission_slip.mode_of_admission
             ret['certificates_surrendered'] = admission_slip.certificates_surrendered
             ret['recommendation_id'] = admission_slip.recommendation_id
-            ret['recommendation_name'] = admission_slip.recommendation.name if admission_slip.recommendation else ''
+            ret['recommendation_name'] = admission_slip.recommendation.name if admission_slip.recommendation else other_rec
+            ret['other_recommendation'] = other_rec
         else:
             ret['admission_slip_id'] = None
             ret['aadhaar_number'] = ''
@@ -298,6 +303,8 @@ class StudentSerializer(TrackingModelSerializerMixin, serializers.ModelSerialize
             ret['mode_of_admission'] = 'I Sem'
             ret['certificates_surrendered'] = {}
             ret['recommendation_id'] = None
+            ret['recommendation_name'] = ''
+            ret['other_recommendation'] = ''
             ret['recommendation_name'] = ''
 
         # ── Fees fields (StudentFees) ───────────────────────────────────
@@ -597,10 +604,30 @@ class StudentAdmissionSlipSerializer(TrackingModelSerializerMixin, serializers.M
         ] + TrackingModelSerializerMixin.TRACKING_FIELDS
         read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by'] + TrackingModelSerializerMixin.TRACKING_FIELDS
 
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        other_rec = ''
+        if instance.certificates_surrendered and isinstance(instance.certificates_surrendered, dict):
+            other_rec = instance.certificates_surrendered.get('other_recommendation', '') or ''
+        ret['other_recommendation'] = other_rec
+        ret['recommendation_name'] = instance.recommendation.name if instance.recommendation else other_rec
+        return ret
+
     def validate(self, attrs):
         student = attrs.get('student')
         if not student and self.instance:
             student = self.instance.student
+
+        # Safeguard: Never overwrite existing umis_number with empty string or None if already present
+        umis_input = attrs.get('umis_number')
+        if (umis_input is None or str(umis_input).strip() == '') and self.instance and self.instance.umis_number:
+            attrs['umis_number'] = self.instance.umis_number
+
+        # Safeguard: Never wipe existing marks_percentage to None if no new marks are provided
+        pct_input = attrs.get('marks_percentage')
+        if (pct_input is None or str(pct_input).strip() == '') and self.instance and self.instance.marks_percentage is not None:
+            if not attrs.get('marks_maths') and not attrs.get('marks_physics') and not attrs.get('marks_chemistry'):
+                attrs['marks_percentage'] = self.instance.marks_percentage
 
         if student:
             is_pg = (student.department.program.program_level == 'PG') if (student.department and student.department.program) else False
