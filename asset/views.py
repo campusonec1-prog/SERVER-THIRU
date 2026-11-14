@@ -1754,7 +1754,25 @@ class AssetAllocationViewSet(viewsets.ModelViewSet):
         
         my_assets_param = self.request.query_params.get('my_assets', None)
         assigned_to_param = self.request.query_params.get('assigned_to', None)
-        if my_assets_param in ['true', '1', True] or str(assigned_to_param).lower() == 'me':
+        scope_param = self.request.query_params.get('scope', None)
+        department_assets_param = self.request.query_params.get('department_assets', None)
+
+        if scope_param in ['department', 'dept'] or department_assets_param in ['true', '1', True]:
+            user_dept = None
+            if hasattr(self.request.user, 'user_details') and self.request.user.user_details:
+                user_dept = getattr(self.request.user.user_details, 'department', None)
+            if user_dept:
+                qs = qs.filter(department=user_dept)
+        elif scope_param in ['my_department', 'all_dept']:
+            from django.db.models import Q
+            user_dept = None
+            if hasattr(self.request.user, 'user_details') and self.request.user.user_details:
+                user_dept = getattr(self.request.user.user_details, 'department', None)
+            if user_dept:
+                qs = qs.filter(Q(department=user_dept) | Q(assigned_to=self.request.user))
+            elif self.request.user and self.request.user.is_authenticated:
+                qs = qs.filter(assigned_to=self.request.user)
+        elif my_assets_param in ['true', '1', True] or str(assigned_to_param).lower() == 'me':
             if self.request.user and self.request.user.is_authenticated:
                 qs = qs.filter(assigned_to=self.request.user)
 

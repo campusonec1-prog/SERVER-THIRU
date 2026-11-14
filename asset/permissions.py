@@ -7,7 +7,7 @@ class AssetCategoryPermission(BaseRolePermission):
     Allows authenticated users to read, and authorized admin/office/manager roles to perform write actions.
     """
     read_roles = ['authenticated']
-    write_roles = ['admin', 'administrator', 'office', 'manager', 'tech_supporter', 'administration_officer']
+    write_roles = ['admin', 'administrator', 'hod', 'office', 'manager', 'tech_supporter', 'administration_officer']
 
 
 class AssetPermission(BaseRolePermission):
@@ -16,7 +16,7 @@ class AssetPermission(BaseRolePermission):
     Allows authenticated users to read, and authorized admin/office/manager roles to perform write actions.
     """
     read_roles = ['authenticated']
-    write_roles = ['admin', 'administrator', 'office', 'manager', 'tech_supporter', 'administration_officer']
+    write_roles = ['admin', 'administrator', 'hod', 'office', 'manager', 'tech_supporter', 'administration_officer']
 
 
 class AssetAllocationPermission(BaseRolePermission):
