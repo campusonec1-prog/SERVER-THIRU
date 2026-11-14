@@ -14,14 +14,15 @@ class BaseRolePermission(permissions.BasePermission):
     ALL_ACCESS_ROLES = {
         'ADMIN', 'ADMINISTRATOR', 'SUPER_ADMIN', 'SUPERADMIN',
         'PRINCIPAL', 'VICE_PRINCIPAL',
-        'TECH_SUPPORTER', 'TS',
-        'ADMINISTRATION_OFFICER', 'ADMINISTRATIVE_OFFICER', 'AO'
+        'TECH_SUPPORTER', 'TECH_SUPPORT', 'TS', 'TECHNICAL_SUPPORTER', 'TECHNICAL_SUPPORT',
+        'ADMINISTRATION_OFFICER', 'ADMINISTRATIVE_OFFICER', 'AO',
+        'ADMISSIONS_OFFICER', 'ADMISSION_OFFICER'
     }
 
     # Strict Delete Access: ONLY Tech Supporter and Superuser are permitted to delete records.
     # ADMIN, AO, and other leadership roles have EDIT access only across all modules.
     DELETE_ALLOWED_ROLES = {
-        'TECH_SUPPORTER', 'TS', 'TECHNICAL_SUPPORT', 'TECH SUPPORTER'
+        'TECH_SUPPORTER', 'TS', 'TECHNICAL_SUPPORT', 'TECH SUPPORTER', 'TECHNICAL_SUPPORTER', 'TECH_SUPPORT'
     }
 
     def has_permission(self, request, view):
@@ -93,7 +94,7 @@ class RestrictDeleteToTechSupporterPermission(permissions.BasePermission):
     Non-DELETE methods (GET, POST, PUT, PATCH, HEAD, OPTIONS) pass through unconditionally.
     """
     DELETE_ALLOWED_ROLES = {
-        'TECH_SUPPORTER', 'TS', 'TECHNICAL_SUPPORT', 'TECH SUPPORTER'
+        'TECH_SUPPORTER', 'TS', 'TECHNICAL_SUPPORT', 'TECH SUPPORTER', 'TECHNICAL_SUPPORTER', 'TECH_SUPPORT'
     }
 
     def has_permission(self, request, view):

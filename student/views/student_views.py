@@ -3468,17 +3468,31 @@ class StudentViewSet(viewsets.ModelViewSet):
         sf_map = {sf.student_id: sf for sf in sf_list}
         sf_ids = [sf.id for sf in sf_list]
 
-        sem_fee_list = StudentSemesterFee.objects.filter(student_fees_id__in=sf_ids, semester__semester_number=sem_num).select_related('semester')
-        sem_fee_map = {sm.student_fees_id: sm for sm in sem_fee_list}
+        # Ensure any sf without semester_fees gets reconciled
+        existing_sf_ids_with_sem = set(StudentSemesterFee.objects.filter(student_fees_id__in=sf_ids).values_list('student_fees_id', flat=True))
+        missing_sf = [sf for sf in sf_list if sf.id not in existing_sf_ids_with_sem]
+        for sf in missing_sf:
+            try:
+                StudentViewSet._reconcile_student_semester_fees(sf)
+            except Exception:
+                pass
+
+        sem_fee_list = StudentSemesterFee.objects.filter(
+            student_fees_id__in=sf_ids,
+            semester__semester_number__lte=sem_num
+        ).select_related('semester')
+        sem_fee_map = {(sm.student_fees_id, sm.semester.semester_number): sm for sm in sem_fee_list}
 
         fs_list = FeesStructure.objects.all()
         fs_map = {(fs.department_id, fs.batch_id, fs.quota_id): fs for fs in fs_list}
 
         records = []
+        tot_prev_bal = 0.0
         tot_fee = 0.0
         tot_paid = 0.0
         tot_concession = 0.0
         tot_bal = 0.0
+        tot_net_due = 0.0
 
         for i, st in enumerate(students, start=1):
             st_name = (st.name if hasattr(st, 'name') and st.name else (st.student_name or 'Student'))
@@ -3486,14 +3500,32 @@ class StudentViewSet(viewsets.ModelViewSet):
             quota_name = st.quota.quota_name if st.quota else 'Regular'
 
             sf = sf_map.get(st.id)
-            sem_fee = sem_fee_map.get(sf.id) if sf else None
 
-            if sem_fee:
-                cur_total = float(sem_fee.total_amount or 0)
-                cur_paid = float(sem_fee.paid_amount or 0)
-                cur_concession = float(sem_fee.concession_amount or 0)
-                cur_bal = float(sem_fee.balance_amount or 0)
-                cur_status = sem_fee.status
+            # 1. Previous semesters pending balance (Semesters 1 to sem_num - 1)
+            prev_balance_fee = 0.0
+            prev_sem_details = []
+            if sem_num > 1 and sf:
+                for p_num in range(1, sem_num):
+                    p_sm = sem_fee_map.get((sf.id, p_num))
+                    if p_sm:
+                        p_bal = max(0.0, float(p_sm.balance_amount or 0))
+                        prev_balance_fee += p_bal
+                        if p_bal > 0:
+                            prev_sem_details.append({
+                                'semester': p_num,
+                                'semester_name': f"Sem {p_num}",
+                                'balance': p_bal
+                            })
+
+            # 2. Current selected semester fees (sem_num)
+            cur_sm = sem_fee_map.get((sf.id, sem_num)) if sf else None
+
+            if cur_sm:
+                cur_total = float(cur_sm.total_amount or 0)
+                cur_paid = float(cur_sm.paid_amount or 0)
+                cur_concession = float(cur_sm.concession_amount or 0)
+                cur_bal = max(0.0, float(cur_sm.balance_amount or 0))
+                cur_status = cur_sm.status
             elif sf and sf.total_fees:
                 cur_total = float(sf.total_fees or 0) / 8.0
                 cur_paid = 0.0
@@ -3514,10 +3546,14 @@ class StudentViewSet(viewsets.ModelViewSet):
                 cur_bal = 0.0
                 cur_status = 'NOT SET'
 
+            student_total_due = prev_balance_fee + cur_bal
+
+            tot_prev_bal += prev_balance_fee
             tot_fee += cur_total
             tot_paid += cur_paid
             tot_concession += cur_concession
             tot_bal += cur_bal
+            tot_net_due += student_total_due
 
             records.append({
                 'sno': i,
@@ -3526,10 +3562,13 @@ class StudentViewSet(viewsets.ModelViewSet):
                 'roll_no': st.roll_number or '—',
                 'name': st_name,
                 'quota': quota_name,
+                'prev_balance_fee': prev_balance_fee,
+                'prev_sem_details': prev_sem_details,
                 'total_fee': cur_total,
                 'paid_fee': cur_paid,
                 'concession_fee': cur_concession,
                 'balance_fee': cur_bal,
+                'total_due': student_total_due,
                 'status': cur_status,
             })
 
@@ -3549,10 +3588,13 @@ class StudentViewSet(viewsets.ModelViewSet):
 
         summary = {
             'total_students': len(students),
+            'total_prev_balance_fees': tot_prev_bal,
             'total_semester_fees': tot_fee,
             'total_paid_fees': tot_paid,
             'total_concession_fees': tot_concession,
             'total_balance_fees': tot_bal,
+            'total_net_due': tot_net_due,
+            'grand_total_balance': tot_net_due,
         }
 
         return meta, summary, records, college_header_obj, department, batch, sec_name, sem_num
@@ -3592,8 +3634,9 @@ class StudentViewSet(viewsets.ModelViewSet):
         story.append(Spacer(1, 6))
 
         # 3. Meta Info Table
-        lbl_bold = ParagraphStyle(name='FRLbl', fontName='Times-Bold', fontSize=9, leading=12, textColor=colors.black)
-        val_norm = ParagraphStyle(name='FRVal', fontName='Times-Roman', fontSize=9, leading=12, textColor=colors.black)
+        lbl_bold = ParagraphStyle(name='FRLbl', fontName='Times-Bold', fontSize=8.5, leading=11, textColor=colors.black)
+        val_norm = ParagraphStyle(name='FRVal', fontName='Times-Roman', fontSize=8.5, leading=11, textColor=colors.black)
+        val_red_bold = ParagraphStyle(name='FRValRedBold', fontName='Times-Bold', fontSize=8.5, leading=11, textColor=colors.HexColor('#DC2626'))
 
         meta_data = [
             [Paragraph("<b>Program:</b>", lbl_bold), Paragraph(str(meta['program']), val_norm),
@@ -3602,15 +3645,19 @@ class StudentViewSet(viewsets.ModelViewSet):
              Paragraph("<b>Section:</b>", lbl_bold), Paragraph(str(meta['section']), val_norm)],
             [Paragraph("<b>Semester:</b>", lbl_bold), Paragraph(str(meta['semester_name']), val_norm),
              Paragraph("<b>Total Students:</b>", lbl_bold), Paragraph(str(summary['total_students']), val_norm)],
+            [Paragraph("<b>Total Prev. Arrears:</b>", lbl_bold), Paragraph(f"Rs. {summary.get('total_prev_balance_fees', 0.0):,.2f}", val_norm),
+             Paragraph("<b>Total Sem Due:</b>", lbl_bold), Paragraph(f"Rs. {summary.get('total_balance_fees', 0.0):,.2f}", val_norm)],
+            [Paragraph("<b>Total Sem Fees:</b>", lbl_bold), Paragraph(f"Rs. {summary.get('total_semester_fees', 0.0):,.2f}", val_norm),
+             Paragraph("<b>Grand Total Due:</b>", lbl_bold), Paragraph(f"<b>Rs. {summary.get('total_net_due', 0.0):,.2f}</b>", val_red_bold)],
         ]
-        meta_table = Table(meta_data, colWidths=[90, 185, 95, 185])
+        meta_table = Table(meta_data, colWidths=[100, 177, 100, 178])
         meta_table.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F8FAFC')),
             ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#F8FAFC')),
-            ('TOPPADDING', (0, 0), (-1, -1), 3),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('TOPPADDING', (0, 0), (-1, -1), 2.5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
             ('LEFTPADDING', (0, 0), (-1, -1), 5),
             ('RIGHTPADDING', (0, 0), (-1, -1), 5),
         ]))
@@ -3618,47 +3665,63 @@ class StudentViewSet(viewsets.ModelViewSet):
         story.append(Spacer(1, 8))
 
         # 4. Student Fee Table
-        # Columns: S.No (35), Reg No (95), Name (155), Quota (70), Total Fee (65), Paid Fee (65), Balance (70) -> Sum = 555 pt
-        col_widths = [35, 95, 155, 70, 65, 65, 70]
-        tbl_hdr_style = ParagraphStyle(name='FRTH', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=1, textColor=colors.black)
-        tbl_hdr_right = ParagraphStyle(name='FRTHR', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=2, textColor=colors.black)
-        tbl_cell_center = ParagraphStyle(name='FRCC', fontName='Times-Roman', fontSize=9, leading=12, alignment=1, textColor=colors.black)
-        tbl_cell_left = ParagraphStyle(name='FRCL', fontName='Times-Roman', fontSize=9, leading=12, alignment=0, textColor=colors.black)
-        tbl_cell_right = ParagraphStyle(name='FRCR', fontName='Times-Roman', fontSize=9, leading=12, alignment=2, textColor=colors.black)
-        tbl_tot_bold = ParagraphStyle(name='FRTB', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=2, textColor=colors.black)
+        # Columns: S.No (24), Reg No (76), Name (115), Quota (48), Prev. Due (58), Total Fee (58), Paid Fee (58), Sem Due (58), Total Due (60) -> Sum = 555 pt
+        col_widths = [24, 76, 115, 48, 58, 58, 58, 58, 60]
+        tbl_hdr_style = ParagraphStyle(name='FRTH', fontName='Times-Bold', fontSize=8.5, leading=10.5, alignment=1, textColor=colors.black)
+        tbl_hdr_right = ParagraphStyle(name='FRTHR', fontName='Times-Bold', fontSize=8.5, leading=10.5, alignment=2, textColor=colors.black)
+        tbl_cell_center = ParagraphStyle(name='FRCC', fontName='Times-Roman', fontSize=8, leading=10, alignment=1, textColor=colors.black)
+        tbl_cell_left = ParagraphStyle(name='FRCL', fontName='Times-Roman', fontSize=8, leading=10, alignment=0, textColor=colors.black)
+        tbl_cell_right = ParagraphStyle(name='FRCR', fontName='Times-Roman', fontSize=8, leading=10, alignment=2, textColor=colors.black)
+        tbl_cell_right_red = ParagraphStyle(name='FRCRR', fontName='Times-Bold', fontSize=8, leading=10, alignment=2, textColor=colors.HexColor('#DC2626'))
+        tbl_tot_bold = ParagraphStyle(name='FRTB', fontName='Times-Bold', fontSize=8.5, leading=10.5, alignment=2, textColor=colors.black)
+        tbl_tot_red = ParagraphStyle(name='FRTR', fontName='Times-Bold', fontSize=8.5, leading=10.5, alignment=2, textColor=colors.HexColor('#DC2626'))
 
         header_row = [
             Paragraph("<b>S.No</b>", tbl_hdr_style),
             Paragraph("<b>Register No</b>", tbl_hdr_style),
             Paragraph("<b>Student Name</b>", tbl_hdr_style),
             Paragraph("<b>Quota</b>", tbl_hdr_style),
-            Paragraph("<b>Total Fee</b>", tbl_hdr_right),
+            Paragraph("<b>Prev. Due</b>", tbl_hdr_right),
+            Paragraph("<b>Sem Fee</b>", tbl_hdr_right),
             Paragraph("<b>Paid Fee</b>", tbl_hdr_right),
-            Paragraph("<b>Balance</b>", tbl_hdr_right),
+            Paragraph("<b>Sem Due</b>", tbl_hdr_right),
+            Paragraph("<b>Total Due</b>", tbl_hdr_right),
         ]
         table_rows = [header_row]
 
         for r in records:
+            prev_str = f"{r['prev_balance_fee']:,.2f}"
+            sem_fee_str = f"{r['total_fee']:,.2f}"
+            paid_fee_str = f"{r['paid_fee']:,.2f}"
+            sem_due_str = f"{r['balance_fee']:,.2f}"
+            total_due_str = f"{r['total_due']:,.2f}"
+
+            tot_style = tbl_cell_right_red if r['total_due'] > 0 else tbl_cell_right
+
             row = [
                 Paragraph(str(r['sno']), tbl_cell_center),
                 Paragraph(str(r['register_no']), tbl_cell_center),
                 Paragraph(str(r['name']).upper(), tbl_cell_left),
                 Paragraph(str(r['quota']), tbl_cell_center),
-                Paragraph(f"{r['total_fee']:,.2f}", tbl_cell_right),
-                Paragraph(f"{r['paid_fee']:,.2f}", tbl_cell_right),
-                Paragraph(f"{r['balance_fee']:,.2f}", tbl_cell_right),
+                Paragraph(prev_str, tbl_cell_right),
+                Paragraph(sem_fee_str, tbl_cell_right),
+                Paragraph(paid_fee_str, tbl_cell_right),
+                Paragraph(sem_due_str, tbl_cell_right),
+                Paragraph(total_due_str, tot_style),
             ]
             table_rows.append(row)
 
         # Totals footer row
         total_row = [
-            Paragraph("<b>TOTAL</b>", ParagraphStyle(name='FRTotL', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=1)),
+            Paragraph("<b>TOTAL</b>", ParagraphStyle(name='FRTotL', fontName='Times-Bold', fontSize=8.5, leading=10.5, alignment=1)),
             Paragraph("", tbl_cell_center),
-            Paragraph(f"<b>{summary['total_students']} Students</b>", ParagraphStyle(name='FRTotSt', fontName='Times-Bold', fontSize=9, leading=12, alignment=0)),
+            Paragraph(f"<b>{summary['total_students']} Students</b>", ParagraphStyle(name='FRTotSt', fontName='Times-Bold', fontSize=8.5, leading=10.5, alignment=0)),
             Paragraph("", tbl_cell_center),
+            Paragraph(f"<b>{summary.get('total_prev_balance_fees', 0.0):,.2f}</b>", tbl_tot_bold),
             Paragraph(f"<b>{summary['total_semester_fees']:,.2f}</b>", tbl_tot_bold),
             Paragraph(f"<b>{summary['total_paid_fees']:,.2f}</b>", tbl_tot_bold),
             Paragraph(f"<b>{summary['total_balance_fees']:,.2f}</b>", tbl_tot_bold),
+            Paragraph(f"<b>{summary.get('total_net_due', 0.0):,.2f}</b>", tbl_tot_red),
         ]
         table_rows.append(total_row)
 
@@ -3666,10 +3729,10 @@ class StudentViewSet(viewsets.ModelViewSet):
         ts = [
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#64748B')),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING', (0, 0), (-1, -1), 3.5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 3.5),
-            ('LEFTPADDING', (0, 0), (-1, -1), 4),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 2.5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
+            ('LEFTPADDING', (0, 0), (-1, -1), 2),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 2),
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E2E8F0')),
             ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#F1F5F9')),
         ]
@@ -3808,11 +3871,11 @@ class StudentViewSet(viewsets.ModelViewSet):
         if not college_header_obj:
             college_header_obj = CollegeHeader.objects.first()
 
-        # 7. Query Students - Only students who have a quota assigned fetch fees
+        # 7. Query Students - Only active students who have a quota assigned fetch fees
         students_qs = Student.objects.select_related(
             'department', 'department__program', 'batch', 'section', 'quota',
             'application', 'application__candidate'
-        ).filter(quota__isnull=False)
+        ).filter(quota__isnull=False, status__is_active=True)
 
         quota_param = req_data.get('quota') or req_params.get('quota') or req_data.get('quota_id') or req_params.get('quota_id')
         if quota_param and str(quota_param).strip().lower() not in ['', 'all', 'all_quotas', 'undefined', 'null']:
@@ -3845,6 +3908,15 @@ class StudentViewSet(viewsets.ModelViewSet):
         sf_map = {sf.student_id: sf for sf in sf_list}
         sf_ids = [sf.id for sf in sf_list]
 
+        # Ensure any sf without semester_fees gets reconciled
+        existing_sf_ids_with_sem = set(StudentSemesterFee.objects.filter(student_fees_id__in=sf_ids).values_list('student_fees_id', flat=True))
+        missing_sf = [sf for sf in sf_list if sf.id not in existing_sf_ids_with_sem]
+        for sf in missing_sf:
+            try:
+                StudentViewSet._reconcile_student_semester_fees(sf)
+            except Exception:
+                pass
+
         sem_fee_list = StudentSemesterFee.objects.filter(student_fees_id__in=sf_ids).select_related('semester')
         sem_fee_map = {(sm.student_fees_id, sm.semester.semester_number): sm for sm in sem_fee_list}
 
@@ -3852,10 +3924,12 @@ class StudentViewSet(viewsets.ModelViewSet):
         fs_map = {(fs.department_id, fs.batch_id, fs.quota_id): fs for fs in fs_list}
 
         records = []
+        tot_prev_bal_sum = 0.0
         tot_fee_sum = 0.0
         tot_paid_sum = 0.0
         tot_conc_sum = 0.0
         tot_bal_sum = 0.0
+        tot_net_due_sum = 0.0
 
         for i, st in enumerate(students, start=1):
             b_obj = st.batch
@@ -3873,6 +3947,22 @@ class StudentViewSet(viewsets.ModelViewSet):
             quota_name = st.quota.quota_name if st.quota else 'Regular'
 
             sf = sf_map.get(st.id)
+
+            # 1. Previous semesters pending balance (all semesters prior to s1: range(1, s1))
+            prev_balance_fee = 0.0
+            prev_sem_details = []
+            if s1 > 1 and sf:
+                for p_num in range(1, s1):
+                    p_sm = sem_fee_map.get((sf.id, p_num))
+                    if p_sm:
+                        p_bal = max(0.0, float(p_sm.balance_amount or 0))
+                        prev_balance_fee += p_bal
+                        if p_bal > 0:
+                            prev_sem_details.append({
+                                'semester': p_num,
+                                'semester_name': f"Sem {p_num}",
+                                'balance': p_bal
+                            })
 
             def _calc_sem(sem_num):
                 sm = sem_fee_map.get((sf.id, sem_num)) if sf else None
@@ -3896,19 +3986,23 @@ class StudentViewSet(viewsets.ModelViewSet):
             cur_conc = s1_conc + s2_conc
             cur_bal = s1_bal + s2_bal
 
-            if cur_bal <= 0 and cur_tot > 0:
+            student_total_due = prev_balance_fee + cur_bal
+
+            if student_total_due <= 0 and cur_tot > 0:
                 cur_status = 'PAID'
             elif cur_paid > 0:
                 cur_status = 'PARTIAL'
-            elif cur_tot > 0:
+            elif student_total_due > 0:
                 cur_status = 'PENDING'
             else:
                 cur_status = 'NOT SET'
 
+            tot_prev_bal_sum += prev_balance_fee
             tot_fee_sum += cur_tot
             tot_paid_sum += cur_paid
             tot_conc_sum += cur_conc
             tot_bal_sum += cur_bal
+            tot_net_due_sum += student_total_due
 
             records.append({
                 'sno': i,
@@ -3924,10 +4018,13 @@ class StudentViewSet(viewsets.ModelViewSet):
                 'semesters': [s1, s2],
                 'semesters_label': f"Sem {s1} & {s2}",
                 'quota': quota_name,
+                'prev_balance_fee': prev_balance_fee,
+                'prev_sem_details': prev_sem_details,
                 'total_fee': cur_tot,
                 'paid_fee': cur_paid,
                 'concession_fee': cur_conc,
                 'balance_fee': cur_bal,
+                'total_due': student_total_due,
                 'status': cur_status,
                 'sem1': {
                     'semester_number': s1,
@@ -3966,18 +4063,22 @@ class StudentViewSet(viewsets.ModelViewSet):
                     'semesters_label': st_rec.get('semesters_label', ''),
                     'section': sec_k,
                     'total_students': 0,
+                    'total_prev_balance_fee': 0.0,
                     'total_fee': 0.0,
                     'paid_fee': 0.0,
                     'concession_fee': 0.0,
                     'balance_fee': 0.0,
+                    'total_due': 0.0,
                     'students': []
                 }
             g_item = grouped_dict[g_key]
             g_item['total_students'] += 1
+            g_item['total_prev_balance_fee'] += st_rec['prev_balance_fee']
             g_item['total_fee'] += st_rec['total_fee']
             g_item['paid_fee'] += st_rec['paid_fee']
             g_item['concession_fee'] += st_rec['concession_fee']
             g_item['balance_fee'] += st_rec['balance_fee']
+            g_item['total_due'] += st_rec['total_due']
 
             rec_in_g = dict(st_rec)
             rec_in_g['group_sno'] = len(g_item['students']) + 1
@@ -4011,10 +4112,12 @@ class StudentViewSet(viewsets.ModelViewSet):
         summary = {
             'total_students': len(records),
             'total_groups': len(groups_list),
+            'total_prev_balance_fees': tot_prev_bal_sum,
             'total_academic_year_fees': tot_fee_sum,
             'total_paid_fees': tot_paid_sum,
             'total_concession_fees': tot_conc_sum,
             'total_balance_fees': tot_bal_sum,
+            'total_net_due': tot_net_due_sum,
         }
 
         student_map = {s.id: s for s in students}
@@ -4066,6 +4169,8 @@ class StudentViewSet(viewsets.ModelViewSet):
              Paragraph("<b>Section:</b>", lbl_bold), Paragraph(str(meta['section']), val_norm)],
             [Paragraph("<b>Semesters:</b>", lbl_bold), Paragraph(str(meta['semesters_covered']), val_norm),
              Paragraph("<b>Total Students / Groups:</b>", lbl_bold), Paragraph(f"<b>{summary['total_students']} Students</b> ({len(groups_list)} Groups)", val_norm)],
+            [Paragraph("<b>Prev. Arrears:</b>", lbl_bold), Paragraph(f"₹{summary['total_prev_balance_fees']:,.2f}", val_norm),
+             Paragraph("<b>Total Net Due:</b>", lbl_bold), Paragraph(f"<b>₹{summary['total_net_due']:,.2f}</b>", val_norm)],
         ]
         meta_table = Table(meta_data, colWidths=[90, 185, 105, 175])
         meta_table.setStyle(TableStyle([
@@ -4082,13 +4187,15 @@ class StudentViewSet(viewsets.ModelViewSet):
         story.append(Spacer(1, 10))
 
         # 4. Student Fee Table(s) Grouped by Department, Batch, and Section
-        col_widths = [35, 95, 155, 70, 65, 65, 70]  # Sum = 555 pt
-        tbl_hdr_style = ParagraphStyle(name='AYFRTH', fontName='Times-Bold', fontSize=9, leading=11, alignment=1, textColor=colors.black)
-        tbl_hdr_right = ParagraphStyle(name='AYFRTHR', fontName='Times-Bold', fontSize=9, leading=11, alignment=2, textColor=colors.black)
-        tbl_cell_center = ParagraphStyle(name='AYFRCC', fontName='Times-Roman', fontSize=8.5, leading=11, alignment=1, textColor=colors.black)
-        tbl_cell_left = ParagraphStyle(name='AYFRCL', fontName='Times-Roman', fontSize=8.5, leading=11, alignment=0, textColor=colors.black)
-        tbl_cell_right = ParagraphStyle(name='AYFRCR', fontName='Times-Roman', fontSize=8.5, leading=11, alignment=2, textColor=colors.black)
-        tbl_tot_bold = ParagraphStyle(name='AYFRTB', fontName='Times-Bold', fontSize=9, leading=11, alignment=2, textColor=colors.black)
+        col_widths = [24, 76, 115, 48, 58, 58, 58, 58, 60]  # Sum = 555 pt
+        tbl_hdr_style = ParagraphStyle(name='AYFRTH', fontName='Times-Bold', fontSize=8.5, leading=10.5, alignment=1, textColor=colors.black)
+        tbl_hdr_right = ParagraphStyle(name='AYFRTHR', fontName='Times-Bold', fontSize=8.5, leading=10.5, alignment=2, textColor=colors.black)
+        tbl_cell_center = ParagraphStyle(name='AYFRCC', fontName='Times-Roman', fontSize=8, leading=10, alignment=1, textColor=colors.black)
+        tbl_cell_left = ParagraphStyle(name='AYFRCL', fontName='Times-Roman', fontSize=8, leading=10, alignment=0, textColor=colors.black)
+        tbl_cell_right = ParagraphStyle(name='AYFRCR', fontName='Times-Roman', fontSize=8, leading=10, alignment=2, textColor=colors.black)
+        tbl_cell_right_red = ParagraphStyle(name='AYFRCRR', fontName='Times-Bold', fontSize=8, leading=10, alignment=2, textColor=colors.HexColor('#DC2626'))
+        tbl_tot_bold = ParagraphStyle(name='AYFRTB', fontName='Times-Bold', fontSize=8.5, leading=10.5, alignment=2, textColor=colors.black)
+        tbl_tot_red = ParagraphStyle(name='AYFRTR', fontName='Times-Bold', fontSize=8.5, leading=10.5, alignment=2, textColor=colors.HexColor('#DC2626'))
         grp_hdr_style = ParagraphStyle(name='AYFRGH', fontName='Times-Bold', fontSize=9, leading=12, textColor=colors.white)
         grp_hdr_right = ParagraphStyle(name='AYFRGHR', fontName='Times-Bold', fontSize=9, leading=12, alignment=2, textColor=colors.HexColor('#38BDF8'))
 
@@ -4097,9 +4204,11 @@ class StudentViewSet(viewsets.ModelViewSet):
             Paragraph("<b>Register No</b>", tbl_hdr_style),
             Paragraph("<b>Student Name</b>", tbl_hdr_style),
             Paragraph("<b>Quota</b>", tbl_hdr_style),
-            Paragraph("<b>Total Fee</b>", tbl_hdr_right),
+            Paragraph("<b>Prev. Due</b>", tbl_hdr_right),
+            Paragraph("<b>AY Fee</b>", tbl_hdr_right),
             Paragraph("<b>Paid Fee</b>", tbl_hdr_right),
-            Paragraph("<b>Balance</b>", tbl_hdr_right),
+            Paragraph("<b>AY Due</b>", tbl_hdr_right),
+            Paragraph("<b>Total Due</b>", tbl_hdr_right),
         ]
 
         for g_idx, grp in enumerate(groups_list, start=1):
@@ -4121,26 +4230,34 @@ class StudentViewSet(viewsets.ModelViewSet):
             # Group Student Rows
             grp_rows = [header_row]
             for st_in_g in grp['students']:
+                has_prev_due = (st_in_g.get('prev_balance_fee', 0.0) or 0) > 0
+                has_tot_due = (st_in_g.get('total_due', 0.0) or 0) > 0
                 row = [
                     Paragraph(str(st_in_g.get('group_sno', 1)), tbl_cell_center),
                     Paragraph(str(st_in_g['register_no']), tbl_cell_center),
                     Paragraph(str(st_in_g['name']).upper(), tbl_cell_left),
                     Paragraph(str(st_in_g['quota']), tbl_cell_center),
+                    Paragraph(f"{st_in_g.get('prev_balance_fee', 0.0):,.2f}", tbl_cell_right_red if has_prev_due else tbl_cell_right),
                     Paragraph(f"{st_in_g['total_fee']:,.2f}", tbl_cell_right),
                     Paragraph(f"{st_in_g['paid_fee']:,.2f}", tbl_cell_right),
                     Paragraph(f"{st_in_g['balance_fee']:,.2f}", tbl_cell_right),
+                    Paragraph(f"{st_in_g.get('total_due', 0.0):,.2f}", tbl_cell_right_red if has_tot_due else tbl_cell_right),
                 ]
                 grp_rows.append(row)
 
             # Subtotal Row
+            grp_has_prev_due = (grp.get('total_prev_balance_fee', 0.0) or 0) > 0
+            grp_has_tot_due = (grp.get('total_due', 0.0) or 0) > 0
             subtot_row = [
                 Paragraph("<b>SUBTOTAL</b>", ParagraphStyle(name=f'AYFRSubL_{g_idx}', fontName='Times-Bold', fontSize=8.5, leading=11, alignment=1)),
                 Paragraph("", tbl_cell_center),
                 Paragraph(f"<b>{grp['total_students']} Students</b>", ParagraphStyle(name=f'AYFRSubSt_{g_idx}', fontName='Times-Bold', fontSize=8.5, leading=11, alignment=0)),
                 Paragraph("", tbl_cell_center),
+                Paragraph(f"<b>{grp.get('total_prev_balance_fee', 0.0):,.2f}</b>", tbl_tot_red if grp_has_prev_due else tbl_tot_bold),
                 Paragraph(f"<b>{grp['total_fee']:,.2f}</b>", tbl_tot_bold),
                 Paragraph(f"<b>{grp['paid_fee']:,.2f}</b>", tbl_tot_bold),
                 Paragraph(f"<b>{grp['balance_fee']:,.2f}</b>", tbl_tot_bold),
+                Paragraph(f"<b>{grp.get('total_due', 0.0):,.2f}</b>", tbl_tot_red if grp_has_tot_due else tbl_tot_bold),
             ]
             grp_rows.append(subtot_row)
 
@@ -4148,10 +4265,10 @@ class StudentViewSet(viewsets.ModelViewSet):
             ts = [
                 ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#64748B')),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('TOPPADDING', (0, 0), (-1, -1), 3),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-                ('LEFTPADDING', (0, 0), (-1, -1), 3.5),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 3.5),
+                ('TOPPADDING', (0, 0), (-1, -1), 2.5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
+                ('LEFTPADDING', (0, 0), (-1, -1), 2),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 2),
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E2E8F0')),
                 ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#EEF2F6')),
             ]
@@ -4167,25 +4284,29 @@ class StudentViewSet(viewsets.ModelViewSet):
 
         # Grand Total Table if multiple groups
         if len(groups_list) > 1:
+            gtot_has_prev = summary.get('total_prev_balance_fees', 0.0) > 0
+            gtot_has_net = summary.get('total_net_due', 0.0) > 0
             grand_tot_table = Table([
                 [
-                    Paragraph("<b>GRAND TOTAL (ALL GROUPS)</b>", ParagraphStyle(name='AYFRGTotL', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=1)),
+                    Paragraph("<b>GRAND TOTAL (ALL GROUPS)</b>", ParagraphStyle(name='AYFRGTotL', fontName='Times-Bold', fontSize=9, leading=11, alignment=1)),
                     Paragraph("", tbl_cell_center),
-                    Paragraph(f"<b>{summary['total_students']} Students ({len(groups_list)} Groups)</b>", ParagraphStyle(name='AYFRGTotSt', fontName='Times-Bold', fontSize=9, leading=12, alignment=0)),
+                    Paragraph(f"<b>{summary['total_students']} Students ({len(groups_list)} Groups)</b>", ParagraphStyle(name='AYFRGTotSt', fontName='Times-Bold', fontSize=8.5, leading=11, alignment=0)),
                     Paragraph("", tbl_cell_center),
-                    Paragraph(f"<b>{summary['total_academic_year_fees']:,.2f}</b>", ParagraphStyle(name='AYFRGTot1', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=2)),
-                    Paragraph(f"<b>{summary['total_paid_fees']:,.2f}</b>", ParagraphStyle(name='AYFRGTot2', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=2)),
-                    Paragraph(f"<b>{summary['total_balance_fees']:,.2f}</b>", ParagraphStyle(name='AYFRGTot3', fontName='Times-Bold', fontSize=9.5, leading=12, alignment=2)),
+                    Paragraph(f"<b>{summary.get('total_prev_balance_fees', 0.0):,.2f}</b>", tbl_tot_red if gtot_has_prev else tbl_tot_bold),
+                    Paragraph(f"<b>{summary['total_academic_year_fees']:,.2f}</b>", tbl_tot_bold),
+                    Paragraph(f"<b>{summary['total_paid_fees']:,.2f}</b>", tbl_tot_bold),
+                    Paragraph(f"<b>{summary['total_balance_fees']:,.2f}</b>", tbl_tot_bold),
+                    Paragraph(f"<b>{summary.get('total_net_due', 0.0):,.2f}</b>", tbl_tot_red if gtot_has_net else tbl_tot_bold),
                 ]
             ], colWidths=col_widths)
             grand_tot_table.setStyle(TableStyle([
                 ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#1E293B')),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#E2E8F0')),
-                ('TOPPADDING', (0, 0), (-1, -1), 4),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-                ('LEFTPADDING', (0, 0), (-1, -1), 3.5),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 3.5),
+                ('TOPPADDING', (0, 0), (-1, -1), 3.5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3.5),
+                ('LEFTPADDING', (0, 0), (-1, -1), 2),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 2),
             ]))
             story.append(grand_tot_table)
             story.append(Spacer(1, 12))

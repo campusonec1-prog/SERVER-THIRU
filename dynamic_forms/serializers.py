@@ -472,6 +472,14 @@ class ApplicationSerializer(TrackingModelSerializerMixin, serializers.ModelSeria
 
     def get_readable_form_data(self, obj):
         form_data = obj.form_data or {}
+        if isinstance(form_data, str):
+            try:
+                import json
+                form_data = json.loads(form_data)
+            except Exception:
+                form_data = {}
+        if not isinstance(form_data, dict):
+            form_data = {}
         readable_data = {}
         
         # Load all form fields to lookup labels

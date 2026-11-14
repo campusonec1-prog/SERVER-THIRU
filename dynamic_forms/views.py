@@ -135,6 +135,26 @@ class FormFieldViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         return Response({"code": 200, "message": "Form Field deleted successfully"}, status=status.HTTP_200_OK)
 
 
+def is_admin_or_staff_user(user):
+    """
+    Returns True if the authenticated user is an internal staff, administrative, 
+    or technical user (not an external candidate applicant).
+    """
+    if not user or not user.is_authenticated:
+        return False
+    if getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False):
+        return True
+    if user.__class__.__name__ == 'ApplicationUser':
+        return False
+    try:
+        r_name = getattr(getattr(user, 'role', None), 'role_name', '').upper().replace(' ', '_').replace('-', '_').strip()
+        if r_name == 'CANDIDATE':
+            return False
+    except Exception:
+        pass
+    return True
+
+
 class ApplicationViewSet(viewsets.ModelViewSet):
     queryset = Application.objects.all().order_by('-id')
     serializer_class = ApplicationSerializer
@@ -145,21 +165,19 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if not user or not user.is_authenticated:
             return Application.objects.none()
-        
-        is_admin = False
-        try:
-            role_name = user.role.role_name.upper()
-            if role_name in ['ADMIN', 'ADMINISTRATOR']:
-                is_admin = True
-        except AttributeError:
-            pass
 
-        if user.__class__.__name__ == 'ApplicationUser':
-            qs = Application.objects.filter(candidate=user).select_related('candidate', 'program', 'academic_year', 'status', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role')
-        elif is_admin:
-            qs = Application.objects.all().select_related('candidate', 'program', 'academic_year', 'status', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role')
+        is_staff_admin = is_admin_or_staff_user(user)
+
+        if user.__class__.__name__ == 'ApplicationUser' or not is_staff_admin:
+            qs = Application.objects.filter(candidate=user).select_related(
+                'candidate', 'program', 'academic_year', 'status', 
+                'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
+            )
         else:
-            return Application.objects.none()
+            qs = Application.objects.all().select_related(
+                'candidate', 'program', 'academic_year', 'status', 
+                'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
+            )
 
         status_id = self.request.query_params.get('status_id')
         if status_id:
@@ -277,15 +295,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         user = self.request.user
         instance = self.get_object()
 
-        is_admin = False
-        try:
-            role_name = user.role.role_name.upper()
-            if role_name in ['ADMIN', 'ADMINISTRATOR']:
-                is_admin = True
-        except AttributeError:
-            pass
-
-        if not is_admin:
+        if not is_admin_or_staff_user(user):
             if user.__class__.__name__ != 'ApplicationUser' or instance.candidate != user:
                 raise PermissionDenied("You do not have permission to edit this application.")
             
@@ -304,15 +314,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         user = request.user
 
-        is_admin = False
-        try:
-            role_name = user.role.role_name.upper()
-            if role_name in ['ADMIN', 'ADMINISTRATOR']:
-                is_admin = True
-        except AttributeError:
-            pass
-
-        if not is_admin:
+        if not is_admin_or_staff_user(user):
             if user.__class__.__name__ != 'ApplicationUser' or instance.candidate != user:
                 raise PermissionDenied("You do not have permission to delete this application.")
             if instance.status.status_name.lower() != 'draft':
@@ -375,15 +377,7 @@ class ApplicationUserViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         user = self.request.user
         instance = self.get_object()
 
-        is_admin = False
-        try:
-            role_name = user.role.role_name.upper()
-            if role_name in ['ADMIN', 'ADMINISTRATOR']:
-                is_admin = True
-        except AttributeError:
-            pass
-
-        if not is_admin:
+        if not is_admin_or_staff_user(user):
             user_email = getattr(user, 'mail', getattr(user, 'email', None))
             if instance.email != user_email:
                 raise PermissionDenied("You do not have permission to update this profile.")
@@ -531,7 +525,8 @@ class ApplicationPDFDownloadView(APIView):
         application = get_object_or_404(Application, pk=pk)
         
         # Security check: candidates can only download their own application
-        if request.user.role.role_name == 'CANDIDATE' and application.candidate.email != request.user.email:
+        user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper()
+        if (request.user.__class__.__name__ == 'ApplicationUser' or user_role == 'CANDIDATE') and getattr(application.candidate, 'email', None) != getattr(request.user, 'email', None):
             return HttpResponse("Unauthorized", status=403)
 
         # Create BytesIO buffer
