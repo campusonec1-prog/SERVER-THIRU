@@ -118,9 +118,13 @@ urlpatterns = [
 
     # Bonafide Certificate endpoints
     path('bonafide/search', BonafideStudentSearchView.as_view(), name='bonafide-student-search'),
+    path('bonafide/search/', BonafideStudentSearchView.as_view(), name='bonafide-student-search-slash'),
     path('bonafide/generate', BonafideGenerateView.as_view(), name='bonafide-generate'),
+    path('bonafide/generate/', BonafideGenerateView.as_view(), name='bonafide-generate-slash'),
     path('bonafide/history', BonafideHistoryListView.as_view(), name='bonafide-history-list'),
+    path('bonafide/history/', BonafideHistoryListView.as_view(), name='bonafide-history-list-slash'),
     path('bonafide/download/<int:cert_id>', BonafideDownloadExistingView.as_view(), name='bonafide-download-existing'),
+    path('bonafide/download/<int:cert_id>/', BonafideDownloadExistingView.as_view(), name='bonafide-download-existing-slash'),
 ]
 
 
