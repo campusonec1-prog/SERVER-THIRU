@@ -635,6 +635,37 @@ class FacultySpecialDuty(TrackingModel):
         return f"{self.faculty.username} - {self.category} ({self.date})"
 
 
+class BonafideCertificate(TrackingModel):
+    certificate_number = models.CharField(max_length=100, unique=True, db_index=True)
+    student = models.ForeignKey(
+        Student,
+        on_delete=models.CASCADE,
+        related_name='bonafide_certificates',
+        db_column='student_id'
+    )
+    student_name = models.CharField(max_length=255)
+    roll_number = models.CharField(max_length=50, null=True, blank=True)
+    register_number = models.CharField(max_length=50, null=True, blank=True)
+    gender = models.CharField(max_length=20, default='Male')
+    salutation = models.CharField(max_length=20, default='Mr.')
+    parent_name = models.CharField(max_length=255, null=True, blank=True)
+    relation = models.CharField(max_length=20, default='S/O')
+    department_name = models.CharField(max_length=255)
+    year_of_study = models.CharField(max_length=50)
+    academic_year = models.CharField(max_length=50)
+    purpose = models.TextField(default='Current Enrollment and Eligibility')
+    issue_date = models.DateField(default=timezone.now)
+    include_header = models.BooleanField(default=False)
 
+    class Meta:
+        db_table = 'student_bonafide_certificates'
+        ordering = ['-issue_date', '-created_at', '-id']
+        indexes = [
+            models.Index(fields=['student', '-created_at']),
+            models.Index(fields=['certificate_number']),
+            models.Index(fields=['issue_date']),
+        ]
 
+    def __str__(self):
+        return f"{self.certificate_number} - {self.student_name} ({self.issue_date})"
 

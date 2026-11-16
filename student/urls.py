@@ -11,6 +11,12 @@ from .views import (
     HostelVisitorLogViewSet
 )
 from .views.admission_report_views import AdmissionReportDataView, AdmissionReportPDFView
+from .views.bonafide_views import (
+    BonafideStudentSearchView,
+    BonafideGenerateView,
+    BonafideHistoryListView,
+    BonafideDownloadExistingView,
+)
 
 urlpatterns = [
     # Student Status endpoints
@@ -109,6 +115,12 @@ urlpatterns = [
     path('admissions/report/data/', AdmissionReportDataView.as_view(), name='admissions-report-data-slash'),
     path('admissions/report/pdf', AdmissionReportPDFView.as_view(), name='admissions-report-pdf'),
     path('admissions/report/pdf/', AdmissionReportPDFView.as_view(), name='admissions-report-pdf-slash'),
+
+    # Bonafide Certificate endpoints
+    path('bonafide/search', BonafideStudentSearchView.as_view(), name='bonafide-student-search'),
+    path('bonafide/generate', BonafideGenerateView.as_view(), name='bonafide-generate'),
+    path('bonafide/history', BonafideHistoryListView.as_view(), name='bonafide-history-list'),
+    path('bonafide/download/<int:cert_id>', BonafideDownloadExistingView.as_view(), name='bonafide-download-existing'),
 ]
 
 

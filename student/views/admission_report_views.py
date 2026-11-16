@@ -1,5 +1,6 @@
 import re
 import datetime
+import zoneinfo
 from io import BytesIO
 from decimal import Decimal
 
@@ -78,6 +79,33 @@ def _parse_date(val):
     return None
 
 
+def _format_dept_with_program(dept):
+    """
+    Returns department formatted with program name prefix, e.g.:
+    'B.E. Computer Science Engineering', 'B.Tech. Information Technology', 'M.E. ...'
+    """
+    if not dept:
+        return '—'
+    dept_name = str(dept.department_name or '').strip()
+    prog = getattr(dept, 'program', None)
+    prog_name = str(prog.program_name or '').strip() if prog else ''
+
+    if not prog_name:
+        return dept_name
+
+    # If dept_name already starts with the program name (e.g. "MCA ...", "MBA ..."), avoid duplicating
+    if dept_name.lower().startswith(prog_name.lower()):
+        return dept_name
+
+    # Ensure clean dot format for acronyms like "B.E." or "B.Tech."
+    if '.' in prog_name and not prog_name.endswith('.'):
+        prog_clean = f"{prog_name}."
+    else:
+        prog_clean = prog_name
+
+    return f"{prog_clean} {dept_name}"
+
+
 def _resolve_student_recommender(st):
     """
     Returns normalized dictionary describing the recommender for a student:
@@ -93,8 +121,8 @@ def _resolve_student_recommender(st):
         return {
             'id': 'direct',
             'user_id': None,
-            'name': 'Direct / No Recommendation',
-            'clean_name': 'Direct / None',
+            'name': 'Direct',
+            'clean_name': 'Direct',
             'is_direct': True,
             'is_user': False,
         }
@@ -129,8 +157,8 @@ def _resolve_student_recommender(st):
     return {
         'id': 'direct',
         'user_id': None,
-        'name': 'Direct / No Recommendation',
-        'clean_name': 'Direct / None',
+        'name': 'Direct',
+        'clean_name': 'Direct',
         'is_direct': True,
         'is_user': False,
     }
@@ -209,13 +237,13 @@ def _compute_recommendation_breakdown(students, all_faculties=None, other_names=
                 'count': 0,
             }
 
-    # 3. Initialize Direct / No Recommendation
+    # 3. Initialize Direct
     rec_groups['direct'] = {
         'id': 'direct',
         'user_id': None,
-        'name': 'Direct / No Recommendation',
-        'clean_name': 'Direct / None',
-        'role': 'Direct Admission',
+        'name': 'Direct',
+        'clean_name': 'Direct',
+        'role': 'Direct',
         'is_direct': True,
         'is_user': False,
         'count': 0,
@@ -231,7 +259,7 @@ def _compute_recommendation_breakdown(students, all_faculties=None, other_names=
                 'user_id': rec_info['user_id'],
                 'name': rec_info['name'],
                 'clean_name': rec_info['clean_name'],
-                'role': 'Staff / Faculty' if rec_info['is_user'] else ('Direct Admission' if rec_info['is_direct'] else 'External / Other'),
+                'role': 'Staff / Faculty' if rec_info['is_user'] else ('Direct' if rec_info['is_direct'] else 'External / Other'),
                 'is_direct': rec_info['is_direct'],
                 'is_user': rec_info['is_user'],
                 'count': 0,
@@ -246,7 +274,7 @@ def _compute_recommendation_breakdown(students, all_faculties=None, other_names=
         breakdown.append({
             **g,
             'percentage': pct,
-            'summary_text': f"{g['clean_name']} recommended {cnt} candidate{'s' if cnt != 1 else ''}" if not g['is_direct'] else f"Direct / No Recommendation: {cnt} candidate{'s' if cnt != 1 else ''}"
+            'summary_text': f"{g['clean_name']} recommended {cnt} candidate{'s' if cnt != 1 else ''}" if not g['is_direct'] else f"Direct: {cnt} candidate{'s' if cnt != 1 else ''}"
         })
 
     # Sort order:
@@ -390,7 +418,7 @@ def _filter_admissions_queryset(request):
 
     if rec_val and rec_val.lower() not in ['', 'all', 'all_recommenders', 'undefined', 'null']:
         if rec_val.lower() in ['none', 'direct', 'direct_admission']:
-            rec_filter_label = "Direct / No Recommendation"
+            rec_filter_label = "Direct"
             qs = qs.filter(Q(admission_slip__isnull=True) | Q(admission_slip__recommendation__isnull=True))
             in_memory_rec_filter = lambda st: _resolve_student_recommender(st)['is_direct']
         elif rec_val.isdigit() or (rec_val.startswith('user_') and rec_val[5:].isdigit()):
@@ -427,7 +455,7 @@ def _filter_admissions_queryset(request):
         'selected_date': str(parsed_single_date) if parsed_single_date else None,
         'from_date': str(parsed_from_date) if parsed_from_date else None,
         'to_date': str(parsed_to_date) if parsed_to_date else None,
-        'department_name': dept_obj.department_name if dept_obj else "All Departments",
+        'department_name': _format_dept_with_program(dept_obj) if dept_obj else "All Departments",
         'quota_name': quota_obj.quota_name if quota_obj else "All Quotas",
         'recommendation_name': rec_filter_label,
         'recommendation_filter': rec_val,
@@ -493,7 +521,7 @@ class AdmissionReportDataView(APIView):
             quota_name = st.quota.quota_name if st.quota else '—'
 
             # Department lookup
-            dept_name = st.department.department_name if st.department else '—'
+            dept_name = _format_dept_with_program(st.department)
 
             # Recommendation lookup
             rec_info = _resolve_student_recommender(st)
@@ -731,9 +759,17 @@ class AdmissionReportPDFView(APIView):
             Paragraph("TOTAL ADMITTED:", meta_label_style),
             Paragraph(f"<b>{len(students)}</b> Candidates", meta_val_style),
         ]
+
+        # Convert to Indian Standard Time (IST)
+        try:
+            ist_tz = zoneinfo.ZoneInfo('Asia/Kolkata')
+            gen_time_ist = timezone.now().astimezone(ist_tz)
+        except Exception:
+            gen_time_ist = timezone.now() + datetime.timedelta(hours=5, minutes=30)
+
         row4 = [
             Paragraph("GENERATED ON:", meta_label_style),
-            Paragraph(timezone.now().strftime('%d/%m/%Y %I:%M %p'), meta_val_style),
+            Paragraph(gen_time_ist.strftime('%d/%m/%Y %I:%M %p'), meta_val_style),
             Paragraph("DOCUMENT SCOPE:", meta_label_style),
             Paragraph(f"Official Admission Roster with Candidate Recommendation Summary", meta_val_style),
         ]
@@ -792,7 +828,7 @@ class AdmissionReportPDFView(APIView):
             textColor=colors.HexColor('#0F172A')
         )
 
-        col_widths = [24, 62, 112, 105, 45, 105, 50, 52]  # Total: 555 pt
+        col_widths = [20, 55, 105, 115, 55, 95, 50, 60]  # Total: 555 pt
         table_rows = [
             [
                 Paragraph("S.No", th_style),
@@ -829,7 +865,7 @@ class AdmissionReportPDFView(APIView):
                     '—'
                 )
 
-                dept_title = st.department.department_name if st.department else '—'
+                dept_title = _format_dept_with_program(st.department)
                 quota_title = st.quota.quota_name if st.quota else '—'
                 app_no = app.application_no if app else (st.roll_number or f'ADM{st.id}')
 
@@ -935,7 +971,7 @@ class AdmissionReportPDFView(APIView):
 
             total_recomms = len(students)
             for r_item in rec_breakdown:
-                affil = "Staff / Faculty" if r_item['is_user'] else ("External / Other" if not r_item['is_direct'] else "Direct Admission")
+                affil = "Staff / Faculty" if r_item['is_user'] else ("External / Other" if not r_item['is_direct'] else "Direct")
                 count_str = f"<b>{r_item['count']} candidate{'s' if r_item['count'] != 1 else ''}</b>"
 
                 rec_tbl_rows.append([
@@ -976,7 +1012,7 @@ class AdmissionReportPDFView(APIView):
             dept_counts = {}
             quota_counts = {}
             for st in students:
-                d_n = st.department.department_name if st.department else 'Other'
+                d_n = _format_dept_with_program(st.department) if st.department else 'Other'
                 q_n = st.quota.quota_name if st.quota else 'Unassigned'
                 dept_counts[d_n] = dept_counts.get(d_n, 0) + 1
                 quota_counts[q_n] = quota_counts.get(q_n, 0) + 1
