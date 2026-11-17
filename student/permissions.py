@@ -10,7 +10,7 @@ class StudentPermission(BaseRolePermission):
     read_roles = ['authenticated']
     write_roles = [
         'admin', 'administrator', 'office', 'manager', 'tech_supporter',
-        'administration_officer', 'administrative_officer', 'principal',
+        'administration_officer', 'administrative_officer',
         'vice_principal', 'hod', 'admissions_officer', 'hostel_warden',
         'warden', 'transport', 'placement_cell', 'placement_officer'
     ]
@@ -27,6 +27,15 @@ class StudentPermission(BaseRolePermission):
                 return user_role_name in self.DELETE_ALLOWED_ROLES
             except Exception:
                 return False
+
+        is_edit = (request.method in ['PUT', 'PATCH']) or (getattr(view, 'action', None) in ['update', 'partial_update', 'edit', 'full_profile_update'])
+        if is_edit:
+            try:
+                user_role_name = getattr(request.user.role, 'role_name', '').upper().replace(' ', '_')
+                if user_role_name == 'PRINCIPAL':
+                    return False
+            except Exception:
+                pass
 
         if request.method in permissions.SAFE_METHODS:
             return bool(request.user and request.user.is_authenticated)
@@ -78,6 +87,15 @@ class CounsellingReportPermission(BaseRolePermission):
             except Exception:
                 return False
 
+        is_edit = (request.method in ['PUT', 'PATCH']) or (getattr(view, 'action', None) in ['update', 'partial_update', 'edit'])
+        if is_edit:
+            try:
+                user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+                if user_role == 'PRINCIPAL':
+                    return False
+            except Exception:
+                pass
+
         if request.method in permissions.SAFE_METHODS:
             return super().has_permission(request, view)
 
@@ -112,7 +130,7 @@ class CounsellingReportPermission(BaseRolePermission):
         # 2. Leadership and Admins have full access automatically
         try:
             user_role = request.user.role.role_name.upper().replace(' ', '_')
-            if user_role in ['ADMIN', 'ADMINISTRATOR', 'ADMINISTRATIVE_OFFICER', 'ADMINISTRATION_OFFICER', 'TECH_SUPPORTER', 'TS', 'PRINCIPAL', 'VICE_PRINCIPAL']:
+            if user_role in ['ADMIN', 'ADMINISTRATOR', 'ADMINISTRATIVE_OFFICER', 'ADMINISTRATION_OFFICER', 'TECH_SUPPORTER', 'TS', 'VICE_PRINCIPAL']:
                 return True
         except AttributeError:
             pass
@@ -124,6 +142,13 @@ class CounsellingReportPermission(BaseRolePermission):
                 user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
                 if not (getattr(request.user, 'is_superuser', False) or user_role in self.DELETE_ALLOWED_ROLES):
                     return False
+
+            is_edit = (request.method in ['PUT', 'PATCH']) or (getattr(view, 'action', None) in ['update', 'partial_update', 'edit'])
+            if is_edit:
+                user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+                if user_role == 'PRINCIPAL':
+                    return False
+
             return obj.created_by == request.user
 
         return True

@@ -25,6 +25,8 @@ class BaseRolePermission(permissions.BasePermission):
         'TECH_SUPPORTER', 'TS', 'TECHNICAL_SUPPORT', 'TECH SUPPORTER', 'TECHNICAL_SUPPORTER', 'TECH_SUPPORT'
     }
 
+    BLOCKED_EDIT_ROLES = {'PRINCIPAL'}
+
     def has_permission(self, request, view):
         is_delete = (request.method == 'DELETE') or (getattr(view, 'action', None) in ['destroy', 'bulk_destroy', 'bulk_delete', 'remove', 'delete'])
 
@@ -39,6 +41,19 @@ class BaseRolePermission(permissions.BasePermission):
                 return user_role in self.DELETE_ALLOWED_ROLES
             except Exception:
                 return False
+
+        # Block edit for Principal
+        is_edit = (request.method in ['PUT', 'PATCH']) or (getattr(view, 'action', None) in ['update', 'partial_update', 'edit', 'full_profile_update'])
+        if is_edit and getattr(view, 'action', None) not in ['change_password', 'approve', 'reject', 'recommend', 'principal_approve', 'principal_reject']:
+            if not request.user or not request.user.is_authenticated:
+                return False
+            if not getattr(request.user, 'is_superuser', False):
+                try:
+                    user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+                    if user_role in self.BLOCKED_EDIT_ROLES:
+                        return False
+                except Exception:
+                    pass
 
         is_read = request.method in permissions.SAFE_METHODS
         
@@ -83,6 +98,19 @@ class BaseRolePermission(permissions.BasePermission):
                 return user_role in self.DELETE_ALLOWED_ROLES
             except Exception:
                 return False
+
+        is_edit = (request.method in ['PUT', 'PATCH']) or (getattr(view, 'action', None) in ['update', 'partial_update', 'edit', 'full_profile_update'])
+        if is_edit and getattr(view, 'action', None) not in ['change_password', 'approve', 'reject', 'recommend', 'principal_approve', 'principal_reject']:
+            if not request.user or not request.user.is_authenticated:
+                return False
+            if not getattr(request.user, 'is_superuser', False):
+                try:
+                    user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+                    if user_role in self.BLOCKED_EDIT_ROLES:
+                        return False
+                except Exception:
+                    pass
+
         return True
 
 
@@ -91,39 +119,57 @@ class RestrictDeleteToTechSupporterPermission(permissions.BasePermission):
     Global standalone permission rule:
     DELETE / destroy requests are restricted strictly to TECH_SUPPORTER and Superuser.
     All other roles (including ADMIN and AO) are blocked from DELETE (403 Forbidden).
-    Non-DELETE methods (GET, POST, PUT, PATCH, HEAD, OPTIONS) pass through unconditionally.
+    EDIT (PUT/PATCH/update) requests are blocked for PRINCIPAL role.
+    Other non-DELETE/non-edit methods pass through.
     """
     DELETE_ALLOWED_ROLES = {
         'TECH_SUPPORTER', 'TS', 'TECHNICAL_SUPPORT', 'TECH SUPPORTER', 'TECHNICAL_SUPPORTER', 'TECH_SUPPORT'
     }
+    BLOCKED_EDIT_ROLES = {'PRINCIPAL'}
 
     def has_permission(self, request, view):
         is_delete = (request.method == 'DELETE') or (getattr(view, 'action', None) in ['destroy', 'bulk_destroy', 'bulk_delete', 'remove', 'delete'])
-        if not is_delete:
-            return True
+        if is_delete:
+            if not request.user or not request.user.is_authenticated:
+                return False
+            if getattr(request.user, 'is_superuser', False):
+                return True
+            user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+            return user_role in self.DELETE_ALLOWED_ROLES
 
-        if not request.user or not request.user.is_authenticated:
-            return False
+        is_edit = (request.method in ['PUT', 'PATCH']) or (getattr(view, 'action', None) in ['update', 'partial_update', 'edit', 'full_profile_update'])
+        if is_edit and getattr(view, 'action', None) not in ['change_password', 'approve', 'reject', 'recommend', 'principal_approve', 'principal_reject']:
+            if not request.user or not request.user.is_authenticated:
+                return False
+            if getattr(request.user, 'is_superuser', False):
+                return True
+            user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+            if user_role in self.BLOCKED_EDIT_ROLES:
+                return False
 
-        if getattr(request.user, 'is_superuser', False):
-            return True
-
-        user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
-        return user_role in self.DELETE_ALLOWED_ROLES
+        return True
 
     def has_object_permission(self, request, view, obj):
         is_delete = (request.method == 'DELETE') or (getattr(view, 'action', None) in ['destroy', 'bulk_destroy', 'bulk_delete', 'remove', 'delete'])
-        if not is_delete:
-            return True
+        if is_delete:
+            if not request.user or not request.user.is_authenticated:
+                return False
+            if getattr(request.user, 'is_superuser', False):
+                return True
+            user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+            return user_role in self.DELETE_ALLOWED_ROLES
 
-        if not request.user or not request.user.is_authenticated:
-            return False
+        is_edit = (request.method in ['PUT', 'PATCH']) or (getattr(view, 'action', None) in ['update', 'partial_update', 'edit', 'full_profile_update'])
+        if is_edit and getattr(view, 'action', None) not in ['change_password', 'approve', 'reject', 'recommend', 'principal_approve', 'principal_reject']:
+            if not request.user or not request.user.is_authenticated:
+                return False
+            if getattr(request.user, 'is_superuser', False):
+                return True
+            user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+            if user_role in self.BLOCKED_EDIT_ROLES:
+                return False
 
-        if getattr(request.user, 'is_superuser', False):
-            return True
-
-        user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
-        return user_role in self.DELETE_ALLOWED_ROLES
+        return True
 
 
 # ─── Legacy Permission Classes (Refactored to subclass BaseRolePermission) ────
@@ -133,7 +179,7 @@ class IsAdminUser(BaseRolePermission):
     Allows access only to authenticated admin / leadership / tech support users.
     """
     read_roles = ['admin', 'administrator', 'principal', 'vice_principal', 'tech_supporter', 'administration_officer', 'ao', 'ts']
-    write_roles = ['admin', 'administrator', 'principal', 'vice_principal', 'tech_supporter', 'administration_officer', 'ao', 'ts']
+    write_roles = ['admin', 'administrator', 'vice_principal', 'tech_supporter', 'administration_officer', 'ao', 'ts']
 
 
 class IsMarksManager(BaseRolePermission):
@@ -141,7 +187,7 @@ class IsMarksManager(BaseRolePermission):
     Allows access to HOD, Faculty, Principal, Vice Principal, AO, TS, and Admin.
     """
     read_roles = ['hod', 'faculty', 'principal', 'vice_principal', 'admin', 'administrator', 'administration_officer', 'tech_supporter']
-    write_roles = ['hod', 'faculty', 'principal', 'vice_principal', 'admin', 'administrator', 'administration_officer', 'tech_supporter']
+    write_roles = ['hod', 'faculty', 'vice_principal', 'admin', 'administrator', 'administration_officer', 'tech_supporter']
 
 
 class IsCounsellingCreator(BaseRolePermission):
@@ -149,7 +195,7 @@ class IsCounsellingCreator(BaseRolePermission):
     Allows access to HOD, Faculty, Principal, Vice Principal, Admin, Office.
     """
     read_roles = ['hod', 'faculty', 'principal', 'vice_principal', 'office', 'manager']
-    write_roles = ['hod', 'faculty', 'principal', 'vice_principal', 'office', 'manager']
+    write_roles = ['hod', 'faculty', 'vice_principal', 'office', 'manager']
 
 
 # ─── Users App Permission Classes ─────────────────────────────────────────────
