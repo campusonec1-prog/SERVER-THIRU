@@ -279,6 +279,36 @@ class FeesStructure(TrackingModel):
     def unallocated_amount(self):
         return self.fees - self.allocated_total
 
+    def auto_allocate_semesters(self, user=None):
+        """
+        Automatically divides fees equally across all Semesters belonging to this department.
+        Ensures sum(amount) == self.fees exactly, adding any fractional remainder to the final semester.
+        """
+        from decimal import Decimal, ROUND_DOWN
+        semesters = list(self.department.semesters.all().order_by('semester_number'))
+        if not semesters:
+            return []
+
+        count = len(semesters)
+        total = Decimal(str(self.fees))
+        base = (total / Decimal(count)).quantize(Decimal('0.01'), rounding=ROUND_DOWN)
+        rem = total - (base * Decimal(count))
+
+        allocations = []
+        for idx, s in enumerate(semesters):
+            amt = base + (rem if idx == count - 1 else Decimal('0.00'))
+            obj, _ = SemesterFeeStructure.objects.update_or_create(
+                fee_structure=self,
+                semester=s,
+                defaults={
+                    'amount': amt,
+                    'created_by': user if user and getattr(user, 'is_authenticated', False) else None,
+                    'updated_by': user if user and getattr(user, 'is_authenticated', False) else None,
+                }
+            )
+            allocations.append(obj)
+        return allocations
+
     def __str__(self):
         return f"{self.department.department_code} - {self.batch.batch} - {self.quota.quota_name}: {self.fees}"
 

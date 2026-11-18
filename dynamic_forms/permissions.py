@@ -11,14 +11,22 @@ MANAGEMENT_ROLES = [
 ]
 
 
+ADMIN_MANAGEMENT_ROLES = [
+    'admin', 'administrator', 'super_admin', 'superadmin',
+    'principal', 'vice_principal',
+    'tech_supporter', 'tech_support', 'ts', 'technical_supporter', 'technical_support',
+    'administration_officer', 'administrative_officer', 'ao',
+]
+
+
 class FormModulePermission(BaseRolePermission):
-    read_roles = ['authenticated']
-    write_roles = MANAGEMENT_ROLES
+    read_roles = ADMIN_MANAGEMENT_ROLES
+    write_roles = ADMIN_MANAGEMENT_ROLES
 
 
 class FormFieldPermission(BaseRolePermission):
-    read_roles = ['authenticated']
-    write_roles = MANAGEMENT_ROLES
+    read_roles = ADMIN_MANAGEMENT_ROLES
+    write_roles = ADMIN_MANAGEMENT_ROLES
 
 
 class ApplicationPermission(BaseRolePermission):
@@ -68,8 +76,8 @@ class ApplicationPermission(BaseRolePermission):
 
 
 class ApplicationStatusPermission(BaseRolePermission):
-    read_roles = ['authenticated']
-    write_roles = MANAGEMENT_ROLES
+    read_roles = ADMIN_MANAGEMENT_ROLES
+    write_roles = ADMIN_MANAGEMENT_ROLES
 
 
 class ApplicationUserPermission(BaseRolePermission):
@@ -100,19 +108,16 @@ class ApplicationUserPermission(BaseRolePermission):
                 allowed_manage = [
                     'ADMIN', 'ADMINISTRATOR', 'SUPER_ADMIN', 'SUPERADMIN',
                     'PRINCIPAL', 'VICE_PRINCIPAL',
-                    'OFFICE', 'MANAGER',
                     'TECH_SUPPORTER', 'TECH_SUPPORT', 'TS', 'TECHNICAL_SUPPORTER', 'TECHNICAL_SUPPORT',
                     'ADMINISTRATION_OFFICER', 'ADMINISTRATIVE_OFFICER', 'AO',
-                    'ADMISSIONS_OFFICER', 'ADMISSION_OFFICER',
-                    'STAFF'
                 ]
-                return role_name in allowed_manage or not role_name
+                return role_name in allowed_manage
             except Exception:
-                return True
+                return False
 
         return True
 
 
 class ApplicationFeePermission(BaseRolePermission):
-    read_roles = ['authenticated']
-    write_roles = MANAGEMENT_ROLES
+    read_roles = ADMIN_MANAGEMENT_ROLES
+    write_roles = ADMIN_MANAGEMENT_ROLES

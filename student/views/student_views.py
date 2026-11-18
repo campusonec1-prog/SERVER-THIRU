@@ -351,7 +351,7 @@ class StudentViewSet(viewsets.ModelViewSet):
         from users.models import User
 
         student = get_object_or_404(
-            Student.objects.select_related('department', 'department__program', 'batch', 'quota', 'status', 'bus', 'route', 'stop', 'application', 'application__candidate', 'admission_slip', 'fees_payment'),
+            Student.objects.select_related('department', 'department__program', 'batch', 'quota', 'status', 'bus', 'route', 'stop', 'application', 'application__candidate', 'admission_slip', 'fees_payment', 'section'),
             pk=pk
         )
         app = student.application
@@ -659,6 +659,8 @@ class StudentViewSet(viewsets.ModelViewSet):
                     'program': program,
                     'batch': student.batch.batch if student.batch else '',
                     'batch_id': student.batch_id,
+                    'section': student.section.sections if getattr(student, 'section', None) else '',
+                    'section_name': student.section.sections if getattr(student, 'section', None) else '',
                     'status_id': student.status_id,
                     'quota': student.quota.quota_name if student.quota else '',
                     'quota_id': student.quota_id,
@@ -852,9 +854,19 @@ class StudentViewSet(viewsets.ModelViewSet):
             if pay_books_now < 0:
                 return Response({"code": 400, "message": "Books payment amount cannot be negative"}, status=status.HTTP_400_BAD_REQUEST)
 
+            MIN_FEE_PAYMENT = Decimal('500.00')
+
             # Process tuition payment
             receipt_records = []
             if pay_tuition_now > Decimal('0.00'):
+                # Validate minimum payment of ₹500 (or full remaining balance if balance < 500)
+                min_tuit_allowed = min(MIN_FEE_PAYMENT, fees_payment.balance_amount) if fees_payment.balance_amount > Decimal('0.00') else Decimal('0.00')
+                if pay_tuition_now < min_tuit_allowed:
+                    return Response({
+                        "code": 400,
+                        "message": f"Tuition payment amount must be at least ₹{min_tuit_allowed:,.2f}."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
                 # Validate against total tuition outstanding balance
                 if pay_tuition_now > fees_payment.balance_amount and fees_payment.balance_amount > Decimal('0.00'):
                     return Response({
@@ -873,6 +885,13 @@ class StudentViewSet(viewsets.ModelViewSet):
                     sem_fee = StudentSemesterFee.objects.select_for_update().filter(semester_id=semester_id, student_fees=fees_payment).first()
 
                 if sem_fee:
+                    min_sem_allowed = min(MIN_FEE_PAYMENT, sem_fee.balance_amount) if sem_fee.balance_amount > Decimal('0.00') else Decimal('0.00')
+                    if pay_tuition_now < min_sem_allowed:
+                        return Response({
+                            "code": 400,
+                            "message": f"Semester tuition payment must be at least ₹{min_sem_allowed:,.2f}."
+                        }, status=status.HTTP_400_BAD_REQUEST)
+
                     if pay_tuition_now > sem_fee.balance_amount and sem_fee.balance_amount > Decimal('0.00'):
                         return Response({
                             "code": 400,
@@ -912,6 +931,19 @@ class StudentViewSet(viewsets.ModelViewSet):
 
             # Process books payment
             if pay_books_now > Decimal('0.00'):
+                book_bal = max(Decimal('0.00'), fees_payment.books_fees_total - fees_payment.books_fees_paid)
+                min_book_allowed = min(MIN_FEE_PAYMENT, book_bal) if book_bal > Decimal('0.00') else Decimal('0.00')
+                if pay_books_now < min_book_allowed:
+                    return Response({
+                        "code": 400,
+                        "message": f"Books payment amount must be at least ₹{min_book_allowed:,.2f}."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                if pay_books_now > book_bal and book_bal > Decimal('0.00'):
+                    return Response({
+                        "code": 400,
+                        "message": f"Books payment amount ₹{pay_books_now:,.2f} exceeds outstanding books balance ₹{book_bal:,.2f}."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
                 book_receipt_no = self._generate_receipt_number()
                 book_payment = FeePayment.objects.create(
                     student_fees=fees_payment,
@@ -943,6 +975,7 @@ class StudentViewSet(viewsets.ModelViewSet):
             "code": 200,
             "message": "Student fees and payment transaction saved successfully",
             "data": StudentFeesSerializer(updated_fees).data,
+            "receipt": FeePaymentSerializer(receipt_records[0]).data if receipt_records else None,
             "receipts": FeePaymentSerializer(receipt_records, many=True).data if receipt_records else []
         }, status=status.HTTP_200_OK)
 
@@ -956,7 +989,7 @@ class StudentViewSet(viewsets.ModelViewSet):
         """
         try:
             student = Student.objects.select_related(
-                'department', 'batch', 'quota', 'status'
+                'department', 'batch', 'quota', 'status', 'section'
             ).get(pk=pk)
         except Student.DoesNotExist:
             return Response({"code": 404, "message": "Student not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -987,6 +1020,8 @@ class StudentViewSet(viewsets.ModelViewSet):
                 "department_name": getattr(student.department, 'department_name', ''),
                 "batch_id": student.batch_id,
                 "batch_name": getattr(student.batch, 'batch', ''),
+                "section": getattr(student.section, 'sections', '') if getattr(student, 'section', None) else '',
+                "section_name": getattr(student.section, 'sections', '') if getattr(student, 'section', None) else '',
                 "quota_id": student.quota_id,
                 "quota_name": getattr(student.quota, 'quota_name', ''),
             },

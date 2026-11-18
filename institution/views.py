@@ -657,7 +657,10 @@ class QuotaViewSet(CachedOptionViewSetMixin, AdminWriteMixin, viewsets.ModelView
 # ─── Fees Structure ──────────────────────────────────────────
 
 class FeesStructureViewSet(AdminWriteMixin, viewsets.ModelViewSet):
-    queryset = FeesStructure.objects.all().select_related('department', 'batch', 'quota', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role').order_by('id')
+    queryset = FeesStructure.objects.all().select_related(
+        'department', 'department__program', 'batch', 'quota',
+        'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
+    ).order_by('department__program__program_name', 'department__department_name', '-batch__batch', 'quota__quota_name', 'id')
     serializer_class = FeesStructureSerializer
     permission_classes = [FeesStructurePermission]
     model_label = "Fees Structure"
@@ -742,14 +745,16 @@ class FeesStructureViewSet(AdminWriteMixin, viewsets.ModelViewSet):
                     # Record exists → update fees
                     serializer = self.get_serializer(instance, data=item)
                     serializer.is_valid(raise_exception=True)
-                    serializer.save(updated_by=user)
+                    saved_instance = serializer.save(updated_by=user)
+                    saved_instance.auto_allocate_semesters(user=user)
                     updated_cnt += 1
 
                 except FeesStructure.DoesNotExist:
                     # Record does not exist → create
                     serializer = self.get_serializer(data=item)
                     serializer.is_valid(raise_exception=True)
-                    serializer.save(created_by=user, updated_by=user)
+                    saved_instance = serializer.save(created_by=user, updated_by=user)
+                    saved_instance.auto_allocate_semesters(user=user)
                     created_cnt += 1
 
                 results.append(serializer.data)
@@ -769,10 +774,30 @@ class FeesStructureViewSet(AdminWriteMixin, viewsets.ModelViewSet):
         # ── Single object create ─────────────────────────────────────────────
         else:
             response = super().create(request, *args, **kwargs)
+            if response.status_code in [200, 201]:
+                obj_id = response.data.get('id') if isinstance(response.data, dict) else None
+                if obj_id:
+                    try:
+                        instance = FeesStructure.objects.get(id=obj_id)
+                        user = request.user if request.user and request.user.is_authenticated else None
+                        if not request.data.get('allocations'):
+                            instance.auto_allocate_semesters(user=user)
+                    except FeesStructure.DoesNotExist:
+                        pass
             return Response({"code": 201, "message": "Fees structure created successfully", "data": response.data}, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
         response = super().update(request, *args, **kwargs)
+        if response.status_code == 200:
+            obj_id = kwargs.get('pk')
+            if obj_id:
+                try:
+                    instance = FeesStructure.objects.get(id=obj_id)
+                    user = request.user if request.user and request.user.is_authenticated else None
+                    if not request.data.get('allocations') and not instance.is_allocation_complete:
+                        instance.auto_allocate_semesters(user=user)
+                except FeesStructure.DoesNotExist:
+                    pass
         return Response({"code": 200, "message": "Fees structure updated successfully", "data": response.data}, status=status.HTTP_200_OK)
 
     def destroy(self, request, *args, **kwargs):

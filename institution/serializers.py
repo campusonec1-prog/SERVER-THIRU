@@ -605,6 +605,8 @@ class FeesStructureSerializer(TrackingModelSerializerMixin, serializers.ModelSer
     )
     
     department_name = serializers.CharField(source='department.department_name', read_only=True)
+    program_name = serializers.CharField(source='department.program.program_name', read_only=True, default='')
+    department_full_name = serializers.SerializerMethodField(read_only=True)
     batch_name = serializers.CharField(source='batch.batch', read_only=True)
     quota_name = serializers.CharField(source='quota.quota_name', read_only=True)
 
@@ -612,15 +614,21 @@ class FeesStructureSerializer(TrackingModelSerializerMixin, serializers.ModelSer
     unallocated_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     is_allocation_complete = serializers.BooleanField(read_only=True)
 
+    def get_department_full_name(self, obj):
+        if obj.department and obj.department.program:
+            return f"{obj.department.program.program_name} - {obj.department.department_name}"
+        return obj.department.department_name if obj.department else ""
+
     class Meta:
         model = FeesStructure
         fields = [
-            'id', 'department_id', 'department_name', 
+            'id', 'department_id', 'department_name', 'program_name', 'department_full_name',
             'batch_id', 'batch_name', 'quota_id', 'quota_name',
             'fees', 'allocated_total', 'unallocated_amount', 'is_allocation_complete',
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ] + TrackingModelSerializerMixin.TRACKING_FIELDS
         read_only_fields = [
+            'program_name', 'department_full_name',
             'allocated_total', 'unallocated_amount', 'is_allocation_complete',
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ] + TrackingModelSerializerMixin.TRACKING_FIELDS
