@@ -122,6 +122,61 @@ def parse_subject_triplet(col0, col1, col2):
     return subjects
 
 
+def extract_subjects_from_page_text(raw_text):
+    """
+    Ultra-fast regex-based subject extractor from page text (<1ms execution time).
+    Avoids expensive vector geometry extraction on pdfplumber.extract_tables() (200ms+).
+    """
+    subjects = []
+    if not raw_text:
+        return subjects
+
+    for line in raw_text.splitlines():
+        line_clean = line.strip()
+        if not line_clean:
+            continue
+        low = line_clean.lower()
+        if 'sem no' in low and 'subject' in low:
+            continue
+        if any(h in low for h in ['register number', 'date of birth', 'anna university', 'degree & branch', 'regulations', 'signature of candidate', 'signature of principal', 'name of the candidate', 'college name']):
+            continue
+
+        codes = list(re.finditer(r'\b([A-Z]{2,4}\d[A-Z0-9]{3,7})\b', line_clean))
+        if not codes:
+            continue
+
+        for idx, cm in enumerate(codes):
+            code = cm.group(1)
+            pre_text = line_clean[:cm.start()].strip()
+            if idx > 0:
+                pre_text = line_clean[codes[idx - 1].end():cm.start()].strip()
+
+            sem_m = re.findall(r'\b(?:0?([1-8])|S([1-8]))\b', pre_text)
+            sem = 1
+            if sem_m:
+                last_m = sem_m[-1]
+                sem_str = last_m[0] or last_m[1]
+                if sem_str and sem_str.isdigit():
+                    sem = int(sem_str)
+
+            next_start = codes[idx + 1].start() if idx + 1 < len(codes) else len(line_clean)
+            title_part = line_clean[cm.end():next_start].strip(' \t-:|')
+
+            title_part = re.sub(r'\s+\d{2}[-/.]\d{2}[-/.]\d{2,4}.*$', '', title_part)
+            title_part = re.sub(r'\s+(?:FN|AN|FORENOON|AFTERNOON)\b.*$', '', title_part, flags=re.IGNORECASE)
+            title_part = re.sub(r'\s+(?:0?[1-8]|S[1-8])\s*$', '', title_part)
+            title_part = re.sub(r'\s+\d{1,3}\s*$', '', title_part)
+            title = clean_subject_title(title_part)
+
+            if code:
+                subjects.append({
+                    'semester': sem,
+                    'subject_code': code,
+                    'subject_title': title or code
+                })
+    return subjects
+
+
 def parse_anna_univ_reg_preview_pdf(file_bytes):
     """
     Parse Anna University 'REGISTRATION PREVIEW' PDF.
@@ -192,27 +247,30 @@ def parse_anna_univ_reg_preview_pdf(file_bytes):
             if len(reg_no) >= 9:
                 branch_au_code = reg_no[6:9]
 
-            extracted_subjects = []
-            tables = page.extract_tables() or []
+            # 1. Fast regex text-based extraction (<1ms per page)
+            extracted_subjects = extract_subjects_from_page_text(raw_text)
 
-            for tbl in tables:
-                for row in tbl:
-                    if not row or len(row) < 2:
-                        continue
-                    cleaned_row = [clean_str(c) for c in row]
+            # 2. Fallback to vector table extraction only if text extraction yielded no subjects
+            if not extracted_subjects:
+                tables = page.extract_tables() or []
+                for tbl in tables:
+                    for row in tbl:
+                        if not row or len(row) < 2:
+                            continue
+                        cleaned_row = [clean_str(c) for c in row]
 
-                    joined_low = ' '.join(cleaned_row).lower()
-                    if 'sem no' in joined_low and 'subject code' in joined_low:
-                        continue
+                        joined_low = ' '.join(cleaned_row).lower()
+                        if 'sem no' in joined_low and 'subject code' in joined_low:
+                            continue
 
-                    # Scan all cells for subject code occurrences (handles single & multi-column tables)
-                    for col_idx, cell in enumerate(cleaned_row):
-                        codes = re.findall(r'\b([A-Z]{2,4}\d[A-Z0-9]{3,7})\b', cell)
-                        if codes:
-                            sem_cell = cleaned_row[col_idx - 1] if col_idx > 0 else ''
-                            title_cell = cleaned_row[col_idx + 1] if col_idx + 1 < len(cleaned_row) else ''
-                            row_subjects = parse_subject_triplet(sem_cell, cell, title_cell)
-                            extracted_subjects.extend(row_subjects)
+                        # Scan all cells for subject code occurrences (handles single & multi-column tables)
+                        for col_idx, cell in enumerate(cleaned_row):
+                            codes = re.findall(r'\b([A-Z]{2,4}\d[A-Z0-9]{3,7})\b', cell)
+                            if codes:
+                                sem_cell = cleaned_row[col_idx - 1] if col_idx > 0 else ''
+                                title_cell = cleaned_row[col_idx + 1] if col_idx + 1 < len(cleaned_row) else ''
+                                row_subjects = parse_subject_triplet(sem_cell, cell, title_cell)
+                                extracted_subjects.extend(row_subjects)
 
             if not extracted_subjects:
                 subj_pattern = re.compile(r'^\s*0?([1-8])\s+([A-Z]{2,4}\d[A-Z0-9]{3,7})\s+(.+?)\s*$', re.MULTILINE)
@@ -274,28 +332,70 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['post'], url_path='preview')
     def preview_pdf(self, request):
-        file_obj = request.FILES.get('file')
-        if not file_obj:
-            return Response({'error': 'No file uploaded. Please upload an Anna University Registration Preview PDF.'},
+        files = request.FILES.getlist('files')
+        if not files:
+            files = request.FILES.getlist('file')
+        if not files:
+            f = request.FILES.get('file')
+            if f:
+                files = [f]
+
+        if not files:
+            return Response({'error': 'No file uploaded. Please upload one or more Anna University Registration Preview PDFs.'},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        if not file_obj.name.lower().endswith('.pdf'):
-            return Response({'error': 'Only PDF files are accepted.'}, status=status.HTTP_400_BAD_REQUEST)
+        invalid_files = [f.name for f in files if not f.name.lower().endswith('.pdf')]
+        if invalid_files:
+            return Response({'error': f"Only PDF files are accepted. Invalid: {', '.join(invalid_files)}"},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         college_type = request.data.get('college_type', 'INTER')
 
-        try:
-            file_bytes = file_obj.read()
-            raw_candidates = parse_anna_univ_reg_preview_pdf(file_bytes)
-        except ImportError as e:
-            return Response({'error': str(e)}, status=status.HTTP_501_NOT_IMPLEMENTED)
-        except Exception as e:
-            return Response({'error': f'Failed to parse PDF: {str(e)}'}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        raw_candidates = []
+        file_names = []
+        parsed_file_stats = []
+        parse_errors = []
+        seen_reg_map = {}  # reg_no -> index in raw_candidates
+
+        for file_obj in files:
+            file_names.append(file_obj.name)
+            try:
+                file_bytes = file_obj.read()
+                file_candidates = parse_anna_univ_reg_preview_pdf(file_bytes)
+                count = 0
+                for cand in file_candidates:
+                    cand['source_file'] = file_obj.name
+                    reg = cand.get('register_no')
+                    if reg and reg in seen_reg_map:
+                        # Candidate appears in multiple sheets (e.g. arrears or multiple semesters)
+                        existing_cand = raw_candidates[seen_reg_map[reg]]
+                        if not isinstance(existing_cand.get('source_files'), list):
+                            existing_cand['source_files'] = [existing_cand.get('source_file')]
+                        if file_obj.name not in existing_cand['source_files']:
+                            existing_cand['source_files'].append(file_obj.name)
+
+                        existing_codes = {s['subject_code'].lower() for s in existing_cand.get('subjects', [])}
+                        for new_s in cand.get('subjects', []):
+                            if new_s['subject_code'].lower() not in existing_codes:
+                                existing_cand['subjects'].append(new_s)
+                                existing_codes.add(new_s['subject_code'].lower())
+                    else:
+                        cand['source_files'] = [file_obj.name]
+                        if reg:
+                            seen_reg_map[reg] = len(raw_candidates)
+                        raw_candidates.append(cand)
+                    count += 1
+                parsed_file_stats.append({'name': file_obj.name, 'candidates': count})
+            except ImportError as e:
+                return Response({'error': str(e)}, status=status.HTTP_501_NOT_IMPLEMENTED)
+            except Exception as e:
+                parse_errors.append(f"{file_obj.name}: {str(e)}")
 
         if not raw_candidates:
-            return Response({
-                'error': 'No candidate registration data found in the PDF. Please verify this is an Anna University Registration Preview document.'
-            }, status=status.HTTP_400_BAD_REQUEST)
+            err_msg = 'No candidate registration data found in the uploaded PDF(s).'
+            if parse_errors:
+                err_msg += f" (Errors: {'; '.join(parse_errors)})"
+            return Response({'error': err_msg}, status=status.HTTP_400_BAD_REQUEST)
 
         # Preload DB master lookups
         all_departments = list(Department.objects.filter(is_active=True).values('id', 'department_code', 'department_name', 'short_name', 'program_id'))
@@ -413,6 +513,8 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                 'department_batches': dept_batches,
                 'subjects_count': len(cand['subjects']),
                 'subjects': cand['subjects'],
+                'source_file': cand.get('source_file') or (file_names[0] if file_names else ''),
+                'source_files': cand.get('source_files') or ([file_names[0]] if file_names else []),
             }
 
             students_analysis.append(student_item)
@@ -425,6 +527,7 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
             matched_dept = match_department(cand['branch'], cand.get('branch_au_code'), cand.get('degree', 'B.E.'))
             dept_id = matched_dept['id'] if matched_dept else None
             reg_code = cand['regulations'] or '2025'
+            src_f = cand.get('source_file') or (file_names[0] if file_names else '')
 
             for s in cand['subjects']:
                 code = s['subject_code']
@@ -438,8 +541,11 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                         'department_name': matched_dept['department_name'] if matched_dept else cand['branch'],
                         'regulation_code': reg_code,
                         'student_count': 0,
+                        'source_files': set(),
                     }
                 unique_subjects_dict[key]['student_count'] += 1
+                if src_f:
+                    unique_subjects_dict[key]['source_files'].add(src_f)
 
         all_subject_codes = [s['subject_code'] for s in unique_subjects_dict.values()]
         existing_subjects = Subject.objects.filter(
@@ -492,6 +598,7 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                 'credits': 0.0,
                 'is_theory': is_theory,
                 'is_lab': is_lab,
+                'source_files': sorted(list(s_item.get('source_files', []))),
             }
             subjects_analysis.append(subj_item)
             if not is_found:
@@ -535,7 +642,10 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
         missing_departments = [d for d in departments_analysis if not d['is_found']]
 
         summary = {
-            'file_name': file_obj.name,
+            'file_name': file_names[0] if len(file_names) == 1 else f"{len(file_names)} PDFs Combined",
+            'total_files': len(files),
+            'file_names': file_names,
+            'file_stats': parsed_file_stats,
             'college': '',
             'exam_title': raw_candidates[0]['exam_title'] if raw_candidates else '',
             'college_type': college_type,
@@ -764,6 +874,34 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
             return Response({'error': 'No students provided to add.'}, status=status.HTTP_400_BAD_REQUEST)
 
         status_obj, _ = StudentStatus.objects.get_or_create(status_name='ACTIVE')
+        
+        # 1. Preload master records into memory dictionaries to eliminate 17,000+ repeated SQL queries
+        all_depts = list(Department.objects.all())
+        dept_by_id = {d.id: d for d in all_depts}
+        dept_by_code = {d.department_code.strip().lower(): d for d in all_depts if d.department_code}
+        dept_by_name = {d.department_name.strip().lower(): d for d in all_depts if d.department_name}
+        default_dept = all_depts[0] if all_depts else None
+
+        all_progs = list(Program.objects.all())
+        prog_by_id = {p.id: p for p in all_progs}
+        prog_by_name = {p.program_name.strip().lower(): p for p in all_progs if p.program_name}
+        default_prog = all_progs[0] if all_progs else None
+
+        all_batches = list(Batch.objects.all())
+        batch_cache = {(b.department_id, b.batch.strip().lower()): b for b in all_batches}
+
+        all_regs = list(Regulation.objects.all())
+        reg_cache = {r.regulation_code.strip().lower(): r for r in all_regs if r.regulation_code}
+
+        all_sections = list(Section.objects.all())
+        section_cache = {}
+        for sec in all_sections:
+            section_cache.setdefault(sec.department_id, []).append(sec)
+
+        reg_nos = [clean_str(item.get('register_no') or item.get('register_number')) for item in students_data if item.get('register_no') or item.get('register_number')]
+        existing_inter_map = {s.register_number: s for s in Student.objects.filter(register_number__in=reg_nos)}
+        existing_outer_map = {s.register_number: s for s in OuterStudent.objects.filter(register_number__in=reg_nos)}
+
         created_count = 0
         added_list = []
 
@@ -782,23 +920,27 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                 if not reg_no:
                     continue
 
-                # Program
+                # Program resolution in memory
                 program = None
                 if prog_id and str(prog_id).isdigit():
-                    program = Program.objects.filter(id=int(prog_id)).first()
+                    program = prog_by_id.get(int(prog_id))
                 if not program and prog_name:
-                    program, _ = Program.objects.get_or_create(program_name=prog_name, defaults={'program_level': 'UG', 'duration': 4})
+                    program = prog_by_name.get(prog_name.lower())
+                    if not program:
+                        program, _ = Program.objects.get_or_create(program_name=prog_name, defaults={'program_level': 'UG', 'duration': 4})
+                        prog_by_id[program.id] = program
+                        prog_by_name[prog_name.lower()] = program
                 if not program:
-                    program = Program.objects.first()
+                    program = default_prog
 
-                # Department
+                # Department resolution in memory
                 dept = None
                 if dept_id and str(dept_id).isdigit():
-                    dept = Department.objects.filter(id=int(dept_id)).first()
+                    dept = dept_by_id.get(int(dept_id))
                 if not dept and dept_code:
-                    dept = Department.objects.filter(department_code__iexact=dept_code).first()
+                    dept = dept_by_code.get(dept_code.lower())
                 if not dept and dept_name:
-                    dept = Department.objects.filter(department_name__iexact=dept_name).first()
+                    dept = dept_by_name.get(dept_name.lower())
                 if not dept and dept_name:
                     dept, _ = Department.objects.get_or_create(
                         department_name=dept_name,
@@ -809,45 +951,65 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                             'is_active': True
                         }
                     )
+                    dept_by_id[dept.id] = dept
+                    if dept.department_code:
+                        dept_by_code[dept.department_code.lower()] = dept
+                    dept_by_name[dept.department_name.lower()] = dept
                 if not dept:
-                    dept = Department.objects.first()
+                    dept = default_dept
 
-                # Batch
+                # Batch resolution in memory
                 batch = None
                 if not batch_str and len(reg_no) >= 6 and reg_no[4:6].isdigit():
                     yr = int(reg_no[4:6])
                     batch_str = f"{2000 + yr}-{2000 + yr + 4}"
 
                 if batch_str and dept:
-                    batch, _ = Batch.objects.get_or_create(department=dept, batch=batch_str)
+                    b_key = (dept.id, batch_str.lower())
+                    batch = batch_cache.get(b_key)
+                    if not batch:
+                        batch, _ = Batch.objects.get_or_create(department=dept, batch=batch_str)
+                        batch_cache[b_key] = batch
                 elif dept:
-                    batch = Batch.objects.filter(department=dept).first()
+                    for (d_id, b_name), b_obj in batch_cache.items():
+                        if d_id == dept.id:
+                            batch = b_obj
+                            break
                     if not batch:
                         batch, _ = Batch.objects.get_or_create(department=dept, batch='REGULAR')
+                        batch_cache[(dept.id, 'regular')] = batch
 
-                # Regulation
+                # Regulation resolution in memory
                 regulation = None
                 if reg_code:
-                    regulation, _ = Regulation.objects.get_or_create(
-                        regulation_code=reg_code,
-                        defaults={'effective_from_year': int(reg_code) if reg_code.isdigit() else 2021}
-                    )
+                    reg_key = reg_code.lower()
+                    regulation = reg_cache.get(reg_key)
+                    if not regulation:
+                        regulation, _ = Regulation.objects.get_or_create(
+                            regulation_code=reg_code,
+                            defaults={'effective_from_year': int(reg_code) if reg_code.isdigit() else 2021}
+                        )
+                        reg_cache[reg_key] = regulation
 
                 item_college_type = clean_str(item.get('college_type') or college_type or 'INTER').upper()
 
                 if item_college_type == 'OUTER':
-                    outer_stud, created = OuterStudent.objects.get_or_create(
-                        register_number=reg_no,
-                        defaults={
-                            'student_name': s_name or reg_no,
-                            'program': program,
-                            'department': dept,
-                            'batch': batch,
-                            'regulation': regulation,
-                        }
-                    )
-                    if created:
+                    outer_stud = existing_outer_map.get(reg_no)
+                    if outer_stud:
+                        created = False
+                    else:
+                        outer_stud = OuterStudent.objects.create(
+                            register_number=reg_no,
+                            student_name=s_name or reg_no,
+                            program=program,
+                            department=dept,
+                            batch=batch,
+                            regulation=regulation,
+                        )
+                        existing_outer_map[reg_no] = outer_stud
+                        created = True
                         created_count += 1
+
                     added_list.append({
                         'id': outer_stud.id,
                         'register_number': outer_stud.register_number,
@@ -857,42 +1019,54 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                         'created': created
                     })
                 else:
+                    # Section resolution in memory
                     sec_name = clean_str(item.get('section_name') or item.get('section') or 'Section: A')
                     sec_id = item.get('section_id')
                     sec_obj = None
+
                     if dept:
-                        clean_sec = sec_name.replace('Section:', '').replace('Section', '').strip() or 'A'
+                        dept_secs = section_cache.get(dept.id, [])
                         if sec_id and str(sec_id).isdigit():
-                            sec_obj = Section.objects.filter(id=int(sec_id), department=dept).first()
-                        if not sec_obj:
-                            sec_obj = Section.objects.filter(department=dept, sections__iexact=sec_name).first()
-                        if not sec_obj:
-                            sec_obj = Section.objects.filter(department=dept, sections__iexact=f"Section: {clean_sec}").first()
-                        if not sec_obj:
-                            sec_obj = Section.objects.filter(department=dept, sections__iexact=clean_sec).first()
-                        if not sec_obj:
-                            sec_obj = Section.objects.filter(department=dept, sections__icontains=clean_sec).first()
-                        if not sec_obj:
-                            sec_obj = Section.objects.filter(department=dept, sections__icontains='A').first()
-                        if not sec_obj:
-                            sec_obj, _ = Section.objects.get_or_create(department=dept, sections='Section: A')
+                            sec_obj = next((s for s in dept_secs if s.id == int(sec_id)), None)
 
-                    student, created = Student.objects.get_or_create(
-                        register_number=reg_no,
-                        defaults={
-                            'student_name': s_name or reg_no,
-                            'department': dept,
-                            'batch': batch,
-                            'section': sec_obj,
-                            'status': status_obj
-                        }
-                    )
-                    if not created and sec_obj and not student.section:
-                        student.section = sec_obj
-                        student.save(update_fields=['section'])
+                        if not sec_obj:
+                            clean_sec = sec_name.replace('Section:', '').replace('Section', '').strip() or 'A'
+                            for s in dept_secs:
+                                s_low = s.sections.lower()
+                                if s_low == sec_name.lower() or s_low == f"section: {clean_sec}".lower() or s_low == clean_sec.lower():
+                                    sec_obj = s
+                                    break
+                            if not sec_obj:
+                                for s in dept_secs:
+                                    if clean_sec.lower() in s.sections.lower():
+                                        sec_obj = s
+                                        break
+                            if not sec_obj and dept_secs:
+                                sec_obj = dept_secs[0]
 
-                    if created:
+                            if not sec_obj:
+                                sec_obj, _ = Section.objects.get_or_create(department=dept, sections='Section: A')
+                                section_cache.setdefault(dept.id, []).append(sec_obj)
+
+                    student = existing_inter_map.get(reg_no)
+                    if student:
+                        created = False
+                        if sec_obj and not student.section_id:
+                            student.section = sec_obj
+                            student.save(update_fields=['section'])
+                    else:
+                        student = Student.objects.create(
+                            register_number=reg_no,
+                            student_name=s_name or reg_no,
+                            department=dept,
+                            batch=batch,
+                            section=sec_obj,
+                            status=status_obj
+                        )
+                        existing_inter_map[reg_no] = student
+                        created = True
                         created_count += 1
+
                     added_list.append({
                         'id': student.id,
                         'register_number': student.register_number,
@@ -994,6 +1168,16 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
         if not subjects_data:
             return Response({'error': 'No subjects provided.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # 1. Preload masters into memory dictionaries to avoid repeated SQL queries on 400+ subjects
+        all_depts = {d.id: d for d in Department.objects.all()}
+        default_dept = Department.objects.first()
+
+        all_regs = {r.regulation_code.strip().lower(): r for r in Regulation.objects.all() if r.regulation_code}
+        all_sems = {(s.department_id, s.semester_number): s for s in Semester.objects.all()}
+
+        s_codes = [clean_str(item.get('subject_code')) for item in subjects_data if item.get('subject_code')]
+        existing_subjects = {(s.department_id, s.subject_code.strip().lower()): s for s in Subject.objects.filter(subject_code__in=s_codes)}
+
         created_count = 0
         added_list = []
 
@@ -1014,35 +1198,36 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                 if not s_code:
                     continue
 
-                dept = Department.objects.filter(id=dept_id).first() if dept_id else Department.objects.first()
+                dept = all_depts.get(dept_id) if dept_id else default_dept
                 if not dept:
                     continue
 
-                reg, _ = Regulation.objects.get_or_create(
-                    regulation_code=reg_code,
-                    defaults={'effective_from_year': int(reg_code) if reg_code.isdigit() else 2025}
-                )
+                # Regulation in memory
+                reg_key = reg_code.lower()
+                reg = all_regs.get(reg_key)
+                if not reg:
+                    reg, _ = Regulation.objects.get_or_create(
+                        regulation_code=reg_code,
+                        defaults={'effective_from_year': int(reg_code) if reg_code.isdigit() else 2025}
+                    )
+                    all_regs[reg_key] = reg
 
-                sem, _ = Semester.objects.get_or_create(
-                    department=dept,
-                    semester_number=sem_num,
-                    defaults={'semester_name': f"Semester {sem_num}"}
-                )
+                # Semester in memory
+                sem_key = (dept.id, sem_num)
+                sem = all_sems.get(sem_key)
+                if not sem:
+                    sem, _ = Semester.objects.get_or_create(
+                        department=dept,
+                        semester_number=sem_num,
+                        defaults={'semester_name': f"Semester {sem_num}"}
+                    )
+                    all_sems[sem_key] = sem
 
-                subj, created = Subject.objects.get_or_create(
-                    subject_code=s_code,
-                    department=dept,
-                    regulation=reg,
-                    semester=sem,
-                    defaults={
-                        'subject_name': s_name or s_code,
-                        'credits': credits,
-                        'is_theory': is_theory,
-                        'is_lab': is_lab,
-                        'is_active': True,
-                    }
-                )
-                if not created:
+                # Subject in memory
+                subj_key = (dept.id, s_code.lower())
+                subj = existing_subjects.get(subj_key)
+                if subj:
+                    created = False
                     updated = False
                     if s_name and subj.subject_name != s_name:
                         subj.subject_name = s_name; updated = True
@@ -1054,9 +1239,22 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                         subj.is_lab = is_lab; updated = True
                     if updated:
                         subj.save()
-
-                if created:
+                else:
+                    subj = Subject.objects.create(
+                        subject_code=s_code,
+                        department=dept,
+                        regulation=reg,
+                        semester=sem,
+                        subject_name=s_name or s_code,
+                        credits=credits,
+                        is_theory=is_theory,
+                        is_lab=is_lab,
+                        is_active=True,
+                    )
+                    existing_subjects[subj_key] = subj
+                    created = True
                     created_count += 1
+
                 added_list.append({
                     'id': subj.id,
                     'subject_code': subj.subject_code,
