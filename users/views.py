@@ -843,9 +843,11 @@ class UserViewSet(viewsets.ModelViewSet):
 
         # Auto-hydrate current user if not yet in cache
         user_id = getattr(user, 'id', None)
-        if user_id and not cache.get(f'online_user_{user_id}'):
-            current_user_data = resolve_user_presence_data(user, None, request)
-            broadcast_user_online(current_user_data)
+        if user_id:
+            if not cache.get(f'online_user_{user_id}'):
+                current_user_data = resolve_user_presence_data(user, None, request)
+                broadcast_user_online(current_user_data)
+            user_ids.add(user_id)
 
         active_users = []
         stale_ids = set()

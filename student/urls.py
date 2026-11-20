@@ -66,6 +66,9 @@ urlpatterns = [
     path('fees/semester-report/pdf', StudentViewSet.as_view({'get': 'fees_semester_report_pdf', 'post': 'fees_semester_report_pdf'}), name='fees-semester-report-pdf'),
     path('fees/academic-year-report', StudentViewSet.as_view({'get': 'fees_academic_year_report', 'post': 'fees_academic_year_report'}), name='fees-academic-year-report'),
     path('fees/academic-year-report/pdf', StudentViewSet.as_view({'get': 'fees_academic_year_report_pdf', 'post': 'fees_academic_year_report_pdf'}), name='fees-academic-year-report-pdf'),
+    path('fees/payments', StudentViewSet.as_view({'get': 'fees_payments_list'}), name='fees-payments-list'),
+    path('fees/payments/<int:pk>', StudentViewSet.as_view({'put': 'fees_payment_update', 'patch': 'fees_payment_update'}), name='fees-payment-update'),
+    path('fees/payments/pdf-report', StudentViewSet.as_view({'get': 'fees_payments_pdf_report', 'post': 'fees_payments_pdf_report'}), name='fees-payments-pdf-report'),
     path('comprehensive-view', StudentViewSet.as_view({'get': 'comprehensive_view'}), name='student-comprehensive-view'),
     path('full-profile-edit/<int:pk>', StudentViewSet.as_view({'put': 'full_profile_update', 'post': 'full_profile_update', 'patch': 'full_profile_update'}), name='student-full-profile-edit'),
 

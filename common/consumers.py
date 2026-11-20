@@ -60,22 +60,31 @@ def get_user_rooms(token_str):
 
 class RealTimeConsumer(AsyncWebsocketConsumer):
     async def connect(self):
+        await self.accept()
         self.joined_groups = set()
         self.default_group = 'realtime_updates'
-        await self.channel_layer.group_add(self.default_group, self.channel_name)
-        self.joined_groups.add(self.default_group)
+        try:
+            if self.channel_layer:
+                await self.channel_layer.group_add(self.default_group, self.channel_name)
+                self.joined_groups.add(self.default_group)
+        except Exception as e:
+            logger.warning(f"Error joining default realtime group: {e}")
 
-        # Parse token from query string if provided (?token=...)
-        query_string = self.scope.get('query_string', b'').decode('utf-8')
-        params = urllib.parse.parse_qs(query_string)
-        token = params.get('token', [None])[0]
-        if token:
-            rooms = await get_user_rooms(token)
-            for room in rooms:
-                await self.channel_layer.group_add(room, self.channel_name)
-                self.joined_groups.add(room)
-
-        await self.accept()
+        try:
+            # Parse token from query string if provided (?token=...)
+            query_string = self.scope.get('query_string', b'').decode('utf-8')
+            params = urllib.parse.parse_qs(query_string)
+            token = params.get('token', [None])[0]
+            if token and self.channel_layer:
+                rooms = await get_user_rooms(token)
+                for room in rooms:
+                    try:
+                        await self.channel_layer.group_add(room, self.channel_name)
+                        self.joined_groups.add(room)
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.warning(f"Error joining token rooms: {e}")
 
     async def disconnect(self, close_code):
         for room in list(self.joined_groups):
@@ -146,24 +155,33 @@ class RealTimeConsumer(AsyncWebsocketConsumer):
 
 class PresenceConsumer(AsyncWebsocketConsumer):
     async def connect(self):
+        await self.accept()
         self.presence_group = 'presence'
         self.realtime_group = 'realtime_updates'
         self.joined_groups = {self.presence_group, self.realtime_group}
 
-        await self.channel_layer.group_add(self.presence_group, self.channel_name)
-        await self.channel_layer.group_add(self.realtime_group, self.channel_name)
+        try:
+            if self.channel_layer:
+                await self.channel_layer.group_add(self.presence_group, self.channel_name)
+                await self.channel_layer.group_add(self.realtime_group, self.channel_name)
+        except Exception as e:
+            logger.warning(f"Error joining presence groups: {e}")
 
-        # Parse token if present
-        query_string = self.scope.get('query_string', b'').decode('utf-8')
-        params = urllib.parse.parse_qs(query_string)
-        token = params.get('token', [None])[0]
-        if token:
-            rooms = await get_user_rooms(token)
-            for room in rooms:
-                await self.channel_layer.group_add(room, self.channel_name)
-                self.joined_groups.add(room)
-
-        await self.accept()
+        try:
+            # Parse token if present
+            query_string = self.scope.get('query_string', b'').decode('utf-8')
+            params = urllib.parse.parse_qs(query_string)
+            token = params.get('token', [None])[0]
+            if token and self.channel_layer:
+                rooms = await get_user_rooms(token)
+                for room in rooms:
+                    try:
+                        await self.channel_layer.group_add(room, self.channel_name)
+                        self.joined_groups.add(room)
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.warning(f"Error joining presence token rooms: {e}")
 
     async def disconnect(self, close_code):
         for room in list(self.joined_groups):

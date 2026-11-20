@@ -319,6 +319,28 @@ class StudentViewSet(viewsets.ModelViewSet):
                         )
                         sem_fees.append(sem_fee)
 
+            # Fallback if no specific SemesterFeeStructure was assigned:
+            if len(sem_fees) == 0 and fees_payment.total_fees > Decimal('0.00'):
+                from institution.models import Semester
+                all_sems = list(Semester.objects.all().order_by('semester_number')[:8])
+                if all_sems:
+                    sem_count = len(all_sems)
+                    base_amt = round(fees_payment.total_fees / Decimal(str(sem_count)), 2)
+                    for idx, sem_obj in enumerate(all_sems):
+                        cur_amt = (fees_payment.total_fees - (base_amt * (sem_count - 1))) if idx == sem_count - 1 else base_amt
+                        sem_fee, _ = StudentSemesterFee.objects.get_or_create(
+                            student_fees=fees_payment,
+                            semester=sem_obj,
+                            defaults={
+                                'total_amount': cur_amt,
+                                'paid_amount': Decimal('0.00'),
+                                'concession_amount': Decimal('0.00'),
+                                'balance_amount': cur_amt,
+                                'status': 'PENDING',
+                            }
+                        )
+                        sem_fees.append(sem_fee)
+
         if len(sem_fees) == 0:
             return
 
@@ -905,6 +927,19 @@ class StudentViewSet(viewsets.ModelViewSet):
                 # Generate unique receipt number safely
                 receipt_no = self._generate_receipt_number()
 
+                # Resolve notes from payload or JSON remarks
+                raw_notes = request.data.get('notes')
+                if not raw_notes:
+                    raw_rem = request.data.get('remarks')
+                    if raw_rem:
+                        try:
+                            import json
+                            parsed_rem = json.loads(raw_rem) if isinstance(raw_rem, str) else raw_rem
+                            if isinstance(parsed_rem, dict) and parsed_rem.get('notes'):
+                                raw_notes = parsed_rem.get('notes')
+                        except Exception:
+                            raw_notes = raw_rem
+
                 # Create Payment transaction
                 tuit_payment = FeePayment.objects.create(
                     student_fees=fees_payment,
@@ -917,7 +952,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                     receipt_number=receipt_no,
                     transaction_reference=request.data.get('transaction_reference') or '',
                     idempotency_key=idempotency_key,
-                    remarks=request.data.get('notes') or ('Tuition fee payment' if not sem_fee else f"Tuition payment for {sem_fee.semester.semester_name}"),
+                    remarks=raw_notes or ('Tuition fee payment' if not sem_fee else f"Tuition payment for {sem_fee.semester.semester_name}"),
                     recorded_by=tracking_user,
                     created_by=tracking_user,
                     updated_by=tracking_user,
@@ -928,6 +963,18 @@ class StudentViewSet(viewsets.ModelViewSet):
                 # Reconcile overall tuition ledger
                 fees_payment.paid_amount += pay_tuition_now
                 fees_payment.balance_amount = max(Decimal('0.00'), fees_payment.total_fees - fees_payment.paid_amount)
+
+                # Also link receipt_no into student_fees.remarks history if available
+                if fees_payment.remarks:
+                    try:
+                        import json
+                        sf_rem = json.loads(fees_payment.remarks) if isinstance(fees_payment.remarks, str) else fees_payment.remarks
+                        if isinstance(sf_rem, dict) and sf_rem.get('history') and len(sf_rem['history']) > 0:
+                            if not sf_rem['history'][0].get('receipt_number'):
+                                sf_rem['history'][0]['receipt_number'] = receipt_no
+                            fees_payment.remarks = json.dumps(sf_rem)
+                    except Exception:
+                        pass
 
             # Process books payment
             if pay_books_now > Decimal('0.00'):
@@ -1036,8 +1083,8 @@ class StudentViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path='fees-apply-concession')
     def fees_apply_concession(self, request):
         """
-        Applies student-specific scholarship or fee concession for a semester
-        without altering the institution's standard fee structure.
+        Applies student-specific scholarship or fee concession globally or for a semester
+        with strict business validations and audit logging.
         """
         from decimal import Decimal
         from django.db import transaction
@@ -1046,59 +1093,230 @@ class StudentViewSet(viewsets.ModelViewSet):
         student_id = request.data.get('student_id')
         semester_id = request.data.get('semester_id')
         raw_concession = request.data.get('concession_amount')
+        reason = (request.data.get('reason') or '').strip()
 
-        if not student_id or not semester_id or raw_concession is None:
+        if not student_id or raw_concession is None:
             return Response({
                 "code": 400,
-                "message": "student_id, semester_id, and concession_amount are required."
+                "message": "Student ID and concession amount are required."
             }, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             concession = Decimal(str(raw_concession))
-            if concession < 0:
-                raise ValueError()
+            if concession <= Decimal('0.00'):
+                return Response({
+                    "code": 400,
+                    "message": "Concession amount must be greater than ₹0.00."
+                }, status=status.HTTP_400_BAD_REQUEST)
         except Exception:
-            return Response({"code": 400, "message": "Invalid concession_amount."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                "code": 400,
+                "message": "Invalid concession amount format. Must be a valid positive number."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not reason or len(reason) < 3:
+            return Response({
+                "code": 400,
+                "message": "Please provide a valid reason or approval authority for this concession (minimum 3 characters)."
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         user = self.request.user if self.request.user and self.request.user.is_authenticated else None
         tracking_user = user if isinstance(user, StandardUser) else None
+        is_global = not semester_id or str(semester_id).strip().lower() in ('all', 'global', 'none', '', '0')
 
         with transaction.atomic():
-            sem_fee = StudentSemesterFee.objects.select_for_update().filter(
-                student_fees__student_id=student_id,
-                semester_id=semester_id
-            ).first()
-
-            if not sem_fee:
+            sf = StudentFees.objects.select_for_update().filter(student_id=student_id).first()
+            if not sf:
                 return Response({
                     "code": 404,
-                    "message": "Student semester fee record not found for this semester."
+                    "message": "Student fees record not found."
                 }, status=status.HTTP_404_NOT_FOUND)
 
-            if concession > sem_fee.total_amount:
-                return Response({
-                    "code": 400,
-                    "message": f"Concession amount ₹{concession:,.2f} cannot exceed the semester tuition fee ₹{sem_fee.total_amount:,.2f}."
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-            sem_fee.concession_amount = concession
-            sem_fee.recalculate_balance()
-            sem_fee.updated_by = tracking_user
-            sem_fee.save()
-
-            # Reconcile overall student fees balance
-            sf = sem_fee.student_fees
-            total_concessions = sum(s.concession_amount for s in sf.semester_fees.all())
-            sf.balance_amount = max(Decimal('0.00'), sf.total_fees - total_concessions - sf.paid_amount)
-            sf.updated_by = tracking_user
-            sf.save()
             StudentViewSet._reconcile_student_semester_fees(sf, tracking_user)
 
-        return Response({
-            "code": 200,
-            "message": "Concession applied and semester balance recalculated successfully.",
-            "data": StudentSemesterFeeSerializer(sem_fee).data
-        }, status=status.HTTP_200_OK)
+            if is_global:
+                # Global concession cannot exceed current pending balance amount
+                if sf.balance_amount <= Decimal('0.00'):
+                    return Response({
+                        "code": 400,
+                        "message": f"This student has zero pending due balance (Total: ₹{sf.total_fees:,.2f}, Already Paid: ₹{sf.paid_amount:,.2f}). Concession cannot be granted."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                max_allowed = sf.balance_amount
+                if concession > max_allowed:
+                    return Response({
+                        "code": 400,
+                        "message": f"Concession amount ₹{concession:,.2f} cannot exceed the current pending due balance of ₹{max_allowed:,.2f} (Total: ₹{sf.total_fees:,.2f}, Already Paid: ₹{sf.paid_amount:,.2f})."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                # Distribute concession across semesters that still have an outstanding balance
+                sem_fees = list(sf.semester_fees.select_for_update().order_by('semester__semester_number', 'id'))
+                unallocated = concession
+                for s in sem_fees:
+                    sem_bal = max(Decimal('0.00'), s.balance_amount)
+                    alloc = min(unallocated, sem_bal)
+                    s.concession_amount = (s.concession_amount or Decimal('0.00')) + alloc
+                    s.recalculate_balance()
+                    s.updated_by = tracking_user
+                    s.save()
+                    unallocated -= alloc
+
+                # Reconcile overall student fees
+                total_concessions = sum(s.concession_amount for s in sf.semester_fees.all())
+                sf.balance_amount = max(Decimal('0.00'), sf.total_fees - total_concessions - sf.paid_amount)
+                sf.updated_by = tracking_user
+
+                import json
+                from django.utils import timezone
+                try:
+                    hist_data = json.loads(sf.remarks) if sf.remarks and isinstance(sf.remarks, str) and sf.remarks.startswith('{') else {}
+                except Exception:
+                    hist_data = {}
+                if not isinstance(hist_data, dict):
+                    hist_data = {'history': []}
+                if 'concession_logs' not in hist_data:
+                    hist_data['concession_logs'] = []
+
+                hist_data['concession_logs'].append({
+                    'semester_id': None,
+                    'semester_name': 'Global (All Semesters)',
+                    'concession_amount': float(concession),
+                    'reason': reason,
+                    'applied_by': tracking_user.name if tracking_user else 'Staff',
+                    'applied_at': timezone.now().strftime('%Y-%m-%d %H:%M:%S'),
+                })
+                sf.remarks = json.dumps(hist_data)
+                sf.save()
+                StudentViewSet._reconcile_student_semester_fees(sf, tracking_user)
+
+                # Broadcast WebSocket event
+                try:
+                    from asgiref.sync import async_to_sync
+                    from channels.layers import get_channel_layer
+                    channel_layer = get_channel_layer()
+                    if channel_layer:
+                        async_to_sync(channel_layer.group_send)(
+                            'realtime_updates',
+                            {
+                                'type': 'broadcast_update',
+                                'data': {
+                                    'event': 'fee_concession_applied',
+                                    'model': 'StudentFees',
+                                    'id': sf.id,
+                                    'payload': {
+                                        'student_id': student_id,
+                                        'is_global': True,
+                                        'concession_amount': float(concession),
+                                    }
+                                }
+                            }
+                        )
+                except Exception:
+                    pass
+
+                return Response({
+                    "code": 200,
+                    "message": f"Global fee concession of ₹{concession:,.2f} applied successfully across all semesters.",
+                    "data": {
+                        "total_fees": float(sf.total_fees),
+                        "total_concessions": float(total_concessions),
+                        "balance_amount": float(sf.balance_amount),
+                    }
+                }, status=status.HTTP_200_OK)
+
+            else:
+                sem_fee = StudentSemesterFee.objects.select_for_update().filter(
+                    student_fees=sf,
+                    semester_id=semester_id
+                ).first()
+
+                if not sem_fee:
+                    return Response({
+                        "code": 404,
+                        "message": "Student semester fee record not found for this semester."
+                    }, status=status.HTTP_404_NOT_FOUND)
+
+                if sem_fee.total_amount <= Decimal('0.00'):
+                    return Response({
+                        "code": 400,
+                        "message": "Cannot apply concession on a semester fee of ₹0.00."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                max_allowed = sem_fee.balance_amount
+                if max_allowed <= Decimal('0.00'):
+                    return Response({
+                        "code": 400,
+                        "message": f"This semester is already fully cleared. Concession cannot be granted."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                if concession > max_allowed:
+                    return Response({
+                        "code": 400,
+                        "message": f"Concession amount ₹{concession:,.2f} cannot exceed the semester pending due balance of ₹{max_allowed:,.2f}."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                sem_fee.concession_amount = (sem_fee.concession_amount or Decimal('0.00')) + concession
+                sem_fee.recalculate_balance()
+                sem_fee.updated_by = tracking_user
+                sem_fee.save()
+
+                # Reconcile overall student fees balance and append audit log
+                import json
+                from django.utils import timezone
+                try:
+                    hist_data = json.loads(sf.remarks) if sf.remarks and isinstance(sf.remarks, str) and sf.remarks.startswith('{') else {}
+                except Exception:
+                    hist_data = {}
+                if not isinstance(hist_data, dict):
+                    hist_data = {'history': []}
+                if 'concession_logs' not in hist_data:
+                    hist_data['concession_logs'] = []
+
+                hist_data['concession_logs'].append({
+                    'semester_id': semester_id,
+                    'semester_name': sem_fee.semester.semester_name if sem_fee.semester else f'Semester {semester_id}',
+                    'concession_amount': float(concession),
+                    'reason': reason,
+                    'applied_by': tracking_user.name if tracking_user else 'Staff',
+                    'applied_at': timezone.now().strftime('%Y-%m-%d %H:%M:%S'),
+                })
+                sf.remarks = json.dumps(hist_data)
+                total_concessions = sum(s.concession_amount for s in sf.semester_fees.all())
+                sf.balance_amount = max(Decimal('0.00'), sf.total_fees - total_concessions - sf.paid_amount)
+                sf.updated_by = tracking_user
+                sf.save()
+                StudentViewSet._reconcile_student_semester_fees(sf, tracking_user)
+
+                # Broadcast WebSocket event
+                try:
+                    from asgiref.sync import async_to_sync
+                    from channels.layers import get_channel_layer
+                    channel_layer = get_channel_layer()
+                    if channel_layer:
+                        async_to_sync(channel_layer.group_send)(
+                            'realtime_updates',
+                            {
+                                'type': 'broadcast_update',
+                                'data': {
+                                    'event': 'fee_concession_applied',
+                                    'model': 'StudentSemesterFee',
+                                    'id': sem_fee.id,
+                                    'payload': {
+                                        'student_id': student_id,
+                                        'semester_id': semester_id,
+                                        'concession_amount': float(concession),
+                                    }
+                                }
+                            }
+                        )
+                except Exception:
+                    pass
+
+                return Response({
+                    "code": 200,
+                    "message": f"Concession of ₹{concession:,.2f} applied successfully for {sem_fee.semester.semester_name if sem_fee.semester else f'Semester {semester_id}'}.",
+                    "data": StudentSemesterFeeSerializer(sem_fee).data
+                }, status=status.HTTP_200_OK)
 
 
     @action(detail=True, methods=['put', 'post', 'patch'], url_path='full-profile-edit')
@@ -1619,8 +1837,70 @@ class StudentViewSet(viewsets.ModelViewSet):
 
         fees_payment = getattr(student, 'fees_payment', None)
         fees_data = {}
+        payments_list = []
+        semester_fees_list = []
+
         if fees_payment:
+            try:
+                StudentViewSet._reconcile_student_semester_fees(fees_payment)
+            except Exception:
+                pass
+
+            raw_payments = fees_payment.payments.select_related(
+                'student_semester_fee__semester', 'recorded_by'
+            ).order_by('-payment_date', '-id')
+
+            for p in raw_payments:
+                sem = p.student_semester_fee.semester if p.student_semester_fee else None
+                raw_rem = (p.remarks or '').strip()
+                if not raw_rem or raw_rem in ('Tuition fee payment', 'Academic fees payment') or raw_rem.startswith('Tuition payment for'):
+                    if fees_payment.remarks:
+                        try:
+                            import json
+                            sf_rem = json.loads(fees_payment.remarks) if isinstance(fees_payment.remarks, str) else fees_payment.remarks
+                            if isinstance(sf_rem, dict) and sf_rem.get('history'):
+                                for h in sf_rem['history']:
+                                    if h.get('receipt_number') == p.receipt_number and h.get('notes'):
+                                        note_cand = str(h.get('notes')).strip()
+                                        if note_cand and note_cand not in ('Tuition fee payment', 'Academic fees payment', 'Tuition fees payment'):
+                                            raw_rem = note_cand
+                                            break
+                        except Exception:
+                            pass
+
+                payments_list.append({
+                    'id': p.id,
+                    'receipt_number': p.receipt_number,
+                    'payment_date': p.payment_date.strftime('%d-%m-%Y') if p.payment_date else '',
+                    'payment_date_iso': p.payment_date.isoformat() if p.payment_date else '',
+                    'amount_paid': float(p.amount_paid or 0.0),
+                    'fee_category': p.fee_category or 'TUITION',
+                    'payment_mode': p.payment_mode or 'Cash',
+                    'transaction_reference': p.transaction_reference or '',
+                    'remarks': raw_rem or ('Tuition fee payment' if p.fee_category == 'TUITION' else 'Books & uniform fee'),
+                    'semester_id': sem.id if sem else None,
+                    'semester_name': sem.semester_name if sem else (f"Semester {sem.semester_number}" if sem else None),
+                    'recorded_by_name': p.recorded_by.name if p.recorded_by else 'Cashier',
+                    'created_at': p.created_at.isoformat() if p.created_at else None,
+                })
+
+            for sf in fees_payment.semester_fees.select_related('semester').order_by('semester__semester_number', 'id'):
+                semester_fees_list.append({
+                    'id': sf.id,
+                    'semester_id': sf.semester_id,
+                    'semester_name': sf.semester.semester_name if sf.semester else f"Semester {sf.semester_id}",
+                    'semester_number': sf.semester.semester_number if sf.semester else 0,
+                    'total_amount': float(sf.total_amount or 0.0),
+                    'concession_amount': float(sf.concession_amount or 0.0),
+                    'net_payable': float(sf.net_payable or 0.0),
+                    'paid_amount': float(sf.paid_amount or 0.0),
+                    'balance_amount': float(sf.balance_amount or 0.0),
+                    'status': sf.status or 'PENDING',
+                    'due_date': sf.due_date.isoformat() if sf.due_date else None,
+                })
+
             fees_data = {
+                'id': fees_payment.id,
                 'total_fees': float(fees_payment.total_fees),
                 'paid_amount': float(fees_payment.paid_amount),
                 'balance_amount': float(fees_payment.balance_amount),
@@ -1629,9 +1909,12 @@ class StudentViewSet(viewsets.ModelViewSet):
                 'due_date': fees_payment.due_date.isoformat() if fees_payment.due_date else None,
                 'payment_mode': fees_payment.payment_mode,
                 'remarks': fees_payment.remarks or '',
+                'payments': payments_list,
+                'semester_fees': semester_fees_list,
             }
         else:
             fees_data = {
+                'id': None,
                 'total_fees': 0.0,
                 'paid_amount': 0.0,
                 'balance_amount': 0.0,
@@ -1640,6 +1923,8 @@ class StudentViewSet(viewsets.ModelViewSet):
                 'due_date': None,
                 'payment_mode': 'Cash',
                 'remarks': '',
+                'payments': [],
+                'semester_fees': [],
             }
 
         def format_ddmmyyyy(d_str):
@@ -4379,6 +4664,587 @@ class StudentViewSet(viewsets.ModelViewSet):
         ay_str_clean = str(acad_year_str).replace(' ', '_')
         filename = f"Fees_Report_AY_{ay_str_clean}_{dept_str_clean}_{batch_str_clean}.pdf"
 
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response
+
+    def fees_payments_list(self, request, *args, **kwargs):
+        """
+        List fee payment entries with search, date range, mode filter, and summary statistics.
+        Supports pagination and quick date presets.
+        """
+        from decimal import Decimal
+        from django.db.models import Q, Sum, Count
+        import math
+
+        qs = FeePayment.objects.select_related(
+            'student_fees__student__department',
+            'student_fees__student__batch',
+            'student_fees__student__section',
+            'student_fees__student__application__candidate',
+            'student_semester_fee__semester',
+            'recorded_by'
+        ).all()
+
+        # Date range filtering
+        from_date = request.query_params.get('from_date') or request.data.get('from_date')
+        to_date = request.query_params.get('to_date') or request.data.get('to_date')
+        if from_date:
+            qs = qs.filter(payment_date__gte=from_date)
+        if to_date:
+            qs = qs.filter(payment_date__lte=to_date)
+
+        # Mode filter
+        payment_mode = request.query_params.get('payment_mode') or request.data.get('payment_mode')
+        if payment_mode and payment_mode.upper() != 'ALL':
+            qs = qs.filter(payment_mode__iexact=payment_mode)
+
+        # Category filter
+        fee_category = request.query_params.get('fee_category') or request.data.get('fee_category')
+        if fee_category and fee_category.upper() != 'ALL':
+            qs = qs.filter(fee_category__iexact=fee_category)
+
+        # Search query (Receipt number, student name, roll number, register number)
+        search_query = (request.query_params.get('search') or request.data.get('search') or '').strip()
+        if search_query:
+            qs = qs.filter(
+                Q(receipt_number__icontains=search_query) |
+                Q(transaction_reference__icontains=search_query) |
+                Q(student_fees__student__student_name__icontains=search_query) |
+                Q(student_fees__student__roll_number__icontains=search_query) |
+                Q(student_fees__student__register_number__icontains=search_query) |
+                Q(student_fees__student__application__candidate__name__icontains=search_query)
+            )
+
+        qs = qs.order_by('-payment_date', '-payment_timestamp', '-id')
+
+        # Overall summary aggregation
+        agg = qs.aggregate(tot_amount=Sum('amount_paid'), tot_count=Count('id'))
+        total_amount = float(agg['tot_amount'] or 0.0)
+        total_count = int(agg['tot_count'] or 0)
+
+        # Breakdown by mode
+        by_mode = {}
+        for m in qs.values('payment_mode').annotate(total=Sum('amount_paid'), count=Count('id')):
+            by_mode[m['payment_mode']] = {
+                'total': float(m['total'] or 0.0),
+                'count': int(m['count'] or 0)
+            }
+
+        # Breakdown by category
+        by_category = {}
+        for c in qs.values('fee_category').annotate(total=Sum('amount_paid'), count=Count('id')):
+            by_category[c['fee_category']] = {
+                'total': float(c['total'] or 0.0),
+                'count': int(c['count'] or 0)
+            }
+
+        # Pagination
+        try:
+            page = max(1, int(request.query_params.get('page', 1)))
+        except (ValueError, TypeError):
+            page = 1
+
+        try:
+            page_size = max(1, min(100, int(request.query_params.get('page_size', 10))))
+        except (ValueError, TypeError):
+            page_size = 10
+
+        total_pages = max(1, math.ceil(total_count / page_size)) if total_count > 0 else 1
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        paged_records = qs[start_idx:end_idx]
+
+        results = []
+        for p in paged_records:
+            st = p.student_fees.student if p.student_fees else None
+            student_dict = None
+            if st:
+                sec_val = getattr(st.section, 'sections', None) or getattr(st.section, 'section_name', None) or (str(st.section) if st.section else '—')
+                dept_name = getattr(st.department, 'department_name', None) or '—' if st.department else '—'
+                dept_code = getattr(st.department, 'department_code', None) or '—' if st.department else '—'
+                dept_short = getattr(st.department, 'short_name', None) or dept_code or dept_name
+                batch_val = getattr(st.batch, 'batch', None) or (str(st.batch) if st.batch else '—')
+                student_dict = {
+                    'id': st.id,
+                    'name': st.name or '—',
+                    'roll_number': st.roll_number or '—',
+                    'register_number': st.register_number or '—',
+                    'department_name': dept_name,
+                    'department_code': dept_code,
+                    'department_short_name': dept_short,
+                    'short_name': dept_short,
+                    'batch_name': batch_val,
+                    'section_name': sec_val,
+                }
+
+            sem = p.student_semester_fee.semester if p.student_semester_fee else None
+            sem_fee = p.student_semester_fee
+            sf = p.student_fees
+
+            # Cleanly resolve remarks from FeePayment.remarks or student_fees history
+            raw_remarks = (p.remarks or '').strip()
+            is_generic = (
+                not raw_remarks or
+                raw_remarks == 'Tuition fee payment' or
+                raw_remarks == 'Academic fees payment' or
+                raw_remarks.startswith('Tuition payment for') or
+                raw_remarks.startswith('Academic fees')
+            )
+            if is_generic and sf and sf.remarks:
+                try:
+                    import json
+                    sf_rem = json.loads(sf.remarks) if isinstance(sf.remarks, str) else sf.remarks
+                    if isinstance(sf_rem, dict):
+                        hist = sf_rem.get('history', [])
+                        # 1. Match by receipt_number
+                        for h in hist:
+                            if h.get('receipt_number') == p.receipt_number and h.get('notes'):
+                                note_candidate = str(h.get('notes')).strip()
+                                if note_candidate and note_candidate not in ('Tuition fee payment', 'Academic fees payment', 'Tuition fees payment'):
+                                    raw_remarks = note_candidate
+                                    is_generic = False
+                                    break
+                        # 2. Fallback: match by amount and date if still generic
+                        if is_generic and raw_remarks in ('', 'Tuition fee payment', 'Academic fees payment'):
+                            p_date_str = p.payment_date.strftime('%d-%m-%Y') if p.payment_date else ''
+                            for h in hist:
+                                h_amt = float(h.get('amount') or 0.0)
+                                h_date = str(h.get('date') or '').strip()
+                                note_candidate = str(h.get('notes') or '').strip()
+                                if abs(h_amt - float(p.amount_paid or 0.0)) < 0.01 and note_candidate not in ('', 'Tuition fee payment', 'Academic fees payment', 'Tuition fees payment'):
+                                    if not p_date_str or h_date == p_date_str:
+                                        raw_remarks = note_candidate
+                                        is_generic = False
+                                        break
+                        # 3. Top-level notes
+                        if is_generic and sf_rem.get('notes'):
+                            raw_remarks = sf_rem.get('notes')
+                except Exception:
+                    pass
+
+            if raw_remarks and isinstance(raw_remarks, str) and raw_remarks.startswith('{') and raw_remarks.endswith('}'):
+                try:
+                    import json
+                    parsed_self = json.loads(raw_remarks)
+                    if isinstance(parsed_self, dict) and parsed_self.get('notes'):
+                        raw_remarks = parsed_self.get('notes')
+                except Exception:
+                    pass
+
+            results.append({
+                'id': p.id,
+                'receipt_number': p.receipt_number,
+                'payment_date': p.payment_date.isoformat() if p.payment_date else None,
+                'payment_timestamp': p.payment_timestamp.isoformat() if p.payment_timestamp else None,
+                'amount_paid': float(p.amount_paid or 0.0),
+                'fee_category': p.fee_category,
+                'payment_mode': p.payment_mode,
+                'transaction_reference': p.transaction_reference or '',
+                'remarks': raw_remarks or '',
+                'student': student_dict,
+                'student_fees_id': p.student_fees_id,
+                'student_semester_fee_id': p.student_semester_fee_id,
+                'semester_id': sem.id if sem else None,
+                'semester_name': sem.semester_name if sem else None,
+                'recorded_by_name': p.recorded_by.name if p.recorded_by else 'Cashier',
+                'balance_amount': float(sf.balance_amount or 0.0) if sf else 0.0,
+                'total_fees': float(sf.total_fees or 0.0) if sf else 0.0,
+                'sem_balance_amount': float(sem_fee.balance_amount or 0.0) if sem_fee else None,
+                'sem_total_fee': float(sem_fee.total_amount or 0.0) if sem_fee else None,
+                'created_at': p.created_at.isoformat() if p.created_at else None,
+                'updated_at': p.updated_at.isoformat() if p.updated_at else None,
+            })
+
+        return Response({
+            'count': total_count,
+            'total_pages': total_pages,
+            'current_page': page,
+            'page_size': page_size,
+            'summary': {
+                'total_amount': total_amount,
+                'total_count': total_count,
+                'by_mode': by_mode,
+                'by_category': by_category,
+            },
+            'results': results
+        }, status=status.HTTP_200_OK)
+
+    def fees_payment_update(self, request, pk=None, *args, **kwargs):
+        """
+        Edit a fee payment entry when a wrong amount or detail was entered.
+        Enforces standard fee validation (minimum payment threshold, non-exceeding balances).
+        Safely adjusts the student's ledger and recalculates semester fee balances FIFO.
+        Broadcasts WebSocket update to all connected clients.
+        """
+        from decimal import Decimal
+        from django.db import transaction
+        from users.models import User as StandardUser
+
+        user = self.request.user if self.request.user and self.request.user.is_authenticated else None
+        tracking_user = user if isinstance(user, StandardUser) else None
+
+        with transaction.atomic():
+            payment = FeePayment.objects.select_for_update().filter(pk=pk).first()
+            if not payment:
+                return Response({"code": 404, "message": "Fee payment transaction not found"}, status=status.HTTP_404_NOT_FOUND)
+
+            student_fees = StudentFees.objects.select_for_update().filter(pk=payment.student_fees_id).first()
+            if not student_fees:
+                return Response({"code": 404, "message": "Associated student fees account not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            old_amount = payment.amount_paid
+            raw_amount = request.data.get('amount_paid')
+
+            if raw_amount is not None:
+                try:
+                    new_amount = Decimal(str(raw_amount))
+                    if new_amount <= Decimal('0.00'):
+                        return Response({"code": 400, "message": "Payment amount must be greater than zero."}, status=status.HTTP_400_BAD_REQUEST)
+                except Exception:
+                    return Response({"code": 400, "message": "Invalid payment amount."}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                new_amount = old_amount
+
+            diff = new_amount - old_amount
+
+            # Fee Entry Validation Rules (Matches FeesEntry.jsx)
+            MIN_FEE_PAYMENT = Decimal('500.00')
+
+            if payment.student_semester_fee:
+                sem_fee = payment.student_semester_fee
+                max_allowed = payment.amount_paid + sem_fee.balance_amount
+                min_allowed = min(MIN_FEE_PAYMENT, max_allowed) if max_allowed > Decimal('0.00') else Decimal('0.00')
+            elif payment.fee_category == 'TUITION':
+                max_allowed = payment.amount_paid + student_fees.balance_amount
+                min_allowed = min(MIN_FEE_PAYMENT, max_allowed) if max_allowed > Decimal('0.00') else Decimal('0.00')
+            elif payment.fee_category == 'BOOKS':
+                book_bal = max(Decimal('0.00'), student_fees.books_fees_total - student_fees.books_fees_paid)
+                max_allowed = payment.amount_paid + book_bal
+                min_allowed = min(MIN_FEE_PAYMENT, max_allowed) if max_allowed > Decimal('0.00') else Decimal('0.00')
+            else:
+                max_allowed = Decimal('9999999.00')
+                min_allowed = Decimal('1.00')
+
+            if new_amount < min_allowed:
+                return Response({
+                    "code": 400,
+                    "message": f"Payment amount must be at least ₹{min_allowed:,.2f}."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            if new_amount > max_allowed:
+                return Response({
+                    "code": 400,
+                    "message": f"Payment amount ₹{new_amount:,.2f} cannot exceed the maximum payable dues of ₹{max_allowed:,.2f}."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Check if decreasing by more than paid or increasing beyond total fees
+            if diff > Decimal('0.00') and payment.fee_category == 'TUITION':
+                if student_fees.paid_amount + diff > student_fees.total_fees and student_fees.total_fees > Decimal('0.00'):
+                    return Response({
+                        "code": 400,
+                        "message": f"Updated amount causes total paid (₹{(student_fees.paid_amount + diff):,.2f}) to exceed course fees (₹{student_fees.total_fees:,.2f})."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Update payment record
+            payment.amount_paid = new_amount
+            if 'payment_mode' in request.data and request.data['payment_mode']:
+                payment.payment_mode = request.data['payment_mode']
+            if 'payment_date' in request.data and request.data['payment_date']:
+                raw_pdate = request.data['payment_date']
+                if isinstance(raw_pdate, str):
+                    from datetime import datetime
+                    try:
+                        payment.payment_date = datetime.strptime(raw_pdate[:10], '%Y-%m-%d').date()
+                    except Exception:
+                        payment.payment_date = raw_pdate
+                else:
+                    payment.payment_date = raw_pdate
+            if 'remarks' in request.data:
+                payment.remarks = request.data['remarks']
+                if student_fees and student_fees.remarks:
+                    try:
+                        import json
+                        sf_rem = json.loads(student_fees.remarks) if isinstance(student_fees.remarks, str) else student_fees.remarks
+                        if isinstance(sf_rem, dict) and sf_rem.get('history'):
+                            for h in sf_rem['history']:
+                                if h.get('receipt_number') == payment.receipt_number:
+                                    h['notes'] = payment.remarks
+                                    if raw_amount is not None:
+                                        h['amount'] = float(new_amount)
+                                    if 'payment_mode' in request.data and request.data['payment_mode']:
+                                        h['mode'] = request.data['payment_mode']
+                                    break
+                            student_fees.remarks = json.dumps(sf_rem)
+                            student_fees.save(update_fields=['remarks'])
+                    except Exception:
+                        pass
+            if 'transaction_reference' in request.data:
+                payment.transaction_reference = request.data['transaction_reference']
+
+            payment.updated_by = tracking_user
+            payment.save()
+
+            # Reconcile StudentFees & Semester Fees
+            if diff != Decimal('0.00'):
+                if payment.fee_category == 'TUITION':
+                    student_fees.paid_amount = max(Decimal('0.00'), student_fees.paid_amount + diff)
+                    student_fees.balance_amount = max(Decimal('0.00'), student_fees.total_fees - student_fees.paid_amount)
+                    student_fees.updated_by = tracking_user
+                    student_fees.save()
+                    StudentViewSet._reconcile_student_semester_fees(student_fees, tracking_user)
+                elif payment.fee_category == 'BOOKS':
+                    student_fees.books_fees_paid = max(Decimal('0.00'), student_fees.books_fees_paid + diff)
+                    student_fees.updated_by = tracking_user
+                    student_fees.save()
+
+            # Broadcast WebSocket event
+            try:
+                from asgiref.sync import async_to_sync
+                from channels.layers import get_channel_layer
+                channel_layer = get_channel_layer()
+                if channel_layer:
+                    async_to_sync(channel_layer.group_send)(
+                        'realtime_updates',
+                        {
+                            'type': 'broadcast_update',
+                            'data': {
+                                'event': 'fee_payment_updated',
+                                'model': 'FeePayment',
+                                'id': payment.id,
+                                'payload': {
+                                    'id': payment.id,
+                                    'receipt_number': payment.receipt_number,
+                                    'amount_paid': float(payment.amount_paid),
+                                    'payment_mode': payment.payment_mode,
+                                    'student_id': student_fees.student_id
+                                }
+                            }
+                        }
+                    )
+            except Exception:
+                pass
+
+        st = student_fees.student if student_fees else None
+        return Response({
+            "code": 200,
+            "message": "Fee payment entry updated and student ledger reconciled successfully.",
+            "data": {
+                'id': payment.id,
+                'receipt_number': payment.receipt_number,
+                'payment_date': payment.payment_date.isoformat() if hasattr(payment.payment_date, 'isoformat') else (str(payment.payment_date)[:10] if payment.payment_date else None),
+                'amount_paid': float(payment.amount_paid),
+                'payment_mode': payment.payment_mode,
+                'remarks': payment.remarks or '',
+                'student': {
+                    'id': st.id if st else None,
+                    'name': st.name if st else '—',
+                    'roll_number': st.roll_number or '—' if st else '—',
+                    'register_number': st.register_number or '—' if st else '—',
+                } if st else None
+            }
+        }, status=status.HTTP_200_OK)
+
+    def fees_payments_pdf_report(self, request, *args, **kwargs):
+        """
+        Generates and streams an official Fee Collection PDF report
+        matching the specified date range and filters.
+        """
+        from io import BytesIO
+        from django.http import HttpResponse
+        from django.db.models import Q
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib import colors
+        from institution.models import CollegeHeader
+        from common.report_utils import build_standard_college_header, build_centered_report_title
+        from datetime import datetime
+
+        qs = FeePayment.objects.select_related(
+            'student_fees__student__department',
+            'student_fees__student__batch',
+            'student_fees__student__section',
+            'student_fees__student__application__candidate',
+            'student_semester_fee__semester',
+            'recorded_by'
+        ).all()
+
+        from_date = request.query_params.get('from_date') or request.data.get('from_date')
+        to_date = request.query_params.get('to_date') or request.data.get('to_date')
+        preset_label = request.query_params.get('preset_label') or request.data.get('preset_label') or ''
+        if from_date:
+            qs = qs.filter(payment_date__gte=from_date)
+        if to_date:
+            qs = qs.filter(payment_date__lte=to_date)
+
+        payment_mode = request.query_params.get('payment_mode') or request.data.get('payment_mode')
+        if payment_mode and payment_mode.upper() != 'ALL':
+            qs = qs.filter(payment_mode__iexact=payment_mode)
+
+        fee_category = request.query_params.get('fee_category') or request.data.get('fee_category')
+        if fee_category and fee_category.upper() != 'ALL':
+            qs = qs.filter(fee_category__iexact=fee_category)
+
+        search_query = (request.query_params.get('search') or request.data.get('search') or '').strip()
+        if search_query:
+            qs = qs.filter(
+                Q(receipt_number__icontains=search_query) |
+                Q(student_fees__student__student_name__icontains=search_query) |
+                Q(student_fees__student__roll_number__icontains=search_query) |
+                Q(student_fees__student__register_number__icontains=search_query)
+            )
+
+        qs = qs.order_by('payment_date', 'id')
+        records = list(qs)
+
+        total_amount = sum(float(r.amount_paid or 0) for r in records)
+        cash_total = sum(float(r.amount_paid or 0) for r in records if (r.payment_mode or '').upper() == 'CASH')
+        upi_total = sum(float(r.amount_paid or 0) for r in records if (r.payment_mode or '').upper() == 'UPI')
+        card_total = sum(float(r.amount_paid or 0) for r in records if (r.payment_mode or '').upper() == 'CARD')
+        dd_total = sum(float(r.amount_paid or 0) for r in records if (r.payment_mode or '').upper() in ['DD', 'CHEQUE'])
+        other_total = total_amount - (cash_total + upi_total + card_total + dd_total)
+
+        buffer = BytesIO()
+        page_size = A4
+        page_w = page_size[0] - 40  # 555.27 pt (Portrait A4)
+        doc = SimpleDocTemplate(buffer, pagesize=page_size, leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
+
+        story = []
+        college_header_obj = CollegeHeader.objects.first()
+        header_table = build_standard_college_header(college_header_obj, page_w=page_w, logo_size=55)
+        if header_table:
+            story.append(header_table)
+            story.append(Spacer(1, 4))
+
+        # Title
+        story.append(build_centered_report_title("FEES COLLECTION REPORT", font_size=12, leading=14))
+        story.append(Spacer(1, 4))
+
+        # Date range string helper
+        def fmt_d(d_str):
+            if not d_str:
+                return '—'
+            try:
+                dt = datetime.strptime(str(d_str)[:10], '%Y-%m-%d')
+                return dt.strftime('%d/%m/%Y')
+            except Exception:
+                return str(d_str)
+
+        from_d_fmt = fmt_d(from_date) if from_date else 'All Dates'
+        to_d_fmt = fmt_d(to_date) if to_date else 'Present'
+        period_text = f"Period: {from_d_fmt} to {to_d_fmt}"
+        if preset_label:
+            period_text += f" ({preset_label})"
+
+        lbl_bold = ParagraphStyle(name='FCLbl', fontName='Times-Bold', fontSize=8.5, leading=11, textColor=colors.black)
+        val_norm = ParagraphStyle(name='FCVal', fontName='Times-Roman', fontSize=8.5, leading=11, textColor=colors.black)
+        val_em_bold = ParagraphStyle(name='FCValEm', fontName='Times-Bold', fontSize=9, leading=12, textColor=colors.HexColor('#047857'))
+
+        summary_data = [
+            [
+                Paragraph(f"<b>Period:</b> {period_text}", lbl_bold),
+                Paragraph(f"<b>Total Transactions:</b> {len(records)}", lbl_bold),
+                Paragraph(f"<b>Total Collected:</b> <font color='#047857'>Rs. {total_amount:,.2f}</font>", val_em_bold),
+            ],
+            [
+                Paragraph(f"<b>Cash:</b> Rs. {cash_total:,.2f}", val_norm),
+                Paragraph(f"<b>UPI / Digital:</b> Rs. {upi_total + card_total:,.2f}", val_norm),
+                Paragraph(f"<b>DD / Cheque / Bank:</b> Rs. {dd_total + other_total:,.2f}", val_norm),
+            ]
+        ]
+        sum_table = Table(summary_data, colWidths=[195, 175, 185])
+        sum_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F8FAFC')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(sum_table)
+        story.append(Spacer(1, 6))
+
+        # Transactions Table (Standard A4 Portrait - S.No, Receipt No, Date, Student Name, Register Number, Payment Mode, Amount Paid)
+        col_widths = [28, 105, 72, 140, 85, 60, 65]
+        tbl_th_c = ParagraphStyle(name='FCTHC', fontName='Times-Bold', fontSize=8, leading=10, alignment=1, textColor=colors.black)
+        tbl_th_r = ParagraphStyle(name='FCTHR', fontName='Times-Bold', fontSize=8, leading=10, alignment=2, textColor=colors.black)
+        tbl_th_l = ParagraphStyle(name='FCTHL', fontName='Times-Bold', fontSize=8, leading=10, alignment=0, textColor=colors.black)
+
+        tbl_td_c = ParagraphStyle(name='FCTDC', fontName='Times-Roman', fontSize=7.5, leading=9.5, alignment=1, textColor=colors.black)
+        tbl_td_l = ParagraphStyle(name='FCTDL', fontName='Times-Roman', fontSize=7.5, leading=9.5, alignment=0, textColor=colors.black)
+        tbl_td_r = ParagraphStyle(name='FCTDR', fontName='Times-Bold', fontSize=7.5, leading=9.5, alignment=2, textColor=colors.HexColor('#047857'))
+
+        table_rows = [[
+            Paragraph("<b>S.No</b>", tbl_th_c),
+            Paragraph("<b>Receipt No</b>", tbl_th_l),
+            Paragraph("<b>Date of Payment</b>", tbl_th_c),
+            Paragraph("<b>Student Name</b>", tbl_th_l),
+            Paragraph("<b>Register Number</b>", tbl_th_l),
+            Paragraph("<b>Mode of Payment</b>", tbl_th_c),
+            Paragraph("<b>Amount Paid</b>", tbl_th_r),
+        ]]
+
+        for idx, r in enumerate(records, start=1):
+            st = r.student_fees.student if r.student_fees else None
+            st_name = st.name if st else '—'
+            ident = (st.register_number or st.roll_number or '—') if st else '—'
+            amt_str = f"Rs. {float(r.amount_paid or 0):,.2f}"
+
+            table_rows.append([
+                Paragraph(str(idx), tbl_td_c),
+                Paragraph(str(r.receipt_number or '—'), tbl_td_l),
+                Paragraph(fmt_d(r.payment_date), tbl_td_c),
+                Paragraph(st_name, tbl_td_l),
+                Paragraph(ident, tbl_td_l),
+                Paragraph(str(r.payment_mode or 'Cash'), tbl_td_c),
+                Paragraph(amt_str, tbl_td_r),
+            ])
+
+        # Grand Total Row
+        table_rows.append([
+            Paragraph("", tbl_td_c),
+            Paragraph("<b>TOTAL</b>", tbl_th_l),
+            Paragraph("", tbl_td_c),
+            Paragraph(f"<b>{len(records)} Transactions</b>", tbl_th_l),
+            Paragraph("", tbl_td_l),
+            Paragraph("", tbl_td_c),
+            Paragraph(f"<b>Rs. {total_amount:,.2f}</b>", ParagraphStyle(name='FCTotR', fontName='Times-Bold', fontSize=8.5, leading=11, alignment=2, textColor=colors.HexColor('#047857'))),
+        ])
+
+        tx_table = Table(table_rows, colWidths=col_widths, repeatRows=1)
+        tx_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E2E8F0')),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#F1F5F9')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 2.5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
+            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+        ]))
+        story.append(tx_table)
+
+        # Signatures
+        story.append(Spacer(1, 15))
+        sig_data = [[
+            Paragraph("<b>Cashier / Accounts Officer</b>", val_norm),
+            Paragraph("<b>Verified By</b>", ParagraphStyle(name='FCSigV', fontName='Times-Bold', fontSize=9, leading=12, alignment=1)),
+            Paragraph("<b>Administrative Officer / Principal</b>", ParagraphStyle(name='FCSigP', fontName='Times-Bold', fontSize=9, leading=12, alignment=2))
+        ]]
+        sig_table = Table(sig_data, colWidths=[185, 185, 185])
+        sig_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        story.append(KeepTogether(sig_table))
+
+        doc.build(story)
+        buffer.seek(0)
+
+        filename = f"Fee_Collection_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
         response['Content-Disposition'] = f'inline; filename="{filename}"'
         return response
