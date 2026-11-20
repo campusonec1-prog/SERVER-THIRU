@@ -1,5 +1,5 @@
-import logging
 from io import BytesIO
+import logging
 from django.http import Http404, HttpResponse
 from rest_framework import viewsets, status
 from rest_framework.response import Response

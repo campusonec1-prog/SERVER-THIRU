@@ -58,7 +58,7 @@ class StudentViewSet(viewsets.ModelViewSet):
         'department', 'department__program', 'batch', 'section', 'status', 'quota',
         'bus', 'route', 'stop', 'application', 'application__candidate',
         'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
-    ).all().order_by('id')
+    ).all().order_by('-id')
     serializer_class = StudentSerializer
     permission_classes = [StudentPermission]
 
@@ -246,6 +246,12 @@ class StudentViewSet(viewsets.ModelViewSet):
                 Q(route__route_name__icontains=search) |
                 Q(stop__stop_name__icontains=search)
             )
+
+        ordering = request.query_params.get('ordering')
+        if ordering:
+            order_fields = [f.strip() for f in str(ordering).split(',') if f.strip()]
+            if order_fields:
+                queryset = queryset.order_by(*order_fields)
 
         # ── Case 2: All Students (Combined Internal & Outer) ─────────
         if student_type_str == 'ALL':
@@ -4115,7 +4121,13 @@ class StudentViewSet(viewsets.ModelViewSet):
         meta, summary, records, college_header_obj, department, batch, sec_name, sem_num = self._get_fees_semester_data_helper(request)
 
         if not records:
-            return HttpResponse("No students found matching the selected criteria.", status=400)
+            dept_name = department.department_name if department else "Department"
+            b_name = batch.batch if batch else "Batch"
+            sec_lbl = f", Section {sec_name}" if sec_name and sec_name != 'All' else ""
+            return Response({
+                "code": 400,
+                "message": f"No active student fee records found matching {dept_name} ({b_name}{sec_lbl}, Semester {sem_num})."
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         buffer = BytesIO()
         page_size = A4
@@ -4258,7 +4270,16 @@ class StudentViewSet(viewsets.ModelViewSet):
         ]))
         story.append(KeepTogether(sig_table))
 
-        doc.build(story)
+        try:
+            doc.build(story)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                "code": 500,
+                "message": f"Failed to generate Fees Report: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
         buffer.seek(0)
 
         dept_str_clean = (department.department_code or department.department_name or 'Dept').replace(' ', '_') if department else 'All'
@@ -4640,7 +4661,12 @@ class StudentViewSet(viewsets.ModelViewSet):
         meta, summary, records, groups_list, college_header_obj, department, batch, sec_name, acad_year_str, *rest = self._get_fees_academic_year_data_helper(request)
 
         if not records:
-            return HttpResponse("No students found matching the selected criteria.", status=400)
+            dept_name = department.department_name if department else "All Departments"
+            b_name = batch.batch if batch else "All Batches"
+            return Response({
+                "code": 400,
+                "message": f"No active student fee records found for {dept_name} ({b_name}, Academic Year {acad_year_str})."
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         buffer = BytesIO()
         page_size = A4
@@ -4827,7 +4853,16 @@ class StudentViewSet(viewsets.ModelViewSet):
         ]))
         story.append(KeepTogether(sig_table))
 
-        doc.build(story)
+        try:
+            doc.build(story)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                "code": 500,
+                "message": f"Failed to generate Academic Year Fees Report: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
         buffer.seek(0)
 
         dept_str_clean = (department.department_code or department.department_name or 'Dept').replace(' ', '_') if department else 'All_Depts'
