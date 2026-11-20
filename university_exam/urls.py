@@ -5,8 +5,17 @@ from .views import (
     ExamSeatAllocationViewSet, UniversityExamHallViewSet, ExamHallDateViewSet
 )
 from .views_results import UniversityResultPublishViewSet
+from .views_preview import UniversityRegistrationPreviewViewSet
 
 urlpatterns = [
+    # Registration Preview Import (Anna University Student Registration PDF)
+    path('preview-import/preview', UniversityRegistrationPreviewViewSet.as_view({'post': 'preview_pdf'}), name='univ-exam-reg-preview'),
+    path('preview-import/quick-add-student', UniversityRegistrationPreviewViewSet.as_view({'post': 'quick_add_student'}), name='univ-exam-reg-quick-add-student'),
+    path('preview-import/quick-add-all-students', UniversityRegistrationPreviewViewSet.as_view({'post': 'quick_add_all_students'}), name='univ-exam-reg-quick-add-all-students'),
+    path('preview-import/quick-add-subject', UniversityRegistrationPreviewViewSet.as_view({'post': 'quick_add_subject'}), name='univ-exam-reg-quick-add-subject'),
+    path('preview-import/quick-add-all-subjects', UniversityRegistrationPreviewViewSet.as_view({'post': 'quick_add_all_subjects'}), name='univ-exam-reg-quick-add-all-subjects'),
+    path('preview-import/quick-add-department', UniversityRegistrationPreviewViewSet.as_view({'post': 'quick_add_department'}), name='univ-exam-reg-quick-add-department'),
+    path('preview-import/confirm-save', UniversityRegistrationPreviewViewSet.as_view({'post': 'confirm_save'}), name='univ-exam-reg-confirm-save'),
     # Exam Halls (University Exam Configuration)
     path('exam-halls/list', UniversityExamHallViewSet.as_view({'get': 'list'}), name='univ-exam-hall-list'),
     path('exam-halls/create', UniversityExamHallViewSet.as_view({'post': 'create'}), name='univ-exam-hall-create'),
