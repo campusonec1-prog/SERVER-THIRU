@@ -28,7 +28,7 @@ from PIL import Image as PILImage
 
 from common.report_utils import build_standard_college_header, build_centered_report_title
 
-from ..models import StudentStatus, Student, StudentAdmissionSlip, StudentFees, StudentSemesterFee, FeePayment
+from ..models import StudentStatus, Student, StudentAdmissionSlip, StudentFees, StudentSemesterFee, FeePayment, OuterStudent
 from ..serializers import StudentSerializer, StudentAdmissionSlipSerializer, StudentFeesSerializer, StudentSemesterFeeSerializer, FeePaymentSerializer
 from ..permissions import StudentPermission
 
@@ -121,13 +121,41 @@ class StudentViewSet(viewsets.ModelViewSet):
         instance.delete()
         self._broadcast_delete(student_id)
 
+    def _serialize_outer_student(self, s):
+        return {
+            'id': s.id,
+            'is_outer': True,
+            'student_type': 'OUTER',
+            'register_number': s.register_number,
+            'roll_number': '—',
+            'student_name': s.student_name or '—',
+            'name': s.student_name or '—',
+            'student_email': '—',
+            'department_id': s.department_id,
+            'department_name': s.department.department_name if s.department else '—',
+            'program_id': s.program_id,
+            'program_name': s.program.program_name if s.program else '—',
+            'batch_id': s.batch_id,
+            'batch_name': s.batch.batch if s.batch else '—',
+            'section_name': 'No Section',
+            'is_hostler': False,
+            'is_bus': False,
+            'bus_from': '',
+            'bus_to': '',
+            'status_name': 'OUTER STUDENT',
+            'regulation_code': s.regulation.regulation_code if s.regulation else '',
+            'created_at': s.created_at,
+            'updated_at': s.updated_at,
+        }
+
     def list(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
-        
-        # Filtering
+        # Filtering parameters
+        student_type = request.query_params.get('student_type') or request.query_params.get('college_type') or ''
+        student_type_str = str(student_type).strip().upper()
         department_id = request.query_params.get('department_id')
         batch_id = request.query_params.get('batch_id')
         section_id = request.query_params.get('section_id')
+        program_id = request.query_params.get('program_id')
         is_bus = request.query_params.get('is_bus')
         is_hostler = request.query_params.get('is_hostler')
         bus_id = request.query_params.get('bus_id')
@@ -135,7 +163,43 @@ class StudentViewSet(viewsets.ModelViewSet):
         status_id = request.query_params.get('status_id') or request.query_params.get('status')
         is_active = request.query_params.get('is_active')
         search = request.query_params.get('search')
-        
+
+        # ── Case 1: Outer Students Only ─────────────────────────────
+        if student_type_str == 'OUTER':
+            outer_qs = OuterStudent.objects.select_related('department', 'batch', 'program', 'regulation').all().order_by('-id')
+            if program_id:
+                outer_qs = outer_qs.filter(program_id=program_id)
+            if department_id:
+                outer_qs = outer_qs.filter(department_id=department_id)
+            if batch_id:
+                outer_qs = outer_qs.filter(batch_id=batch_id)
+            if search:
+                outer_qs = outer_qs.filter(
+                    Q(student_name__icontains=search) |
+                    Q(register_number__icontains=search)
+                )
+
+            page = self.paginate_queryset(outer_qs)
+            if page is not None:
+                outer_data = [self._serialize_outer_student(s) for s in page]
+                paginated_response = self.get_paginated_response(outer_data)
+                return Response({
+                    "code": 200,
+                    "message": "Outer students listed successfully",
+                    "data": paginated_response.data
+                }, status=status.HTTP_200_OK)
+
+            outer_data = [self._serialize_outer_student(s) for s in outer_qs]
+            return Response({
+                "code": 200,
+                "message": "Outer students listed successfully",
+                "data": outer_data
+            }, status=status.HTTP_200_OK)
+
+        # ── Query internal students queryset ─────────────────────────
+        queryset = self.get_queryset()
+        if program_id:
+            queryset = queryset.filter(department__program_id=program_id)
         if department_id:
             queryset = queryset.filter(department_id=department_id)
         if batch_id:
@@ -183,10 +247,75 @@ class StudentViewSet(viewsets.ModelViewSet):
                 Q(stop__stop_name__icontains=search)
             )
 
+        # ── Case 2: All Students (Combined Internal & Outer) ─────────
+        if student_type_str == 'ALL':
+            outer_qs = OuterStudent.objects.select_related('department', 'batch', 'program', 'regulation').all().order_by('-id')
+            if program_id:
+                outer_qs = outer_qs.filter(program_id=program_id)
+            if department_id:
+                outer_qs = outer_qs.filter(department_id=department_id)
+            if batch_id:
+                outer_qs = outer_qs.filter(batch_id=batch_id)
+            if search:
+                outer_qs = outer_qs.filter(
+                    Q(student_name__icontains=search) |
+                    Q(register_number__icontains=search)
+                )
+
+            n_internal = queryset.count()
+            n_outer = outer_qs.count()
+            total_count = n_internal + n_outer
+
+            try:
+                page_num = max(1, int(request.query_params.get('page', 1)))
+            except (ValueError, TypeError):
+                page_num = 1
+            try:
+                page_size = max(1, int(request.query_params.get('page_size', 10)))
+            except (ValueError, TypeError):
+                page_size = 10
+
+            offset = (page_num - 1) * page_size
+            combined_results = []
+
+            if offset < n_internal:
+                internal_slice = queryset[offset : min(offset + page_size, n_internal)]
+                ser_data = self.get_serializer(internal_slice, many=True).data
+                for item in ser_data:
+                    item['is_outer'] = False
+                    item['student_type'] = 'INTERNAL'
+                    combined_results.append(item)
+
+                rem = page_size - len(combined_results)
+                if rem > 0 and n_outer > 0:
+                    outer_slice = outer_qs[0 : min(rem, n_outer)]
+                    for o in outer_slice:
+                        combined_results.append(self._serialize_outer_student(o))
+            else:
+                outer_offset = offset - n_internal
+                if outer_offset < n_outer:
+                    outer_slice = outer_qs[outer_offset : min(outer_offset + page_size, n_outer)]
+                    for o in outer_slice:
+                        combined_results.append(self._serialize_outer_student(o))
+
+            return Response({
+                "code": 200,
+                "message": "Students listed successfully",
+                "data": {
+                    "count": total_count,
+                    "results": combined_results
+                }
+            }, status=status.HTTP_200_OK)
+
+        # ── Case 3: Standard Internal Students (Default / INTERNAL) ──
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
-            paginated_response = self.get_paginated_response(serializer.data)
+            data_list = serializer.data
+            for item in data_list:
+                item['is_outer'] = False
+                item['student_type'] = 'INTERNAL'
+            paginated_response = self.get_paginated_response(data_list)
             return Response({
                 "code": 200,
                 "message": "Students listed successfully",
@@ -194,10 +323,14 @@ class StudentViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_200_OK)
 
         serializer = self.get_serializer(queryset, many=True)
+        data_list = serializer.data
+        for item in data_list:
+            item['is_outer'] = False
+            item['student_type'] = 'INTERNAL'
         return Response({
             "code": 200,
             "message": "Students listed successfully",
-            "data": serializer.data
+            "data": data_list
         }, status=status.HTTP_200_OK)
 
     def retrieve(self, request, *args, **kwargs):
@@ -217,6 +350,33 @@ class StudentViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
+        pk = kwargs.get('pk')
+        is_outer = request.data.get('is_outer') or request.query_params.get('is_outer') == 'true'
+        if is_outer or (OuterStudent.objects.filter(pk=pk).exists() and not Student.objects.filter(pk=pk).exists()):
+            outer = OuterStudent.objects.filter(pk=pk).first()
+            if outer:
+                if 'student_name' in request.data:
+                    outer.student_name = request.data['student_name']
+                if 'register_number' in request.data:
+                    outer.register_number = request.data['register_number']
+                if 'department_id' in request.data and request.data['department_id']:
+                    outer.department_id = request.data['department_id']
+                if 'batch_id' in request.data and request.data['batch_id']:
+                    outer.batch_id = request.data['batch_id']
+                if 'program_id' in request.data and request.data['program_id']:
+                    outer.program_id = request.data['program_id']
+                outer.save()
+                return Response({
+                    "code": 200,
+                    "message": "Outer student updated successfully",
+                    "data": {
+                        "id": outer.id,
+                        "register_number": outer.register_number,
+                        "student_name": outer.student_name,
+                        "is_outer": True
+                    }
+                }, status=status.HTTP_200_OK)
+
         partial = kwargs.pop('partial', True)
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
@@ -231,6 +391,17 @@ class StudentViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_200_OK)
 
     def destroy(self, request, *args, **kwargs):
+        pk = kwargs.get('pk')
+        is_outer = request.query_params.get('is_outer') == 'true'
+        if is_outer or (OuterStudent.objects.filter(pk=pk).exists() and not Student.objects.filter(pk=pk).exists()):
+            outer = OuterStudent.objects.filter(pk=pk).first()
+            if outer:
+                outer.delete()
+                return Response({
+                    "code": 200,
+                    "message": "Outer student deleted successfully"
+                }, status=status.HTTP_200_OK)
+
         instance = self.get_object()
         student_id = instance.id
         StudentAdmissionSlip.objects.filter(student=instance).delete()

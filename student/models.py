@@ -669,3 +669,48 @@ class BonafideCertificate(TrackingModel):
     def __str__(self):
         return f"{self.certificate_number} - {self.student_name} ({self.issue_date})"
 
+
+class OuterStudent(TrackingModel):
+    """Stores students from other colleges (Outer College)."""
+    register_number = models.CharField(max_length=50, unique=True)
+    student_name = models.CharField(max_length=255, null=True, blank=True)
+    program = models.ForeignKey(
+        'institution.Program',
+        on_delete=models.SET_NULL,
+        db_column='program_id',
+        related_name='outer_students',
+        null=True,
+        blank=True
+    )
+    department = models.ForeignKey(
+        'institution.Department',
+        on_delete=models.SET_NULL,
+        db_column='department_id',
+        related_name='outer_students',
+        null=True,
+        blank=True
+    )
+    batch = models.ForeignKey(
+        'institution.Batch',
+        on_delete=models.SET_NULL,
+        db_column='batch_id',
+        related_name='outer_students',
+        null=True,
+        blank=True
+    )
+    regulation = models.ForeignKey(
+        'institution.Regulation',
+        on_delete=models.SET_NULL,
+        db_column='regulation_id',
+        related_name='outer_students',
+        null=True,
+        blank=True
+    )
+
+    class Meta:
+        db_table = 'outer_student'
+
+    def __str__(self):
+        return f"{self.register_number} - {self.student_name}"
+
+
