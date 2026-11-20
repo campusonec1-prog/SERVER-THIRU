@@ -4670,8 +4670,8 @@ class StudentViewSet(viewsets.ModelViewSet):
              Paragraph("<b>Section:</b>", lbl_bold), Paragraph(str(meta['section']), val_norm)],
             [Paragraph("<b>Semesters:</b>", lbl_bold), Paragraph(str(meta['semesters_covered']), val_norm),
              Paragraph("<b>Total Students / Groups:</b>", lbl_bold), Paragraph(f"<b>{summary['total_students']} Students</b> ({len(groups_list)} Groups)", val_norm)],
-            [Paragraph("<b>Prev. Arrears:</b>", lbl_bold), Paragraph(f"₹{summary['total_prev_balance_fees']:,.2f}", val_norm),
-             Paragraph("<b>Total Net Due:</b>", lbl_bold), Paragraph(f"<b>₹{summary['total_net_due']:,.2f}</b>", val_norm)],
+            [Paragraph("<b>Prev. Arrears:</b>", lbl_bold), Paragraph(f"Rs. {summary['total_prev_balance_fees']:,.2f}", val_norm),
+             Paragraph("<b>Total Net Due:</b>", lbl_bold), Paragraph(f"<b>Rs. {summary['total_net_due']:,.2f}</b>", val_norm)],
         ]
         meta_table = Table(meta_data, colWidths=[90, 185, 105, 175])
         meta_table.setStyle(TableStyle([
