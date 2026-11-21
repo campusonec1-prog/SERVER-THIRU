@@ -60,6 +60,7 @@ urlpatterns = [
 
     # Hall Allocations
     path('hall-allocations/list', ExamHallAllocationViewSet.as_view({'get': 'list'}), name='univ-exam-hall-alloc-list'),
+    path('hall-allocations/summary', ExamHallAllocationViewSet.as_view({'get': 'summary'}), name='univ-exam-hall-alloc-summary'),
     path('hall-allocations/create', ExamHallAllocationViewSet.as_view({'post': 'create'}), name='univ-exam-hall-alloc-create'),
     path('hall-allocations/get/<int:pk>', ExamHallAllocationViewSet.as_view({'get': 'retrieve'}), name='univ-exam-hall-alloc-detail'),
     path('hall-allocations/edit/<int:pk>', ExamHallAllocationViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='univ-exam-hall-alloc-edit'),

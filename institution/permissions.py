@@ -10,7 +10,7 @@ class ProgramPermission(BaseRolePermission):
 
 class DepartmentPermission(BaseRolePermission):
     read_roles = ['anyone']
-    write_roles = ['admin', 'administrator', 'hod', 'principal', 'office', 'manager']
+    write_roles = ['admin', 'administrator', 'hod', 'principal', 'office', 'manager', 'exam_cell', 'exam cell', 'exam cell member', 'exam_officer']
 
 
 class AcademicYearPermission(BaseRolePermission):

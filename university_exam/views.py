@@ -8,7 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from users.permissions import RestrictDeleteToTechSupporterPermission
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Sum
 from django.utils import timezone
 
 from .models import (
@@ -200,7 +200,7 @@ def extract_candidates_from_table(table):
     - Register numbers with spaces or hyphens.
     - Reg no and student name in the same cell.
     - Two-column rosters on a single page.
-    - Name in adjacent column.
+    - Name in adjacent column or preceding/subsequent columns.
     """
     found = []
     if not table:
@@ -228,18 +228,28 @@ def extract_candidates_from_table(table):
                 if remainder and re.search(r'[A-Za-z]{2,}', remainder) and not remainder.isdigit():
                     name = remainder.split('\n')[0].strip()
 
-                # 2. Check subsequent cells for name
+                # 2. Check all other cells in this row (subsequent first, then preceding)
                 if not name:
-                    for nxt in range(i + 1, min(i + 3, len(cleaned))):
+                    cell_order = list(range(i + 1, len(cleaned))) + list(range(i - 1, -1, -1))
+                    for nxt in cell_order:
                         cand = cleaned[nxt]
-                        if not cand or cand in ['-', 'AB', 'A', 'P']:
+                        if not cand:
                             continue
-                        c_clean = cand.strip()
-                        if c_clean.isdigit() or len(c_clean.replace(' ', '')) >= 10:
+                        c_clean = str(cand).strip()
+                        if c_clean in ['-', '—', 'AB', 'A', 'P', 'OD', 'WH', 'ABSENT', 'PRESENT']:
+                            continue
+                        digits_only = re.sub(r'[\s\-]+', '', c_clean)
+                        if digits_only.isdigit():
                             continue
                         if re.search(r'[A-Za-z]{2,}', c_clean):
-                            name = c_clean.split('\n')[0].strip()
-                            break
+                            low_c = c_clean.lower()
+                            if any(h in low_c for h in ['reg', 'sl.no', 'ans', 'book', 'signature', 'college', 'centre', 'branch', 'subject', 'anna univ']):
+                                continue
+                            first_line = c_clean.split('\n')[0].strip()
+                            first_line = re.sub(r'^\d+[\.\s\-]+', '', first_line).strip()
+                            if re.search(r'[A-Za-z]{2,}', first_line):
+                                name = first_line
+                                break
 
                 found.append((reg_no, name))
             i += 1
@@ -270,10 +280,9 @@ def extract_candidates_from_text(raw_text):
             end_pos = reg_matches[idx + 1].start() if idx + 1 < len(reg_matches) else len(line_str)
             seg = line_str[start_pos:end_pos].strip(' \t\n\r-:|')
 
-            # Clean trailing numbers (booklet no, next sl.no, attendance status)
+            # Clean trailing numbers (booklet no, next sl.no, attendance status), without stripping initials
             seg = re.sub(r'\s+\d{1,4}\s*$', '', seg)
-            seg = re.sub(r'\s+(?:\d{4,9}|AB|OD|WH|ABSENT|PRESENT|[AP])\s*$', '', seg, flags=re.IGNORECASE).strip()
-            seg = re.sub(r'\s+(?:\d{4,9}|AB|OD|WH|ABSENT|PRESENT|[AP])\s*$', '', seg, flags=re.IGNORECASE).strip()
+            seg = re.sub(r'\s+(?:AB|OD|WH|ABSENT|PRESENT)\b\s*$', '', seg, flags=re.IGNORECASE).strip()
             seg = seg.strip(' \t-:|')
 
             name = seg if re.search(r'[A-Za-z]{2,}', seg) else ''
@@ -664,10 +673,14 @@ class ExamAttendanceImportViewSet(viewsets.ModelViewSet):
                         matched_dept_for_row = d
                         break
 
+            extracted_name = (row.get('student_name') or '').strip()
+            final_name = extracted_name or (db_s['name'] if db_s else '')
+
             students_analysis.append({
                 'key': f"{idx}_{r_no}",
                 'register_no': r_no,
-                'student_name': row.get('student_name') or '',
+                'student_name': final_name,
+                'raw_name_in_pdf': extracted_name,
                 'branch_code': b_code,
                 'branch_name': b_name,
                 'subject_code': row.get('subject_code') or '',
@@ -924,24 +937,41 @@ class ExamAttendanceImportViewSet(viewsets.ModelViewSet):
         from subject.models import Subject
         from student.models import Student, StudentStatus
 
-        # Pre-cache mapped departments and subjects
+        # Pre-cache mapped departments and subjects safely (handling string/invalid IDs)
         dept_cache = {}
         for b_code, d_id in department_mappings.items():
-            if d_id:
-                dept_obj = Department.objects.filter(id=d_id).first()
+            if d_id and str(d_id).isdigit():
+                dept_obj = Department.objects.filter(id=int(d_id)).first()
+                if dept_obj:
+                    dept_cache[b_code] = dept_obj
+            elif d_id and isinstance(d_id, str) and d_id.strip() not in ['undefined', 'null', '']:
+                dept_obj = Department.objects.filter(department_code__iexact=d_id.strip()).first()
                 if dept_obj:
                     dept_cache[b_code] = dept_obj
 
         subj_cache = {}
         for s_key, s_id in subject_mappings.items():
-            if s_id:
-                subj_obj = Subject.objects.filter(id=s_id).first()
+            if s_id and str(s_id).isdigit():
+                subj_obj = Subject.objects.filter(id=int(s_id)).first()
+                if subj_obj:
+                    subj_cache[s_key] = subj_obj
+            elif s_id and isinstance(s_id, str) and s_id.strip() not in ['undefined', 'null', '']:
+                subj_obj = Subject.objects.filter(subject_code__iexact=s_id.strip()).first()
                 if subj_obj:
                     subj_cache[s_key] = subj_obj
 
         # Fallbacks
-        fallback_dept = Department.objects.filter(id=default_dept_id).first() if default_dept_id else Department.objects.first()
-        fallback_subj = Subject.objects.filter(id=default_subj_id).first() if default_subj_id else Subject.objects.first()
+        fallback_dept = None
+        if default_dept_id and str(default_dept_id).isdigit():
+            fallback_dept = Department.objects.filter(id=int(default_dept_id)).first()
+        if not fallback_dept:
+            fallback_dept = Department.objects.first()
+
+        fallback_subj = None
+        if default_subj_id and str(default_subj_id).isdigit():
+            fallback_subj = Subject.objects.filter(id=int(default_subj_id)).first()
+        if not fallback_subj:
+            fallback_subj = Subject.objects.first()
 
         saved_attendance_count = 0
         new_students_created = 0
@@ -998,8 +1028,8 @@ class ExamAttendanceImportViewSet(viewsets.ModelViewSet):
                 # Resolve or Create Student
                 student_id = row.get('student_id')
                 student = None
-                if student_id:
-                    student = Student.objects.filter(id=student_id).first()
+                if student_id and str(student_id).isdigit():
+                    student = Student.objects.filter(id=int(student_id)).first()
                 if not student:
                     student = Student.objects.filter(register_number=reg_no).first()
 
@@ -1133,13 +1163,14 @@ class ExamAttendanceImportViewSet(viewsets.ModelViewSet):
 
 class UniversityExamScheduleViewSet(viewsets.ModelViewSet):
     queryset = UniversityExamSchedule.objects.select_related(
-        'department', 'subject',
+        'department', 'subject', 'subject__semester', 'subject__regulation',
         'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
     ).annotate(
         student_count=Count('attendances')
-    ).all().order_by('-exam_date', 'session')
+    ).all().order_by('-exam_date', '-session')
     serializer_class = UniversityExamScheduleSerializer
     permission_classes = [IsAuthenticated, RestrictDeleteToTechSupporterPermission]
+    pagination_class = None
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1181,7 +1212,7 @@ class UniversityExamScheduleViewSet(viewsets.ModelViewSet):
         for schedule in schedules:
             attendances = UniversityExamAttendance.objects.filter(
                 exam_schedule=schedule
-            ).select_related('student', 'department', 'exam_schedule__subject')
+            ).select_related('student', 'department', 'exam_schedule__subject', 'exam_schedule__subject__semester')
             for att in attendances:
                 all_attendances.append(att)
 
@@ -1244,20 +1275,60 @@ class UniversityExamScheduleViewSet(viewsets.ModelViewSet):
             while any(ds_queues):
                 for q in ds_queues:
                     if q: mixed_students.append(q.pop(0))
-        elif 'DEPARTMENT_MIX' in strategies:
+        elif 'DEPARTMENT_MIX' in strategies or True:
+            # Pairwise top-2 department swap:
+            # 1. Sort departments by candidate count descending
+            # 2. Within each department, sort by semester descending, then register_number
+            # 3. Pair top 2 departments and alternate 1-by-1 (A, B, A, B...)
+            # 4. When a department runs out, smoothly pair with the next available department
             from collections import defaultdict
             dept_groups = defaultdict(list)
             for att in all_attendances:
                 dept_groups[att.department_id].append(att)
-            # Sort queues by size descending: [CSE(242), IT(116), AI&DS(87), ECE(57), ...]
-            dept_queues = sorted(list(dept_groups.values()), key=len, reverse=True)
-            
-            # Round-robin: take 1 from each department in order, then repeat
-            # This perfectly spaces out departments and gracefully handles when smaller ones run out
-            while any(dept_queues):
-                for q in dept_queues:
-                    if q:
-                        mixed_students.append(q.pop(0))
+
+            # Sort each department's students: highest semester first, then register_number
+            for dept_id, att_list in dept_groups.items():
+                att_list.sort(key=lambda x: (
+                    -(x.exam_schedule.subject.semester.semester_number if x.exam_schedule.subject and x.exam_schedule.subject.semester else 0),
+                    x.student.register_number if x.student else ''
+                ))
+
+            # Sort departments descending by candidate count
+            sorted_depts = sorted(dept_groups.items(), key=lambda kv: len(kv[1]), reverse=True)
+            queues = [list(att_list) for _, att_list in sorted_depts if len(att_list) > 0]
+
+            curr_q_idx_a = 0
+            curr_q_idx_b = 1 if len(queues) > 1 else None
+            turn = 0
+
+            while any(q for q in queues):
+                while curr_q_idx_a < len(queues) and len(queues[curr_q_idx_a]) == 0:
+                    curr_q_idx_a = max(curr_q_idx_a, curr_q_idx_b + 1 if curr_q_idx_b is not None else curr_q_idx_a + 1)
+
+                if curr_q_idx_b is not None:
+                    while curr_q_idx_b < len(queues) and (len(queues[curr_q_idx_b]) == 0 or curr_q_idx_b == curr_q_idx_a):
+                        curr_q_idx_b += 1
+                    if curr_q_idx_b >= len(queues):
+                        curr_q_idx_b = None
+
+                if curr_q_idx_a < len(queues) and len(queues[curr_q_idx_a]) > 0 and curr_q_idx_b is not None and len(queues[curr_q_idx_b]) > 0:
+                    if turn == 0:
+                        mixed_students.append(queues[curr_q_idx_a].pop(0))
+                        turn = 1
+                    else:
+                        mixed_students.append(queues[curr_q_idx_b].pop(0))
+                        turn = 0
+                elif curr_q_idx_a < len(queues) and len(queues[curr_q_idx_a]) > 0:
+                    mixed_students.append(queues[curr_q_idx_a].pop(0))
+                elif curr_q_idx_b is not None and len(queues[curr_q_idx_b]) > 0:
+                    mixed_students.append(queues[curr_q_idx_b].pop(0))
+                else:
+                    remaining = [i for i, q in enumerate(queues) if len(q) > 0]
+                    if not remaining:
+                        break
+                    curr_q_idx_a = remaining[0]
+                    curr_q_idx_b = remaining[1] if len(remaining) > 1 else None
+                    turn = 0
         elif 'REVERSE_SEQUENTIAL' in strategies:
             mixed_students = list(reversed(all_attendances))
         elif 'RANDOM' in strategies:
@@ -1266,6 +1337,48 @@ class UniversityExamScheduleViewSet(viewsets.ModelViewSet):
             random.shuffle(mixed_students)
         else:
             mixed_students = all_attendances
+
+        total_students = len(mixed_students)
+        if total_students == 0:
+            return Response({'error': 'No attendance records found for these schedules'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Plan capacities per hall:
+        # - Standard capacity: 25
+        # - Min capacity: 20
+        # - Max capacity: 28 (if remainder < 20, add as +3 into preceding halls)
+        if total_students <= 28:
+            hall_capacities = [total_students]
+        else:
+            num_full = total_students // 25
+            remainder = total_students % 25
+            if remainder == 0:
+                hall_capacities = [25] * num_full
+            elif remainder >= 20:
+                hall_capacities = [25] * num_full + [remainder]
+            else:
+                # Remainder < 20: distribute to preceding halls (+3 max each)
+                if num_full * 3 >= remainder:
+                    hall_capacities = [25] * num_full
+                    rem = remainder
+                    for i in range(num_full):
+                        if rem <= 0:
+                            break
+                        add = min(3, rem)
+                        hall_capacities[i] += add
+                        rem -= add
+                else:
+                    h_count = num_full + 1
+                    base = total_students // h_count
+                    extra = total_students % h_count
+                    hall_capacities = [base] * h_count
+                    for i in range(extra):
+                        hall_capacities[i] += 1
+
+        if len(available_halls) < len(hall_capacities):
+            shortfall = len(hall_capacities) - len(available_halls)
+            return Response({
+                'error': f'Halls not available for all students. Need {len(hall_capacities)} halls, but only {len(available_halls)} available. Please add {shortfall} more hall(s).'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         # Clear old allocations for this date+session
         ExamSeatAllocation.objects.filter(exam_schedule__in=schedules).delete()
@@ -1276,15 +1389,11 @@ class UniversityExamScheduleViewSet(viewsets.ModelViewSet):
             hall_order = 1
             allocations_created = 0
 
-            for hall in available_halls:
+            for h_idx, capacity in enumerate(hall_capacities):
                 if student_idx >= len(mixed_students):
                     break
 
-                capacity = min(hall.max_capacity, hall.rows_count * hall.columns_count, len(mixed_students) - student_idx)
-                if capacity < hall.min_capacity and student_idx + capacity < len(mixed_students):
-                    capacity = hall.max_capacity
-
-                # Group students for this hall by their schedule
+                hall = available_halls[h_idx]
                 hall_students = mixed_students[student_idx:student_idx + capacity]
 
                 # Create one ExamHallAllocation per schedule that has students in this hall
@@ -1295,54 +1404,131 @@ class UniversityExamScheduleViewSet(viewsets.ModelViewSet):
                             exam_schedule=att.exam_schedule,
                             exam_hall=hall,
                             allocation_order=hall_order,
-                            planned_capacity=hall.max_capacity,
+                            planned_capacity=capacity,
                             allocated_students=0,
                             status='ALLOCATED',
                         )
                         schedule_in_hall[att.exam_schedule_id] = ha
 
-                # Generate seat layout sequence based on strategy
-                total_seats = hall.rows_count * hall.columns_count
-                available_seats = list(range(1, total_seats + 1))
-                
-                if 'ZIGZAG' in strategies:
-                    seat_sequence = []
-                    for r in range(hall.rows_count):
-                        row_seats = list(range(r * hall.columns_count + 1, (r + 1) * hall.columns_count + 1))
-                        if r % 2 == 1:
-                            row_seats.reverse()
-                        seat_sequence.extend(row_seats)
-                elif 'W_SHAPE' in strategies:
-                    # Column-major seat numbering:
-                    # Seat 1,2,3,4,5 go DOWN column 1
-                    # Seat 6,7,8,9,10 go DOWN column 2, etc.
-                    # With pairwise A,B,A,B this creates a perfect checkerboard
-                    seat_sequence = list(range(1, total_seats + 1))
-                else:
-                    seat_sequence = available_seats
+                # Group hall students by department and sort ascending by register_number
+                from collections import defaultdict
+                hall_dept_groups = defaultdict(list)
+                for att in hall_students:
+                    hall_dept_groups[att.department_id].append(att)
+                for d_id in hall_dept_groups:
+                    hall_dept_groups[d_id].sort(key=lambda x: x.student.register_number if x.student else '')
 
-                # Create seat allocations
-                is_column_major = 'W_SHAPE' in strategies
-                for idx, att in enumerate(hall_students):
-                    seat_offset = seat_sequence[idx] if idx < len(seat_sequence) else available_seats[idx % len(available_seats)]
-                    if is_column_major:
-                        # Column-major: seat 1→r1c1, seat 2→r2c1, seat 5→r5c1, seat 6→r1c2
-                        row_num = ((seat_offset - 1) % hall.rows_count) + 1
-                        col_num = ((seat_offset - 1) // hall.rows_count) + 1
+                sorted_hall_depts = sorted(hall_dept_groups.keys(), key=lambda d: len(hall_dept_groups[d]), reverse=True)
+
+                # Sequential seat allocation without in-between gaps:
+                # - If hall has K <= 25 students: available seats are EXACTLY 1, 2, ..., K (NO gaps, no 26..28)
+                # - If K == 26: seats 1..25, plus 26
+                # - If K == 27: seats 1..25, plus 26, 28
+                # - If K >= 28: seats 1..25, plus 26, 28, 27
+                K = len(hall_students)
+                if K <= 25:
+                    available_seats = list(range(1, K + 1))
+                elif K == 26:
+                    available_seats = list(range(1, 26)) + [26]
+                elif K == 27:
+                    available_seats = list(range(1, 26)) + [26, 28]
+                else:
+                    available_seats = list(range(1, 26)) + [26, 28, 27]
+
+                # Partition available seats into checkerboard odds, evens, and extras
+                odds_seats = [s for s in available_seats if s <= 25 and s % 2 == 1]
+                evens_seats = [s for s in available_seats if s <= 25 and s % 2 == 0]
+                extra_seats = [s for s in available_seats if s > 25]
+
+                needed_odds = len(odds_seats)
+                needed_evens = len(evens_seats)
+                needed_extras = len(extra_seats)
+
+                pool_odds = []
+                pool_evens = []
+                pool_extras = []
+
+                if len(sorted_hall_depts) == 1:
+                    d_students = list(hall_dept_groups[sorted_hall_depts[0]])
+                    pool_odds = d_students[:needed_odds]
+                    rem = d_students[needed_odds:]
+                    pool_evens = rem[:needed_evens]
+                    pool_extras = rem[needed_evens:]
+                else:
+                    # Alternating department allocation across odds and evens
+                    dept_queues = [list(hall_dept_groups[d]) for d in sorted_hall_depts]
+                    
+                    # Primary: Dept 1 for Odds, Dept 2 for Evens
+                    d1_q = dept_queues[0]
+                    d2_q = dept_queues[1]
+                    
+                    take_d1 = min(len(d1_q), needed_odds)
+                    pool_odds.extend(d1_q[:take_d1])
+                    d1_q = d1_q[take_d1:]
+                    
+                    take_d2 = min(len(d2_q), needed_evens)
+                    pool_evens.extend(d2_q[:take_d2])
+                    d2_q = d2_q[take_d2:]
+                    
+                    # Remaining students from Dept 1, Dept 2, and any subsequent departments
+                    remaining_pool = []
+                    for q in [d1_q, d2_q] + dept_queues[2:]:
+                        remaining_pool.extend(q)
+                    
+                    # Fill odds if still needed
+                    short_odds = needed_odds - len(pool_odds)
+                    if short_odds > 0:
+                        pool_odds.extend(remaining_pool[:short_odds])
+                        remaining_pool = remaining_pool[short_odds:]
+                    
+                    # Fill evens if still needed
+                    short_evens = needed_evens - len(pool_evens)
+                    if short_evens > 0:
+                        pool_evens.extend(remaining_pool[:short_evens])
+                        remaining_pool = remaining_pool[short_evens:]
+                    
+                    # Remaining students fill extra seats (26, 28, 27)
+                    pool_extras.extend(remaining_pool)
+
+                seat_assignments = []
+                for s_num in odds_seats:
+                    if pool_odds:
+                        seat_assignments.append((s_num, pool_odds.pop(0)))
+                for s_num in evens_seats:
+                    if pool_evens:
+                        seat_assignments.append((s_num, pool_evens.pop(0)))
+                for s_num in extra_seats:
+                    if pool_extras:
+                        seat_assignments.append((s_num, pool_extras.pop(0)))
+
+                # Create seat allocation database records
+                for seat_offset, chosen_att in seat_assignments:
+                    if seat_offset <= 25:
+                        row_num = ((seat_offset - 1) % 5) + 1
+                        col_num = ((seat_offset - 1) // 5) + 1
+                    elif seat_offset == 26:
+                        row_num = 0
+                        col_num = 1
+                    elif seat_offset == 27:
+                        row_num = 0
+                        col_num = 5
+                    elif seat_offset == 28:
+                        row_num = 0
+                        col_num = 3
                     else:
-                        # Row-major: seat 1→r1c1, seat 2→r1c2, seat 5→r1c5, seat 6→r2c1
-                        row_num = ((seat_offset - 1) // hall.columns_count) + 1
-                        col_num = ((seat_offset - 1) % hall.columns_count) + 1
-                    ha = schedule_in_hall[att.exam_schedule_id]
+                        row_num = ((seat_offset - 1) % 5) + 1
+                        col_num = ((seat_offset - 1) // 5) + 1
+
+                    ha = schedule_in_hall[chosen_att.exam_schedule_id]
                     ExamSeatAllocation.objects.create(
-                        exam_schedule=att.exam_schedule,
+                        exam_schedule=chosen_att.exam_schedule,
                         hall_allocation=ha,
-                        student=att.student,
+                        student=chosen_att.student,
                         seat_number=seat_offset,
                         row_number=row_num,
                         column_number=col_num,
-                        department=att.department,
-                        subject=att.exam_schedule.subject,
+                        department=chosen_att.department,
+                        subject=chosen_att.exam_schedule.subject,
                         allocation_status='ALLOCATED',
                     )
                     allocations_created += 1
@@ -1367,6 +1553,7 @@ class UniversityExamAttendanceViewSet(viewsets.ModelViewSet):
     ).all().order_by('exam_schedule', 'student__register_number')
     serializer_class = UniversityExamAttendanceSerializer
     permission_classes = [IsAuthenticated, RestrictDeleteToTechSupporterPermission]
+    pagination_class = None
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1409,15 +1596,16 @@ class ExamHallAllocationViewSet(viewsets.ModelViewSet):
             'exam_schedule__exam_date', 'exam_schedule__session'
         ).annotate(
             total_students=Sum('allocated_students'),
-            total_halls=Count('exam_hall', distinct=True)
-        ).order_by('-exam_schedule__exam_date', 'exam_schedule__session')
+            total_halls=Count('exam_hall', distinct=True),
+            total_departments=Count('exam_schedule__department', distinct=True)
+        ).order_by('-exam_schedule__exam_date', '-exam_schedule__session')
         return Response(list(qs))
 
 
 class ExamSeatAllocationViewSet(viewsets.ModelViewSet):
     queryset = ExamSeatAllocation.objects.select_related(
         'exam_schedule', 'hall_allocation__exam_hall__hall__floor__block',
-        'student', 'department', 'subject'
+        'student', 'department', 'subject', 'subject__regulation', 'subject__semester'
     ).all().order_by('hall_allocation', 'seat_number')
     serializer_class = ExamSeatAllocationSerializer
     permission_classes = [IsAuthenticated, RestrictDeleteToTechSupporterPermission]
