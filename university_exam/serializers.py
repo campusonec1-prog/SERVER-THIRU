@@ -24,8 +24,8 @@ class UniversityExamHallSerializer(TrackingModelSerializerMixin, serializers.Mod
 
     def validate(self, attrs):
         # Handle instance updates where attrs might be partial
-        min_cap = attrs.get('min_capacity', getattr(self.instance, 'min_capacity', 25))
-        max_cap = attrs.get('max_capacity', getattr(self.instance, 'max_capacity', 27))
+        min_cap = attrs.get('min_capacity', getattr(self.instance, 'min_capacity', 20))
+        max_cap = attrs.get('max_capacity', getattr(self.instance, 'max_capacity', 28))
         total = attrs.get('total_seats', getattr(self.instance, 'total_seats', 0))
 
         errors = {}

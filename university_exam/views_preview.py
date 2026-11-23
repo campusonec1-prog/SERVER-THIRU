@@ -19,6 +19,25 @@ def clean_str(val):
     return str(val).strip()
 
 
+def format_exam_title(raw):
+    """
+    Format exam title to end strictly with the 4-digit year.
+    E.g.: 'Nov./Dec.Examination,2026Examination' -> 'Nov./Dec.Examination,2026'
+          'Application for Nov./Dec.Examination,2026Examination' -> 'Nov./Dec.Examination,2026'
+    """
+    if not raw:
+        return ''
+    t = clean_str(raw)
+    t = re.sub(r'^Application\s+for\s+', '', t, flags=re.IGNORECASE).strip()
+    # Match strictly up to the 4-digit year
+    m = re.search(r'^(.*?\d{4})', t)
+    if m:
+        t = m.group(1).strip()
+    else:
+        t = re.sub(r'\s*(?:Examination|Exam)\s*$', '', t, flags=re.IGNORECASE).strip()
+    return t
+
+
 def clean_subject_title(t):
     """
     Format glued CamelCase or concatenated PDF titles into readable titles.
@@ -216,7 +235,15 @@ def parse_anna_univ_reg_preview_pdf(file_bytes):
             deg_branch = clean_str(deg_branch_match.group(1)) if deg_branch_match else ''
             regulations = clean_str(reg_year_match.group(1)) if reg_year_match else '2021'
             college = clean_str(college_match.group(1)) if college_match else ''
-            exam_title = clean_str(exam_title_match.group(1)) if exam_title_match else ''
+
+            # Extract clean Exam Name (e.g. 'Nov. / Dec. Examination, 2026')
+            exam_title = ''
+            if exam_title_match:
+                exam_title = format_exam_title(exam_title_match.group(1))
+            if not exam_title:
+                alt_et = re.search(r'([A-Za-z\.\s\/]+(?:Examination|Exam)\s*,?\s*\d{4}[A-Za-z]*)', raw_text, re.IGNORECASE)
+                if alt_et:
+                    exam_title = format_exam_title(alt_et.group(1))
 
             degree = 'B.E.'
             branch = deg_branch
@@ -322,6 +349,87 @@ def parse_anna_univ_reg_preview_pdf(file_bytes):
     return students
 
 
+def ensure_university_exam_created(exam_name_str):
+    """
+    Ensure ExamType ('University Exam') and Exam ('<exam_name>') exist in database.
+    Dynamically creates them if not present. Not hard-coded.
+    """
+    if not exam_name_str:
+        return None
+
+    cleaned_name = format_exam_title(exam_name_str)
+    if not cleaned_name:
+        return None
+
+    try:
+        from institution.models import ExamType, Exam
+        from common.caching import invalidate_option_cache
+
+        # 1. Find or create University ExamType in exam_type table
+        univ_type = ExamType.objects.filter(exam_type_name__iexact='University Exam').first()
+        if not univ_type:
+            univ_type = ExamType.objects.filter(exam_type_name__icontains='University').first()
+        if not univ_type:
+            univ_type = ExamType.objects.create(
+                exam_type_name='University Exam',
+                is_active=True
+            )
+            try:
+                invalidate_option_cache('exam_types')
+            except Exception:
+                pass
+
+        # 2. Find or create Exam under this ExamType in exams table
+        exam_obj = Exam.objects.filter(exam_name__iexact=cleaned_name).first()
+        if not exam_obj:
+            # Check if an exam exists with trailing text like 'Examination' and update it
+            exam_obj = Exam.objects.filter(exam_name__istartswith=cleaned_name).first()
+            if exam_obj:
+                exam_obj.exam_name = cleaned_name
+                exam_obj.exam_type = univ_type
+                exam_obj.is_active = True
+                exam_obj.save()
+                try:
+                    invalidate_option_cache('exams')
+                except Exception:
+                    pass
+            else:
+                exam_obj = Exam.objects.create(
+                    exam_name=cleaned_name,
+                    exam_type=univ_type,
+                    is_active=True
+                )
+                try:
+                    invalidate_option_cache('exams')
+                except Exception:
+                    pass
+        else:
+            updated = False
+            if not exam_obj.is_active:
+                exam_obj.is_active = True
+                updated = True
+            if exam_obj.exam_type_id != univ_type.id:
+                exam_obj.exam_type = univ_type
+                updated = True
+            if updated:
+                exam_obj.save()
+                try:
+                    invalidate_option_cache('exams')
+                except Exception:
+                    pass
+
+        return {
+            'id': exam_obj.id,
+            'exam_name': exam_obj.exam_name,
+            'exam_type_id': univ_type.id,
+            'exam_type_name': univ_type.exam_type_name,
+        }
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("ensure_university_exam_created error: %s", e)
+        return None
+
+
 class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
     """
     Handles Preview, Matching, Verification and Quick-add for Anna University
@@ -396,6 +504,17 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
             if parse_errors:
                 err_msg += f" (Errors: {'; '.join(parse_errors)})"
             return Response({'error': err_msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 0. Automatically record/sync the University Exam in the database (exams & exam_type tables)
+        detected_exam_title = ''
+        for cand in raw_candidates:
+            if cand.get('exam_title'):
+                detected_exam_title = cand['exam_title']
+                break
+
+        db_exam_info = None
+        if detected_exam_title:
+            db_exam_info = ensure_university_exam_created(detected_exam_title)
 
         # Preload DB master lookups
         all_departments = list(Department.objects.filter(is_active=True).values('id', 'department_code', 'department_name', 'short_name', 'program_id'))
@@ -647,7 +766,8 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
             'file_names': file_names,
             'file_stats': parsed_file_stats,
             'college': '',
-            'exam_title': raw_candidates[0]['exam_title'] if raw_candidates else '',
+            'exam_title': detected_exam_title or (raw_candidates[0]['exam_title'] if raw_candidates else ''),
+            'exam_info': db_exam_info,
             'college_type': college_type,
             'total_candidates': len(students_analysis),
             'students_found': len(students_analysis) - len(missing_students),
@@ -904,6 +1024,9 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
 
         created_count = 0
         added_list = []
+        to_create_inter = []
+        to_create_outer = []
+        to_update_inter = []
 
         with transaction.atomic():
             for item in students_data:
@@ -996,9 +1119,16 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                 if item_college_type == 'OUTER':
                     outer_stud = existing_outer_map.get(reg_no)
                     if outer_stud:
-                        created = False
+                        added_list.append({
+                            'id': outer_stud.id,
+                            'register_number': outer_stud.register_number,
+                            'student_name': outer_stud.student_name,
+                            'college_type': 'OUTER',
+                            'table': 'outer_student',
+                            'created': False
+                        })
                     else:
-                        outer_stud = OuterStudent.objects.create(
+                        outer_stud = OuterStudent(
                             register_number=reg_no,
                             student_name=s_name or reg_no,
                             program=program,
@@ -1007,17 +1137,8 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                             regulation=regulation,
                         )
                         existing_outer_map[reg_no] = outer_stud
-                        created = True
+                        to_create_outer.append(outer_stud)
                         created_count += 1
-
-                    added_list.append({
-                        'id': outer_stud.id,
-                        'register_number': outer_stud.register_number,
-                        'student_name': outer_stud.student_name,
-                        'college_type': 'OUTER',
-                        'table': 'outer_student',
-                        'created': created
-                    })
                 else:
                     # Section resolution in memory
                     sec_name = clean_str(item.get('section_name') or item.get('section') or 'Section: A')
@@ -1050,12 +1171,20 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
 
                     student = existing_inter_map.get(reg_no)
                     if student:
-                        created = False
                         if sec_obj and not student.section_id:
                             student.section = sec_obj
-                            student.save(update_fields=['section'])
+                            to_update_inter.append(student)
+                        added_list.append({
+                            'id': student.id,
+                            'register_number': student.register_number,
+                            'student_name': student.student_name,
+                            'college_type': 'INTER',
+                            'student_type': 'Inter College',
+                            'section_name': student.section.sections if student.section else '',
+                            'created': False
+                        })
                     else:
-                        student = Student.objects.create(
+                        student = Student(
                             register_number=reg_no,
                             student_name=s_name or reg_no,
                             department=dept,
@@ -1064,18 +1193,36 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                             status=status_obj
                         )
                         existing_inter_map[reg_no] = student
-                        created = True
+                        to_create_inter.append(student)
                         created_count += 1
 
+            if to_create_inter:
+                Student.objects.bulk_create(to_create_inter, batch_size=500)
+                for s in to_create_inter:
                     added_list.append({
-                        'id': student.id,
-                        'register_number': student.register_number,
-                        'student_name': student.student_name,
+                        'id': s.id,
+                        'register_number': s.register_number,
+                        'student_name': s.student_name,
                         'college_type': 'INTER',
                         'student_type': 'Inter College',
-                        'section_name': student.section.sections if student.section else '',
-                        'created': created
+                        'section_name': s.section.sections if s.section else '',
+                        'created': True
                     })
+
+            if to_create_outer:
+                OuterStudent.objects.bulk_create(to_create_outer, batch_size=500)
+                for s in to_create_outer:
+                    added_list.append({
+                        'id': s.id,
+                        'register_number': s.register_number,
+                        'student_name': s.student_name,
+                        'college_type': 'OUTER',
+                        'table': 'outer_student',
+                        'created': True
+                    })
+
+            if to_update_inter:
+                Student.objects.bulk_update(to_update_inter, ['section'], batch_size=500)
 
         inter_count = sum(1 for s in added_list if s.get('college_type') == 'INTER')
         outer_count = sum(1 for s in added_list if s.get('college_type') == 'OUTER')
@@ -1180,6 +1327,8 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
 
         created_count = 0
         added_list = []
+        to_create_subjects = []
+        to_update_subjects = []
 
         with transaction.atomic():
             for item in subjects_data:
@@ -1238,9 +1387,17 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                     if is_lab != subj.is_lab:
                         subj.is_lab = is_lab; updated = True
                     if updated:
-                        subj.save()
+                        to_update_subjects.append(subj)
+                    added_list.append({
+                        'id': subj.id,
+                        'subject_code': subj.subject_code,
+                        'subject_name': subj.subject_name,
+                        'credits': subj.credits,
+                        'regulation_code': reg_code,
+                        'created': False
+                    })
                 else:
-                    subj = Subject.objects.create(
+                    subj = Subject(
                         subject_code=s_code,
                         department=dept,
                         regulation=reg,
@@ -1252,17 +1409,23 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                         is_active=True,
                     )
                     existing_subjects[subj_key] = subj
-                    created = True
+                    to_create_subjects.append(subj)
                     created_count += 1
 
-                added_list.append({
-                    'id': subj.id,
-                    'subject_code': subj.subject_code,
-                    'subject_name': subj.subject_name,
-                    'credits': subj.credits,
-                    'regulation_code': reg_code,
-                    'created': created
-                })
+            if to_create_subjects:
+                Subject.objects.bulk_create(to_create_subjects, batch_size=500)
+                for subj in to_create_subjects:
+                    added_list.append({
+                        'id': subj.id,
+                        'subject_code': subj.subject_code,
+                        'subject_name': subj.subject_name,
+                        'credits': subj.credits,
+                        'regulation_code': subj.regulation.regulation_code if subj.regulation else '2025',
+                        'created': True
+                    })
+
+            if to_update_subjects:
+                Subject.objects.bulk_update(to_update_subjects, ['subject_name', 'credits', 'is_theory', 'is_lab'], batch_size=500)
 
         return Response({
             'success': True,
@@ -1360,6 +1523,10 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
 
         if not candidates:
             return Response({'error': 'No candidates to save.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        exam_title = request.data.get('exam_title') or (candidates[0].get('exam_title') if candidates else '')
+        if exam_title:
+            ensure_university_exam_created(exam_title)
 
         saved_records = 0
         with transaction.atomic():

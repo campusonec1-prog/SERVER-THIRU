@@ -111,6 +111,7 @@ def extract_metadata_from_text(raw_text):
         'subject_code': '', 'subject_name': '',
         'exam_date': None, 'session': '',
         'qp_code': '',
+        'exam_name': '',
     }
     if not raw_text:
         return meta
@@ -183,6 +184,14 @@ def extract_metadata_from_text(raw_text):
             m = re.search(r'(?:Q\.?P\.?\s*Code|Question\s*Paper\s*Code)\s*[:\-]\s*([0-9A-Za-z]+)', line_clean, re.IGNORECASE)
             if m:
                 meta['qp_code'] = m.group(1).strip()
+
+        # 7. Exam Name
+        if not meta['exam_name']:
+            m = re.search(r'(?:Application\s+for\s+|ANNA\s+UNIVERSITY\s+(?:THEORY\s+)?EXAMINATION[S]?\s*[-–:]?\s*)([^\r\n]+)', line_clean, re.IGNORECASE)
+            if m:
+                t = m.group(1).strip()
+                t = re.sub(r'\s+Examination\s*$', '', t, flags=re.IGNORECASE).strip()
+                meta['exam_name'] = t
 
     # Fallback to search for standard Anna University subject code (e.g. CS3351, ME3151) if not found in headers
     if not meta['subject_code']:
@@ -313,6 +322,7 @@ def parse_anna_university_pdf(file_bytes):
     active_exam_date = None
     active_session = ''
     active_qp_code = ''
+    active_exam_name = ''
 
     # Multi-engine PDF page extraction
     pdf_pages_data = []  # list of (page_num, raw_text, tables)
@@ -368,6 +378,13 @@ def parse_anna_university_pdf(file_bytes):
         if page_meta.get('exam_date'): active_exam_date = page_meta['exam_date']
         if page_meta.get('session'): active_session = page_meta['session']
         if page_meta.get('qp_code'): active_qp_code = page_meta['qp_code']
+        if page_meta.get('exam_name'):
+            active_exam_name = page_meta['exam_name']
+            try:
+                from .views_preview import ensure_university_exam_created
+                ensure_university_exam_created(active_exam_name)
+            except Exception:
+                pass
 
         # 2. Extract candidates from tables
         candidates = []
@@ -1240,7 +1257,7 @@ class UniversityExamScheduleViewSet(viewsets.ModelViewSet):
         # Calculate total available capacity
         total_capacity = 0
         for hall in available_halls:
-            total_capacity += min(hall.max_capacity, hall.rows_count * hall.columns_count)
+            total_capacity += hall.max_capacity
 
         total_students = len(all_attendances)
         if total_capacity < total_students:
@@ -1295,40 +1312,41 @@ class UniversityExamScheduleViewSet(viewsets.ModelViewSet):
 
             # Sort departments descending by candidate count
             sorted_depts = sorted(dept_groups.items(), key=lambda kv: len(kv[1]), reverse=True)
-            queues = [list(att_list) for _, att_list in sorted_depts if len(att_list) > 0]
+            dept_queues = [list(att_list) for _, att_list in sorted_depts if len(att_list) > 0]
 
-            curr_q_idx_a = 0
-            curr_q_idx_b = 1 if len(queues) > 1 else None
+            active_a = 0
+            active_b = 1 if len(dept_queues) > 1 else None
             turn = 0
 
-            while any(q for q in queues):
-                while curr_q_idx_a < len(queues) and len(queues[curr_q_idx_a]) == 0:
-                    curr_q_idx_a = max(curr_q_idx_a, curr_q_idx_b + 1 if curr_q_idx_b is not None else curr_q_idx_a + 1)
+            while True:
+                if active_a is not None and (active_a >= len(dept_queues) or len(dept_queues[active_a]) == 0):
+                    active_a = None
+                    for i, q in enumerate(dept_queues):
+                        if len(q) > 0 and i != active_b:
+                            active_a = i
+                            break
 
-                if curr_q_idx_b is not None:
-                    while curr_q_idx_b < len(queues) and (len(queues[curr_q_idx_b]) == 0 or curr_q_idx_b == curr_q_idx_a):
-                        curr_q_idx_b += 1
-                    if curr_q_idx_b >= len(queues):
-                        curr_q_idx_b = None
+                if active_b is not None and (active_b >= len(dept_queues) or len(dept_queues[active_b]) == 0 or active_b == active_a):
+                    active_b = None
+                    for i, q in enumerate(dept_queues):
+                        if len(q) > 0 and i != active_a:
+                            active_b = i
+                            break
 
-                if curr_q_idx_a < len(queues) and len(queues[curr_q_idx_a]) > 0 and curr_q_idx_b is not None and len(queues[curr_q_idx_b]) > 0:
+                if active_a is None and active_b is None:
+                    break
+
+                if active_a is not None and active_b is not None:
                     if turn == 0:
-                        mixed_students.append(queues[curr_q_idx_a].pop(0))
+                        mixed_students.append(dept_queues[active_a].pop(0))
                         turn = 1
                     else:
-                        mixed_students.append(queues[curr_q_idx_b].pop(0))
+                        mixed_students.append(dept_queues[active_b].pop(0))
                         turn = 0
-                elif curr_q_idx_a < len(queues) and len(queues[curr_q_idx_a]) > 0:
-                    mixed_students.append(queues[curr_q_idx_a].pop(0))
-                elif curr_q_idx_b is not None and len(queues[curr_q_idx_b]) > 0:
-                    mixed_students.append(queues[curr_q_idx_b].pop(0))
-                else:
-                    remaining = [i for i, q in enumerate(queues) if len(q) > 0]
-                    if not remaining:
-                        break
-                    curr_q_idx_a = remaining[0]
-                    curr_q_idx_b = remaining[1] if len(remaining) > 1 else None
-                    turn = 0
+                elif active_a is not None:
+                    mixed_students.append(dept_queues[active_a].pop(0))
+                elif active_b is not None:
+                    mixed_students.append(dept_queues[active_b].pop(0))
         elif 'REVERSE_SEQUENTIAL' in strategies:
             mixed_students = list(reversed(all_attendances))
         elif 'RANDOM' in strategies:
@@ -1347,7 +1365,7 @@ class UniversityExamScheduleViewSet(viewsets.ModelViewSet):
         # - Min capacity: 20
         # - Max capacity: 28 (if remainder < 20, add as +3 into preceding halls)
         if total_students <= 28:
-            hall_capacities = [total_students]
+            hall_capacities = [max(20, total_students)]
         else:
             num_full = total_students // 25
             remainder = total_students % 25
@@ -1388,6 +1406,8 @@ class UniversityExamScheduleViewSet(viewsets.ModelViewSet):
             student_idx = 0
             hall_order = 1
             allocations_created = 0
+            all_seat_allocations = []
+            all_hall_allocations = []
 
             for h_idx, capacity in enumerate(hall_capacities):
                 if student_idx >= len(mixed_students):
@@ -1404,11 +1424,12 @@ class UniversityExamScheduleViewSet(viewsets.ModelViewSet):
                             exam_schedule=att.exam_schedule,
                             exam_hall=hall,
                             allocation_order=hall_order,
-                            planned_capacity=capacity,
+                            planned_capacity=max(20, min(28, capacity)),
                             allocated_students=0,
                             status='ALLOCATED',
                         )
                         schedule_in_hall[att.exam_schedule_id] = ha
+                        all_hall_allocations.append(ha)
 
                 # Group hall students by department and sort ascending by register_number
                 from collections import defaultdict
@@ -1501,7 +1522,7 @@ class UniversityExamScheduleViewSet(viewsets.ModelViewSet):
                     if pool_extras:
                         seat_assignments.append((s_num, pool_extras.pop(0)))
 
-                # Create seat allocation database records
+                # Collect seat allocation records for batch insertion
                 for seat_offset, chosen_att in seat_assignments:
                     if seat_offset <= 25:
                         row_num = ((seat_offset - 1) % 5) + 1
@@ -1520,23 +1541,30 @@ class UniversityExamScheduleViewSet(viewsets.ModelViewSet):
                         col_num = ((seat_offset - 1) // 5) + 1
 
                     ha = schedule_in_hall[chosen_att.exam_schedule_id]
-                    ExamSeatAllocation.objects.create(
-                        exam_schedule=chosen_att.exam_schedule,
-                        hall_allocation=ha,
-                        student=chosen_att.student,
-                        seat_number=seat_offset,
-                        row_number=row_num,
-                        column_number=col_num,
-                        department=chosen_att.department,
-                        subject=chosen_att.exam_schedule.subject,
-                        allocation_status='ALLOCATED',
+                    all_seat_allocations.append(
+                        ExamSeatAllocation(
+                            exam_schedule=chosen_att.exam_schedule,
+                            hall_allocation=ha,
+                            student=chosen_att.student,
+                            seat_number=seat_offset,
+                            row_number=row_num,
+                            column_number=col_num,
+                            department=chosen_att.department,
+                            subject=chosen_att.exam_schedule.subject,
+                            allocation_status='ALLOCATED',
+                        )
                     )
+                    ha.allocated_students += 1
                     allocations_created += 1
 
-                # Update allocated_students count on each hall allocation
-                for ha in schedule_in_hall.values():
-                    ha.allocated_students = ExamSeatAllocation.objects.filter(hall_allocation=ha).count()
-                    ha.save()
+                student_idx += capacity
+                hall_order += 1
+
+            if all_seat_allocations:
+                ExamSeatAllocation.objects.bulk_create(all_seat_allocations, batch_size=500)
+
+            if all_hall_allocations:
+                ExamHallAllocation.objects.bulk_update(all_hall_allocations, ['allocated_students'], batch_size=500)
 
                 student_idx += capacity
                 hall_order += 1
