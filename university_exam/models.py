@@ -9,8 +9,8 @@ class UniversityExamHall(TrackingModel):
         db_column='hall_id',
         related_name='exam_config'
     )
-    min_capacity = models.PositiveIntegerField(default=25)
-    max_capacity = models.PositiveIntegerField(default=27)
+    min_capacity = models.PositiveIntegerField(default=20)
+    max_capacity = models.PositiveIntegerField(default=28)
     total_seats = models.PositiveIntegerField()
     rows_count = models.PositiveIntegerField()
     columns_count = models.PositiveIntegerField()
@@ -20,7 +20,7 @@ class UniversityExamHall(TrackingModel):
         db_table = 'university_exam_halls'
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(min_capacity__gte=25) & models.Q(max_capacity__lte=27) & models.Q(min_capacity__lte=models.F('max_capacity')),
+                condition=models.Q(min_capacity__gte=20) & models.Q(max_capacity__lte=28) & models.Q(min_capacity__lte=models.F('max_capacity')),
                 name='chk_univ_exam_hall_capacity'
             ),
             models.CheckConstraint(
@@ -227,7 +227,7 @@ class ExamHallAllocation(TrackingModel):
         ]
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(planned_capacity__gte=25) & models.Q(planned_capacity__lte=27),
+                condition=models.Q(planned_capacity__gte=20) & models.Q(planned_capacity__lte=28),
                 name='chk_hall_alloc_planned_capacity'
             ),
         ]

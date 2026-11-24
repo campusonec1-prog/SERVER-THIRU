@@ -24,15 +24,15 @@ class UniversityExamHallSerializer(TrackingModelSerializerMixin, serializers.Mod
 
     def validate(self, attrs):
         # Handle instance updates where attrs might be partial
-        min_cap = attrs.get('min_capacity', getattr(self.instance, 'min_capacity', 25))
-        max_cap = attrs.get('max_capacity', getattr(self.instance, 'max_capacity', 27))
+        min_cap = attrs.get('min_capacity', getattr(self.instance, 'min_capacity', 20))
+        max_cap = attrs.get('max_capacity', getattr(self.instance, 'max_capacity', 28))
         total = attrs.get('total_seats', getattr(self.instance, 'total_seats', 0))
 
         errors = {}
-        if min_cap < 25:
-            errors['min_capacity'] = "Minimum capacity must be at least 25."
-        if max_cap > 27:
-            errors['max_capacity'] = "Maximum capacity cannot exceed 27."
+        if min_cap < 20:
+            errors['min_capacity'] = "Minimum capacity must be at least 20."
+        if max_cap > 28:
+            errors['max_capacity'] = "Maximum capacity cannot exceed 28."
         if min_cap > max_cap:
             errors['min_capacity'] = "Minimum capacity cannot exceed maximum capacity."
         if total < min_cap:
@@ -86,6 +86,9 @@ class UniversityExamScheduleSerializer(TrackingModelSerializerMixin, serializers
     department_code = serializers.CharField(source='department.department_code', read_only=True)
     subject_code = serializers.CharField(source='subject.subject_code', read_only=True)
     subject_name = serializers.CharField(source='subject.subject_name', read_only=True)
+    semester = serializers.IntegerField(source='subject.semester.semester_number', read_only=True)
+    semester_name = serializers.CharField(source='subject.semester.semester_name', read_only=True)
+    regulation = serializers.CharField(source='subject.regulation.regulation_code', read_only=True)
     student_count = serializers.IntegerField(read_only=True)
 
     class Meta:
@@ -93,6 +96,7 @@ class UniversityExamScheduleSerializer(TrackingModelSerializerMixin, serializers
         fields = [
             'id', 'department', 'department_name', 'department_code',
             'subject', 'subject_code', 'subject_name',
+            'semester', 'semester_name', 'regulation',
             'exam_date', 'session', 'qp_code', 'exam_type',
             'seating_strategy', 'status', 'student_count',
             'created_at', 'updated_at',
@@ -127,6 +131,7 @@ class ExamHallAllocationSerializer(TrackingModelSerializerMixin, serializers.Mod
     hall_no = serializers.CharField(source='exam_hall.hall.hall_no', read_only=True)
     hall_name = serializers.CharField(source='exam_hall.hall.hall_name', read_only=True)
     block_code = serializers.CharField(source='exam_hall.hall.floor.block.block_code', read_only=True)
+    block_name = serializers.CharField(source='exam_hall.hall.floor.block.block_name', read_only=True)
     floor_name = serializers.CharField(source='exam_hall.hall.floor.floor_name', read_only=True)
     exam_date = serializers.DateField(source='exam_schedule.exam_date', read_only=True)
     session = serializers.CharField(source='exam_schedule.session', read_only=True)
@@ -135,7 +140,7 @@ class ExamHallAllocationSerializer(TrackingModelSerializerMixin, serializers.Mod
         model = ExamHallAllocation
         fields = [
             'id', 'exam_schedule', 'exam_date', 'session',
-            'exam_hall', 'hall_no', 'hall_name', 'block_code', 'floor_name',
+            'exam_hall', 'hall_no', 'hall_name', 'block_code', 'block_name', 'floor_name',
             'allocation_order', 'planned_capacity', 'allocated_students', 'status',
             'created_at', 'updated_at',
             *TrackingModelSerializerMixin.TRACKING_FIELDS,
@@ -150,8 +155,11 @@ class ExamSeatAllocationSerializer(TrackingModelSerializerMixin, serializers.Mod
     department_short_name = serializers.CharField(source='department.short_name', read_only=True)
     subject_code = serializers.CharField(source='subject.subject_code', read_only=True)
     subject_name = serializers.CharField(source='subject.subject_name', read_only=True)
+    regulation = serializers.CharField(source='subject.regulation.regulation_code', read_only=True)
+    semester = serializers.CharField(source='subject.semester.semester_number', read_only=True)
     hall_no = serializers.CharField(source='hall_allocation.exam_hall.hall.hall_no', read_only=True)
     block_code = serializers.CharField(source='hall_allocation.exam_hall.hall.floor.block.block_code', read_only=True)
+    block_name = serializers.CharField(source='hall_allocation.exam_hall.hall.floor.block.block_name', read_only=True)
     floor_name = serializers.CharField(source='hall_allocation.exam_hall.hall.floor.floor_name', read_only=True)
     answer_book_no = serializers.SerializerMethodField()
 
@@ -159,11 +167,11 @@ class ExamSeatAllocationSerializer(TrackingModelSerializerMixin, serializers.Mod
         model = ExamSeatAllocation
         fields = [
             'id', 'exam_schedule', 'hall_allocation',
-            'hall_no', 'block_code', 'floor_name',
+            'hall_no', 'block_code', 'block_name', 'floor_name',
             'student', 'student_name', 'register_number',
             'seat_number', 'row_number', 'column_number',
             'department', 'department_name', 'department_code', 'department_short_name',
-            'subject', 'subject_code', 'subject_name',
+            'subject', 'subject_code', 'subject_name', 'regulation', 'semester',
             'allocation_status', 'answer_book_no',
             'created_at', 'updated_at',
             *TrackingModelSerializerMixin.TRACKING_FIELDS,
