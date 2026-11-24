@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import LibraryBook, LibraryMember, LibraryTransaction
+from .models import LibraryBook, LibraryMember, LibraryTransaction, LibraryFine
 
 
 @admin.register(LibraryBook)
@@ -22,3 +22,10 @@ class LibraryTransactionAdmin(admin.ModelAdmin):
     list_display = ('book', 'member', 'issued_on', 'due_on', 'returned_on', 'status', 'renewal_count')
     search_fields = ('book__title', 'member__membership_number', 'member__student__roll_number')
     list_filter = ('status', 'issued_on', 'due_on')
+
+
+@admin.register(LibraryFine)
+class LibraryFineAdmin(admin.ModelAdmin):
+    list_display = ('member', 'book', 'overdue_days', 'fine_rate_per_day', 'fine_amount', 'paid_amount', 'status', 'paid_on')
+    search_fields = ('member__membership_number', 'book__title', 'book__acc_no', 'receipt_no')
+    list_filter = ('status', 'due_on', 'paid_on')

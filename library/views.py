@@ -3,7 +3,8 @@ from decimal import Decimal, InvalidOperation
 import re
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Case, When, Value, IntegerField, F
+from django.db.models.functions import Length
 from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
@@ -11,17 +12,20 @@ from rest_framework.response import Response
 
 from student.models import Student
 from common.signals import send_targeted_broadcast
-from .permissions import LibraryPermission
+from .permissions import LibraryPermission, LibraryReservationPermission
 
-from .models import LibraryBook, LibraryMember, LibraryTransaction
+from .models import LibraryBook, LibraryMember, LibraryTransaction, LibraryFine, LibraryReservation
 from .serializers import (
     LibraryBookSerializer,
     LibraryBookQuickSerializer,
     LibraryMemberSerializer,
     LibraryMemberQuickSerializer,
     LibraryTransactionSerializer,
+    LibraryFineSerializer,
+    LibraryReservationSerializer,
     StudentLookupSerializer,
 )
+from users.models import User
 
 
 class LibraryViewSetMixin:
@@ -59,7 +63,41 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(status__iexact=status_val)
         if department:
             queryset = queryset.filter(department__iexact=department)
-        return queryset.order_by('title', 'author')
+
+        ordering = self.request.query_params.get('ordering')
+        if ordering:
+            order_fields = [f.strip() for f in str(ordering).split(',') if f.strip()]
+            if order_fields:
+                if 'acc_no' in order_fields:
+                    return queryset.annotate(
+                        acc_empty=Case(
+                            When(Q(acc_no__isnull=True) | Q(acc_no=''), then=Value(1)),
+                            default=Value(0),
+                            output_field=IntegerField()
+                        ),
+                        acc_len=Length('acc_no')
+                    ).order_by('acc_empty', 'acc_len', 'acc_no', 'title')
+                elif '-acc_no' in order_fields:
+                    return queryset.annotate(
+                        acc_empty=Case(
+                            When(Q(acc_no__isnull=True) | Q(acc_no=''), then=Value(1)),
+                            default=Value(0),
+                            output_field=IntegerField()
+                        ),
+                        acc_len=Length('acc_no')
+                    ).order_by('acc_empty', '-acc_len', '-acc_no', '-id')
+                else:
+                    return queryset.order_by(*order_fields)
+
+        # Default ordering: Order books by accession number (acc_no) ascending
+        return queryset.annotate(
+            acc_empty=Case(
+                When(Q(acc_no__isnull=True) | Q(acc_no=''), then=Value(1)),
+                default=Value(0),
+                output_field=IntegerField()
+            ),
+            acc_len=Length('acc_no')
+        ).order_by('acc_empty', 'acc_len', 'acc_no', 'title')
 
     def perform_create(self, serializer):
         serializer.save(created_by=self._tracking_user(), updated_by=self._tracking_user())
@@ -142,7 +180,14 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         results = qs.only(
             'id', 'title', 'author', 'acc_no', 'call_no', 'isbn',
             'status', 'total_copies', 'available_copies', 'shelf_location', 'department', 'is_active'
-        ).order_by('title')[:limit]
+        ).annotate(
+            acc_empty=Case(
+                When(Q(acc_no__isnull=True) | Q(acc_no=''), then=Value(1)),
+                default=Value(0),
+                output_field=IntegerField()
+            ),
+            acc_len=Length('acc_no')
+        ).order_by('acc_empty', 'acc_len', 'acc_no', 'title')[:limit]
 
         data = LibraryBookQuickSerializer(results, many=True).data
         return self._success('Books searched successfully', data)
@@ -434,24 +479,35 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
 
 
 class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
-    queryset = LibraryMember.objects.select_related('student__application', 'student__application__candidate', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role')
+    queryset = LibraryMember.objects.select_related(
+        'student__application', 'student__application__candidate', 'student__department',
+        'student__batch', 'student__section', 'user', 'user__role',
+        'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
+    )
     serializer_class = LibraryMemberSerializer
 
     def get_queryset(self):
         queryset = super().get_queryset()
         query = self.request.query_params.get('search')
         is_active = self.request.query_params.get('is_active')
+        member_type = self.request.query_params.get('member_type')
+        department = self.request.query_params.get('department')
+
         if query:
             queryset = queryset.filter(
                 Q(membership_number__icontains=query)
                 | Q(student__roll_number__icontains=query)
                 | Q(student__register_number__icontains=query)
+                | Q(student__student_name__icontains=query)
                 | Q(student__application__candidate__name__icontains=query)
+                | Q(user__username__icontains=query)
+                | Q(user__name__icontains=query)
             )
         if is_active is not None and is_active != '' and is_active != 'ALL':
             val = is_active.lower() in ('true', '1', 'yes', 'active')
             queryset = queryset.filter(is_active=val)
-        department = self.request.query_params.get('department')
+        if member_type and member_type != 'ALL':
+            queryset = queryset.filter(member_type__iexact=member_type)
         if department and department != 'ALL':
             if str(department).isdigit():
                 queryset = queryset.filter(student__department_id=department)
@@ -480,15 +536,17 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
             return Response({'code': 400, 'message': 'Barcode / Membership ID is required.'}, status=400)
 
         member = LibraryMember.objects.select_related(
-            'student__application', 'student__application__candidate', 'student__department', 'student__batch', 'student__section'
+            'student__application', 'student__application__candidate', 'student__department',
+            'student__batch', 'student__section', 'user', 'user__role'
         ).filter(
             Q(membership_number__iexact=barcode)
             | Q(student__roll_number__iexact=barcode)
             | Q(student__register_number__iexact=barcode)
+            | Q(user__username__iexact=barcode)
         ).first()
 
         if not member:
-            return Response({'code': 404, 'message': f'No member found matching "{barcode}".'}, status=404)
+            return Response({'code': 404, 'message': f'No borrower member found matching "{barcode}".'}, status=404)
 
         data = LibraryMemberSerializer(member, context={'request': request}).data
         data['active_loans_count'] = LibraryTransaction.objects.filter(member=member, returned_on__isnull=True).count()
@@ -500,7 +558,8 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         limit = min(int(request.query_params.get('limit', 25)), 100)
 
         qs = LibraryMember.objects.select_related(
-            'student__application', 'student__application__candidate', 'student__department'
+            'student__application', 'student__application__candidate', 'student__department',
+            'user', 'user__role'
         ).filter(is_active=True)
 
         if query:
@@ -508,7 +567,10 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
                 Q(membership_number__icontains=query)
                 | Q(student__roll_number__icontains=query)
                 | Q(student__register_number__icontains=query)
+                | Q(student__student_name__icontains=query)
                 | Q(student__application__candidate__name__icontains=query)
+                | Q(user__username__icontains=query)
+                | Q(user__name__icontains=query)
             )
 
         results = qs.order_by('membership_number')[:limit]
@@ -527,7 +589,11 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
 
 
 class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
-    queryset = LibraryTransaction.objects.select_related('book', 'member__student__application', 'member__student__application__candidate', 'created_by', 'created_by__role', 'updated_by', 'updated_by__role')
+    queryset = LibraryTransaction.objects.select_related(
+        'book', 'member__student__application', 'member__student__application__candidate',
+        'member__student__department', 'member__user', 'member__user__role',
+        'created_by', 'created_by__role', 'updated_by', 'updated_by__role'
+    )
     serializer_class = LibraryTransactionSerializer
 
     def get_queryset(self):
@@ -538,9 +604,14 @@ class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         if query:
             queryset = queryset.filter(
                 Q(book__title__icontains=query)
+                | Q(book__acc_no__icontains=query)
                 | Q(member__membership_number__icontains=query)
                 | Q(member__student__roll_number__icontains=query)
+                | Q(member__student__register_number__icontains=query)
+                | Q(member__student__student_name__icontains=query)
                 | Q(member__student__application__candidate__name__icontains=query)
+                | Q(member__user__username__icontains=query)
+                | Q(member__user__name__icontains=query)
             )
         if status_filter and status_filter != 'ALL':
             today = timezone.localdate()
@@ -617,6 +688,17 @@ class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
                     'user': getattr(self._tracking_user(), 'name', 'System') if self._tracking_user() else 'System'
                 })
                 loan.save(update_fields=['history'])
+
+                # Fulfill any active reservation for this member & book
+                LibraryReservation.objects.filter(
+                    member=loan.member,
+                    book=loan.book,
+                    status__in=['AVAILABLE', 'PENDING']
+                ).update(
+                    status='FULFILLED',
+                    updated_by=self._tracking_user(),
+                    updated_at=timezone.now()
+                )
         return self._success('Book issued successfully', response.data, status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'])
@@ -638,8 +720,91 @@ class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
             'user': getattr(self._tracking_user(), 'name', 'System') if self._tracking_user() else 'System'
         })
         loan.save(update_fields=['history'])
-        
-        return self._success('Book returned successfully', self.get_serializer(loan).data)
+
+        # Persist overdue fine record if returned past due date
+        if loan.due_on and loan.returned_on > loan.due_on:
+            days = (loan.returned_on - loan.due_on).days
+            if days > 0:
+                fine_rate = Decimal('2.00')
+                fine_amt = Decimal(str(days)) * fine_rate
+                fine_rec, created = LibraryFine.objects.get_or_create(
+                    transaction=loan,
+                    defaults={
+                        'member': loan.member,
+                        'book': loan.book,
+                        'due_on': loan.due_on,
+                        'returned_on': loan.returned_on,
+                        'overdue_days': days,
+                        'fine_rate_per_day': fine_rate,
+                        'fine_amount': fine_amt,
+                        'status': 'PENDING',
+                        'created_by': self._tracking_user(),
+                        'updated_by': self._tracking_user(),
+                    }
+                )
+                if not created and fine_rec.status == 'PENDING':
+                    fine_rec.returned_on = loan.returned_on
+                    fine_rec.overdue_days = days
+                    fine_rec.fine_amount = fine_amt
+                    fine_rec.updated_by = self._tracking_user()
+                    fine_rec.save()
+
+        # Check reservation queue for this returned book
+        reservation_alert = None
+        pending_res = LibraryReservation.objects.filter(
+            Q(book=loan.book) | Q(book_title__iexact=loan.book.title),
+            status='PENDING'
+        ).order_by('reserved_on', 'id').first()
+
+        if pending_res:
+            hold_days = 2
+            hold_until = timezone.localdate() + timedelta(days=hold_days)
+            pending_res.status = 'AVAILABLE'
+            pending_res.book = loan.book
+            pending_res.available_until = hold_until
+            pending_res.notified_on = timezone.now()
+            pending_res.updated_by = self._tracking_user()
+            pending_res.save()
+
+            # Create in-app notification to the reserving borrower
+            try:
+                target_user = None
+                if pending_res.member.user:
+                    target_user = pending_res.member.user
+                elif pending_res.member.student:
+                    stu = pending_res.member.student
+                    target_user = User.objects.filter(
+                        Q(username=stu.roll_number) | Q(username=stu.register_number)
+                    ).first()
+                if target_user:
+                    from leave.models import Notification
+                    Notification.objects.create(
+                        user=target_user,
+                        title='Reserved Library Book Ready for Pickup!',
+                        message=f'Good news! Your reserved book "{loan.book.title}" is now returned and ready at the Central Library desk. Please pick it up by {hold_until}.',
+                        notification_type='GENERAL',
+                    )
+            except Exception:
+                pass
+
+            reservation_alert = {
+                'reserved': True,
+                'reservation_id': pending_res.id,
+                'borrower_name': pending_res.member.borrower_name,
+                'borrower_code': pending_res.member.borrower_code,
+                'available_until': str(hold_until),
+                'message': f'HOLD ALERT: Book is reserved for {pending_res.member.borrower_name} ({pending_res.member.borrower_code}). Hold until {hold_until}.'
+            }
+
+        data = self.get_serializer(loan).data
+        if reservation_alert:
+            data['reservation_alert'] = reservation_alert
+            return self._success(
+                f"Book returned. NOTE: Reserved for {reservation_alert['borrower_name']} ({reservation_alert['borrower_code']}) until {reservation_alert['available_until']}.",
+                data
+            )
+
+        return self._success('Book returned successfully', data)
 
     @action(detail=True, methods=['post'])
     @transaction.atomic
@@ -688,13 +853,15 @@ class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
                 'available_copies': book.available_copies,
             })
 
-        # 2. If not a book, check if it is a member barcode (membership_number, student roll, student register)
+        # 2. If not a book, check if it is a member barcode (membership_number, student roll, student register, user username)
         member = LibraryMember.objects.select_related(
-            'student__application', 'student__application__candidate', 'student__department'
+            'student__application', 'student__application__candidate', 'student__department',
+            'user', 'user__role'
         ).filter(
             Q(membership_number__iexact=barcode)
             | Q(student__roll_number__iexact=barcode)
             | Q(student__register_number__iexact=barcode)
+            | Q(user__username__iexact=barcode)
         ).first()
 
         if member:
@@ -779,25 +946,77 @@ class LibraryDashboardViewSet(LibraryViewSetMixin, viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def summary(self, request):
         today = timezone.localdate()
-        active_loans = LibraryTransaction.objects.filter(returned_on__isnull=True)
-        overdue = active_loans.filter(due_on__lt=today)
-        recent = LibraryTransaction.objects.select_related('book', 'member__student__application', 'member__student__application__candidate').order_by('-id')[:8]
-        
-        from django.db.models import Sum
+        try:
+            fine_per_day = max(0.0, float(request.query_params.get('fine_per_day', 2.0)))
+        except (ValueError, TypeError):
+            fine_per_day = 2.0
+
+        active_loans_qs = LibraryTransaction.objects.filter(returned_on__isnull=True)
+        active_loans_count = active_loans_qs.count()
+        overdue_qs = active_loans_qs.filter(due_on__lt=today)
+        overdue_count = overdue_qs.count()
+
+        # Dynamic Fine Calculation across all active overdue loans (read-only aggregation)
+        total_overdue_days = 0
+        for due_on in overdue_qs.values_list('due_on', flat=True):
+            if due_on and due_on < today:
+                total_overdue_days += (today - due_on).days
+
+        total_fine_pending = round(total_overdue_days * fine_per_day, 2)
+
+        # Today's circulation metrics
+        issued_today = LibraryTransaction.objects.filter(issued_on=today).count()
+        returned_today = LibraryTransaction.objects.filter(returned_on=today).count()
+
+        # Recent transactions (10)
+        recent = LibraryTransaction.objects.select_related(
+            'book', 'member__student__application', 'member__student__application__candidate',
+            'member__student', 'member__user', 'member__user__role'
+        ).order_by('-id')[:10]
+
+        from django.db.models import Sum, Count
         books_qs = LibraryBook.objects.filter(is_active=True)
         totals = books_qs.aggregate(
             total=Sum('total_copies'),
             available=Sum('available_copies')
         )
-        
+        total_copies = totals['total'] or 0
+        available_copies = totals['available'] or 0
+
+        # Status counts
+        status_counts = dict(
+            books_qs.values_list('status').annotate(c=Count('id'))
+        )
+        maintenance_count = status_counts.get('MAINTENANCE', 0)
+        lost_count = status_counts.get('LOST', 0) + status_counts.get('DAMAGED', 0)
+        reference_count = status_counts.get('REFERENCE', 0)
+
+        # Department distribution (Top 6 departments)
+        dept_breakdown = list(
+            books_qs.exclude(department='').values('department')
+            .annotate(titles=Count('id'), copies=Sum('total_copies'))
+            .order_by('-titles')[:6]
+        )
+
+        serializer_context = {'request': request, 'fine_per_day': fine_per_day}
+
         return self._success('Library dashboard loaded successfully', {
             'books': books_qs.count(),
-            'total_copies': totals['total'] or 0,
-            'available_copies': totals['available'] or 0,
+            'total_copies': total_copies,
+            'available_copies': available_copies,
             'members': LibraryMember.objects.filter(is_active=True).count(),
-            'active_loans': active_loans.count(),
-            'overdue_loans': overdue.count(),
-            'recent_transactions': LibraryTransactionSerializer(recent, many=True).data,
+            'active_loans': active_loans_count,
+            'overdue_loans': overdue_count,
+            'issued_today': issued_today,
+            'returned_today': returned_today,
+            'fine_per_day': fine_per_day,
+            'total_overdue_days': total_overdue_days,
+            'total_fine_pending': total_fine_pending,
+            'maintenance_count': maintenance_count,
+            'lost_count': lost_count,
+            'reference_count': reference_count,
+            'dept_breakdown': dept_breakdown,
+            'recent_transactions': LibraryTransactionSerializer(recent, many=True, context=serializer_context).data,
         })
 
 
@@ -822,3 +1041,749 @@ class LibraryStudentLookupViewSet(LibraryViewSetMixin, viewsets.ReadOnlyModelVie
             if value:
                 queryset = queryset.filter(**{lookup: value})
         return queryset
+
+
+class LibraryFineViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
+    queryset = LibraryFine.objects.select_related(
+        'transaction', 'member', 'member__student', 'member__student__application__candidate',
+        'member__student__department', 'member__user', 'member__user__role', 'book'
+    ).all()
+    serializer_class = LibraryFineSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        query = self.request.query_params.get('search')
+        status_val = self.request.query_params.get('status')
+        member_id = self.request.query_params.get('member_id')
+        if query:
+            queryset = queryset.filter(
+                Q(book__title__icontains=query)
+                | Q(book__acc_no__icontains=query)
+                | Q(member__membership_number__icontains=query)
+                | Q(member__student__roll_number__icontains=query)
+                | Q(member__student__register_number__icontains=query)
+                | Q(member__student__student_name__icontains=query)
+                | Q(member__student__application__candidate__name__icontains=query)
+                | Q(member__user__username__icontains=query)
+                | Q(member__user__name__icontains=query)
+                | Q(receipt_no__icontains=query)
+            )
+        if status_val:
+            queryset = queryset.filter(status__iexact=status_val)
+        if member_id:
+            queryset = queryset.filter(member_id=member_id)
+
+        ordering = self.request.query_params.get('ordering', '-created_at')
+        if ordering:
+            order_fields = [f.strip() for f in str(ordering).split(',') if f.strip()]
+            if order_fields:
+                queryset = queryset.order_by(*order_fields)
+        return queryset
+
+    def _sync_active_overdue_fines(self, fine_per_day=None):
+        today = timezone.localdate()
+        try:
+            if fine_per_day is None:
+                rate_param = self.request.query_params.get('fine_per_day') or (self.request.data.get('fine_per_day') if hasattr(self.request, 'data') else None)
+                fine_per_day = float(rate_param) if rate_param else 2.0
+            fine_per_day = max(0.0, float(fine_per_day))
+        except (ValueError, TypeError):
+            fine_per_day = 2.0
+
+        overdue_loans = LibraryTransaction.objects.filter(
+            returned_on__isnull=True,
+            due_on__lt=today
+        ).select_related('member', 'book')
+
+        synced_count = 0
+        for loan in overdue_loans:
+            if loan.due_on:
+                days = (today - loan.due_on).days
+                if days > 0:
+                    fine_amt = Decimal(str(days)) * Decimal(str(fine_per_day))
+                    fine_rec = LibraryFine.objects.filter(transaction=loan).first()
+                    if not fine_rec:
+                        LibraryFine.objects.create(
+                            transaction=loan,
+                            member=loan.member,
+                            book=loan.book,
+                            due_on=loan.due_on,
+                            overdue_days=days,
+                            fine_rate_per_day=Decimal(str(fine_per_day)),
+                            fine_amount=fine_amt,
+                            status='PENDING',
+                        )
+                        synced_count += 1
+                    elif fine_rec.status == 'PENDING':
+                        fine_rec.overdue_days = days
+                        fine_rec.fine_rate_per_day = Decimal(str(fine_per_day))
+                        fine_rec.fine_amount = fine_amt
+                        fine_rec.save(update_fields=['overdue_days', 'fine_rate_per_day', 'fine_amount', 'updated_at'])
+                        synced_count += 1
+        return synced_count
+
+    def list(self, request, *args, **kwargs):
+        # Automatically synchronize overdue checkouts instantly on fetch
+        self._sync_active_overdue_fines()
+        response = super().list(request, *args, **kwargs)
+        return self._success('Library fines retrieved successfully', response.data)
+
+    @action(detail=True, methods=['post'])
+    def pay(self, request, pk=None):
+        fine = self.get_object()
+        if fine.status == 'PAID':
+            return Response({'code': 400, 'message': 'This fine has already been paid in full.'}, status=400)
+
+        paid_amount = Decimal(str(request.data.get('paid_amount', fine.fine_amount - fine.paid_amount)))
+        receipt_no = (request.data.get('receipt_no') or f"REC-{timezone.now().strftime('%y%m%d%H%M%S')}").strip()
+        remarks = request.data.get('remarks', '')
+
+        fine.paid_amount = (fine.paid_amount or Decimal('0.00')) + paid_amount
+        if fine.paid_amount >= fine.fine_amount:
+            fine.status = 'PAID'
+        else:
+            fine.status = 'PARTIAL'
+        fine.paid_on = timezone.now()
+        fine.receipt_no = receipt_no
+        if remarks:
+            fine.remarks = f"{fine.remarks}\n{remarks}".strip()
+        fine.updated_by = self._tracking_user()
+        fine.save()
+
+        return self._success('Fine payment recorded successfully', LibraryFineSerializer(fine).data)
+
+    @action(detail=False, methods=['post'], url_path='sync-overdue')
+    def sync_overdue(self, request):
+        try:
+            fine_per_day = max(0.0, float(request.data.get('fine_per_day', 2.0)))
+        except (ValueError, TypeError):
+            fine_per_day = 2.0
+        synced_count = self._sync_active_overdue_fines(fine_per_day=fine_per_day)
+        return self._success(f'Successfully synced {synced_count} overdue fine records', {'synced_count': synced_count})
+
+
+class LibraryReservationViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
+    queryset = LibraryReservation.objects.select_related(
+        'book', 'member', 'member__student', 'member__user', 'created_by'
+    ).all()
+    serializer_class = LibraryReservationSerializer
+    permission_classes = [LibraryReservationPermission]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+
+        # If user is student, filter only their own reservations
+        if hasattr(user, 'role') and getattr(user.role, 'role_name', '').upper() == 'STUDENT':
+            qs = qs.filter(
+                Q(member__user=user) |
+                Q(member__student__roll_number=user.username) |
+                Q(member__student__register_number=user.username)
+            )
+
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param.upper())
+
+        book_id = self.request.query_params.get('book_id')
+        if book_id:
+            qs = qs.filter(book_id=book_id)
+
+        member_id = self.request.query_params.get('member_id')
+        if member_id:
+            qs = qs.filter(member_id=member_id)
+
+        search = self.request.query_params.get('search')
+        if search:
+            qs = qs.filter(
+                Q(book_title__icontains=search) |
+                Q(book__acc_no__icontains=search) |
+                Q(member__membership_number__icontains=search) |
+                Q(member__student__student_name__icontains=search) |
+                Q(member__user__name__icontains=search)
+            )
+
+        return qs.order_by('reserved_on')
+
+    def create(self, request, *args, **kwargs):
+        book_id = request.data.get('book_id') or request.data.get('book')
+        member_id = request.data.get('member_id') or request.data.get('member')
+
+        if not book_id:
+            return Response({'code': 400, 'message': 'Book ID is required to reserve.'}, status=400)
+
+        book = LibraryBook.objects.filter(pk=book_id).first()
+        if not book:
+            return Response({'code': 404, 'message': 'Book not found.'}, status=404)
+
+        # Resolve member
+        member = None
+        user = request.user
+        if member_id:
+            member = LibraryMember.objects.filter(pk=member_id).first()
+        elif user and user.is_authenticated:
+            # Prioritize student membership if user account belongs to a student
+            member = LibraryMember.objects.filter(
+                Q(student__roll_number__iexact=user.username) |
+                Q(student__register_number__iexact=user.username)
+            ).first()
+            if not member:
+                member = LibraryMember.objects.filter(user=user, student__isnull=False).first()
+            if not member:
+                member = LibraryMember.objects.filter(user=user).first()
+            
+            # If member exists for this student but user FK wasn't linked, link it now
+            if member and not member.user and (
+                member.student and (
+                    member.student.roll_number == user.username or
+                    member.student.register_number == user.username
+                )
+            ):
+                member.user = user
+                member.save(update_fields=['user', 'updated_at'])
+
+        if not member:
+            return Response({'code': 400, 'message': 'Unable to identify active library member record.'}, status=400)
+
+        # Check if already has active reservation for this book
+        existing_res = LibraryReservation.objects.filter(
+            book=book,
+            member=member,
+            status__in=['PENDING', 'AVAILABLE']
+        ).first()
+        if existing_res:
+            return Response({
+                'code': 400,
+                'message': f'You already have an active reservation for this book (Status: {existing_res.status}, Position #{existing_res.queue_position}).'
+            }, status=400)
+
+        # Check if member already has this book borrowed
+        already_borrowed = LibraryTransaction.objects.filter(
+            book=book,
+            member=member,
+            returned_on__isnull=True
+        ).exists()
+        if already_borrowed:
+            return Response({
+                'code': 400,
+                'message': 'You currently have this book checked out. No need to reserve.'
+            }, status=400)
+
+        # Calculate queue position
+        pending_count = LibraryReservation.objects.filter(
+            book=book,
+            status='PENDING'
+        ).count()
+        queue_pos = pending_count + 1
+
+        reservation = LibraryReservation.objects.create(
+            book=book,
+            book_title=book.title,
+            member=member,
+            status='PENDING',
+            queue_position=queue_pos,
+            notes=request.data.get('notes', ''),
+            created_by=self._tracking_user(),
+            updated_by=self._tracking_user(),
+        )
+
+        serializer = self.get_serializer(reservation)
+        avail_msg = ''
+        if book.available_copies > 0:
+            avail_msg = ' (Note: Copies are currently in stacks; you can also borrow directly at the desk).'
+
+        return self._success(
+            f'Book reserved successfully. You are #{queue_pos} in queue{avail_msg}.',
+            serializer.data,
+            code=201
+        )
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        reservation = self.get_object()
+        user = request.user
+        role_name = getattr(getattr(user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+        staff_roles = {'ADMIN', 'ADMINISTRATOR', 'SUPER_ADMIN', 'SUPERADMIN', 'LIBRARY', 'LIBRARIAN', 'TECH_SUPPORTER', 'ADMINISTRATION_OFFICER', 'AO'}
+        is_staff = getattr(user, 'is_superuser', False) or (role_name in staff_roles)
+
+        if not is_staff:
+            is_owner = (
+                (reservation.member.user_id and reservation.member.user_id == user.id) or
+                (reservation.member.student and (
+                    reservation.member.student.roll_number == user.username or
+                    reservation.member.student.register_number == user.username
+                ))
+            )
+            if not is_owner:
+                return Response({'code': 403, 'message': 'You can only cancel your own reservation.'}, status=403)
+
+        if reservation.status in ['FULFILLED', 'CANCELLED', 'EXPIRED']:
+            return Response({'code': 400, 'message': f'Cannot cancel reservation with status {reservation.status}.'}, status=400)
+
+        was_available = (reservation.status == 'AVAILABLE')
+        reservation.status = 'CANCELLED'
+        reservation.updated_by = self._tracking_user()
+        reservation.save()
+
+        # If it was available and cancelled, promote next in line
+        if was_available:
+            next_res = LibraryReservation.objects.filter(
+                book=reservation.book,
+                status='PENDING'
+            ).order_by('reserved_on', 'id').first()
+            if next_res:
+                hold_until = timezone.localdate() + timedelta(days=2)
+                next_res.status = 'AVAILABLE'
+                next_res.available_until = hold_until
+                next_res.notified_on = timezone.now()
+                next_res.updated_by = self._tracking_user()
+                next_res.save()
+
+                try:
+                    target_user = next_res.member.user
+                    if not target_user and next_res.member.student:
+                        stu = next_res.member.student
+                        target_user = User.objects.filter(
+                            Q(username=stu.roll_number) | Q(username=stu.register_number)
+                        ).first()
+                    if target_user:
+                        from leave.models import Notification
+                        Notification.objects.create(
+                            user=target_user,
+                            title='Reserved Library Book Ready for Pickup!',
+                            message=f'Good news! Your reserved book "{reservation.book.title}" is now available at the Central Library desk. Please pick it up by {hold_until}.',
+                            notification_type='GENERAL',
+                        )
+                except Exception:
+                    pass
+
+        return self._success('Reservation cancelled successfully.', self.get_serializer(reservation).data)
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        """Staff marks reservation as AVAILABLE / Ready for Pickup and holds it for 2 days."""
+        user = request.user
+        role_name = getattr(getattr(user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+        staff_roles = {'ADMIN', 'ADMINISTRATOR', 'SUPER_ADMIN', 'SUPERADMIN', 'LIBRARY', 'LIBRARIAN', 'TECH_SUPPORTER', 'ADMINISTRATION_OFFICER', 'AO'}
+        is_staff = getattr(user, 'is_superuser', False) or (role_name in staff_roles)
+        if not is_staff:
+            return Response({'code': 403, 'message': 'Only library staff are permitted to approve reservations.'}, status=403)
+
+        reservation = self.get_object()
+        if reservation.status not in ['PENDING']:
+            return Response({'code': 400, 'message': f'Cannot approve reservation with status {reservation.status}.'}, status=400)
+
+        hold_until = timezone.localdate() + timedelta(days=2)
+        reservation.status = 'AVAILABLE'
+        reservation.available_until = hold_until
+        reservation.notified_on = timezone.now()
+        reservation.updated_by = self._tracking_user()
+        reservation.save()
+
+        try:
+            target_user = reservation.member.user
+            if not target_user and reservation.member.student:
+                stu = reservation.member.student
+                target_user = User.objects.filter(
+                    Q(username=stu.roll_number) | Q(username=stu.register_number)
+                ).first()
+            if target_user:
+                from leave.models import Notification
+                Notification.objects.create(
+                    user=target_user,
+                    title='Reserved Library Book Ready for Pickup!',
+                    message=f'Your reserved book "{reservation.book.title}" is now ready at Central Library desk. Held until {hold_until}.',
+                    notification_type='GENERAL',
+                )
+        except Exception:
+            pass
+
+        return self._success(f'Reservation approved. Book held for pickup until {hold_until}.', self.get_serializer(reservation).data)
+
+    @action(detail=True, methods=['post'])
+    @transaction.atomic
+    def issue(self, request, pk=None):
+        """Staff directly issues the reserved book to the borrower, converting reservation to checkout loan."""
+        user = request.user
+        role_name = getattr(getattr(user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+        staff_roles = {'ADMIN', 'ADMINISTRATOR', 'SUPER_ADMIN', 'SUPERADMIN', 'LIBRARY', 'LIBRARIAN', 'TECH_SUPPORTER', 'ADMINISTRATION_OFFICER', 'AO'}
+        is_staff = getattr(user, 'is_superuser', False) or (role_name in staff_roles)
+        if not is_staff:
+            return Response({'code': 403, 'message': 'Only library staff are permitted to issue books.'}, status=403)
+
+        reservation = self.get_object()
+        if reservation.status in ['FULFILLED', 'CANCELLED']:
+            return Response({'code': 400, 'message': f'Cannot issue book for reservation with status {reservation.status}.'}, status=400)
+
+        book = reservation.book
+        member = reservation.member
+
+        # Check borrower limit
+        active_count = LibraryTransaction.objects.filter(member=member, returned_on__isnull=True).count()
+        if active_count >= member.max_books_allowed:
+            return Response({'code': 400, 'message': f'Borrower has reached max limit of {member.max_books_allowed} books.'}, status=400)
+
+        # Decrement available copies if > 0
+        if book.available_copies > 0:
+            book.available_copies -= 1
+            book.save(update_fields=['available_copies', 'updated_at'])
+
+        issue_date = timezone.localdate()
+        due_date = issue_date + timedelta(days=member.max_days_allowed or 14)
+
+        loan = LibraryTransaction.objects.create(
+            member=member,
+            book=book,
+            issued_on=issue_date,
+            due_on=due_date,
+            status='ISSUED',
+            history=[{
+                'action': 'Issued from Reservation',
+                'date': str(issue_date),
+                'user': getattr(self._tracking_user(), 'name', 'Librarian') if self._tracking_user() else 'Librarian'
+            }],
+            created_by=self._tracking_user(),
+            updated_by=self._tracking_user(),
+        )
+
+        reservation.status = 'FULFILLED'
+        reservation.updated_by = self._tracking_user()
+        reservation.save()
+
+        try:
+            target_user = member.user
+            if not target_user and member.student:
+                stu = member.student
+                target_user = User.objects.filter(
+                    Q(username=stu.roll_number) | Q(username=stu.register_number)
+                ).first()
+            if target_user:
+                from leave.models import Notification
+                Notification.objects.create(
+                    user=target_user,
+                    title='Library Book Issued',
+                    message=f'Book "{book.title}" (ACC: {book.acc_no}) has been checked out to you. Due date is {due_date}.',
+                    notification_type='GENERAL',
+                )
+        except Exception:
+            pass
+
+        return self._success(f'Book "{book.title}" issued successfully to {member.borrower_name or "borrower"}. Due date: {due_date}.', {
+            'reservation': self.get_serializer(reservation).data,
+            'loan': LibraryTransactionSerializer(loan).data
+        })
+
+    @action(detail=True, methods=['post'])
+    def fulfill(self, request, pk=None):
+        user = request.user
+        role_name = getattr(getattr(user, 'role', None), 'role_name', '').upper().replace(' ', '_')
+        staff_roles = {'ADMIN', 'ADMINISTRATOR', 'SUPER_ADMIN', 'SUPERADMIN', 'LIBRARY', 'LIBRARIAN', 'TECH_SUPPORTER', 'ADMINISTRATION_OFFICER', 'AO'}
+        is_staff = getattr(user, 'is_superuser', False) or (role_name in staff_roles)
+        if not is_staff:
+            return Response({'code': 403, 'message': 'Only library staff are permitted to fulfill reservations.'}, status=403)
+
+        reservation = self.get_object()
+        reservation.status = 'FULFILLED'
+        reservation.updated_by = self._tracking_user()
+        reservation.save()
+        return self._success('Reservation marked as fulfilled.', self.get_serializer(reservation).data)
+
+
+class MyLibraryViewSet(LibraryViewSetMixin, viewsets.ViewSet):
+    """Provides personalized library oversight for students and faculty."""
+
+    def my_library(self, request):
+        user = request.user
+        today = timezone.localdate()
+
+        # Allow staff/admin to inspect a specific member via query params
+        member_id = request.query_params.get('member_id')
+        code = request.query_params.get('code')
+        roll_number = request.query_params.get('roll_number')
+
+        member = None
+        if member_id:
+            member = LibraryMember.objects.filter(pk=member_id).first()
+        elif code:
+            member = LibraryMember.objects.filter(membership_number__iexact=code).first()
+        elif roll_number:
+            member = LibraryMember.objects.filter(
+                Q(student__roll_number__iexact=roll_number) |
+                Q(user__username__iexact=roll_number)
+            ).first()
+        elif user and user.is_authenticated:
+            # Prioritize student membership if user account belongs to a student
+            member = LibraryMember.objects.filter(
+                Q(student__roll_number__iexact=user.username) |
+                Q(student__register_number__iexact=user.username)
+            ).first()
+            if not member:
+                member = LibraryMember.objects.filter(user=user, student__isnull=False).first()
+            if not member:
+                member = LibraryMember.objects.filter(user=user).first()
+            
+            # If member exists for this student but user FK wasn't linked, link it now
+            if member and not member.user and (
+                member.student and (
+                    member.student.roll_number == user.username or
+                    member.student.register_number == user.username
+                )
+            ):
+                member.user = user
+                member.save(update_fields=['user', 'updated_at'])
+
+        if not member:
+            return Response({
+                'code': 404,
+                'message': 'No library member record associated with your account. Please contact the librarian.'
+            }, status=404)
+
+        # 1. Member Profile & Barcode
+        member_info = LibraryMemberSerializer(member).data
+
+        # 2. Active Loans
+        active_loans_qs = LibraryTransaction.objects.filter(
+            member=member,
+            returned_on__isnull=True
+        ).select_related('book').order_by('due_on')
+
+        active_loans = []
+        overdue_count = 0
+        total_overdue_fines = Decimal('0.00')
+
+        for loan in active_loans_qs:
+            is_overdue = bool(loan.due_on and loan.due_on < today)
+            overdue_days = (today - loan.due_on).days if is_overdue else 0
+            fine_settled = False
+            fine_status = 'NONE'
+            fine_paid = 0.0
+
+            if is_overdue:
+                overdue_count += 1
+                fine_rec = loan.fines.filter(status__in=['PENDING', 'PARTIAL']).first() or loan.fines.first()
+                if fine_rec:
+                    accrued_fine = max(
+                        Decimal('0.00'),
+                        (fine_rec.fine_amount or Decimal('0.00')) -
+                        (fine_rec.paid_amount or Decimal('0.00'))
+                    )
+                    fine_status = fine_rec.status
+                    fine_paid = float(fine_rec.paid_amount or Decimal('0.00'))
+                    if fine_rec.status == 'PAID' and accrued_fine == Decimal('0.00'):
+                        fine_settled = True
+                else:
+                    accrued_fine = Decimal(str(overdue_days)) * Decimal('1.00')
+                    fine_status = 'PENDING'
+                total_overdue_fines += accrued_fine
+            else:
+                accrued_fine = Decimal('0.00')
+
+            status_text = 'OVERDUE' if is_overdue else 'ISSUED'
+            if is_overdue and fine_settled:
+                status_text = 'FINE SETTLED (RETURN PENDING)'
+
+            active_loans.append({
+                'id': loan.id,
+                'book_id': loan.book_id,
+                'book_title': loan.book.title,
+                'book_acc_no': loan.book.acc_no,
+                'book_call_no': loan.book.call_no,
+                'author': loan.book.author,
+                'shelf_location': loan.book.shelf_location,
+                'issued_on': str(loan.issued_on),
+                'due_on': str(loan.due_on),
+                'renewal_count': loan.renewal_count,
+                'status': status_text,
+                'is_overdue': is_overdue,
+                'overdue_days': overdue_days,
+                'accrued_fine': float(accrued_fine),
+                'fine_settled': fine_settled,
+                'fine_status': fine_status,
+                'fine_paid': fine_paid,
+            })
+
+        # 3. Borrowing History (Recent Returned Books)
+        history_qs = LibraryTransaction.objects.filter(
+            member=member,
+            returned_on__isnull=False
+        ).select_related('book').order_by('-returned_on')[:15]
+
+        history = [{
+            'id': loan.id,
+            'book_title': loan.book.title,
+            'book_acc_no': loan.book.acc_no,
+            'author': loan.book.author,
+            'issued_on': str(loan.issued_on),
+            'due_on': str(loan.due_on),
+            'returned_on': str(loan.returned_on),
+            'status': loan.status,
+        } for loan in history_qs]
+
+        # 4. Overdue Fines Ledger
+        fines_qs = LibraryFine.objects.filter(member=member).select_related('book').order_by('-created_at')[:20]
+        fines = [LibraryFineSerializer(f).data for f in fines_qs]
+
+        pending_fines_sum = sum(
+            float(f.get('balance_amount', 0)) for f in fines if f.get('status') in ['PENDING', 'PARTIAL']
+        )
+
+        # 5. Book Reservations Queue
+        res_qs = LibraryReservation.objects.filter(
+            member=member
+        ).select_related('book').order_by('-reserved_on')[:15]
+        reservations = [LibraryReservationSerializer(r).data for r in res_qs]
+
+        active_res_count = LibraryReservation.objects.filter(
+            member=member,
+            status__in=['PENDING', 'AVAILABLE']
+        ).count()
+
+        total_borrowed_lifetime = LibraryTransaction.objects.filter(member=member).count()
+
+        # If there are fine records in the ledger, use pending_fines_sum directly (which is 0 when all are paid)
+        # If there are no fine records at all, use total_overdue_fines
+        effective_pending_fine = pending_fines_sum if len(fines) > 0 else float(total_overdue_fines)
+
+        kpis = {
+            'currently_borrowed': len(active_loans),
+            'overdue_loans': overdue_count,
+            'unsettled_overdues': sum(1 for l in active_loans if l.get('is_overdue') and not l.get('fine_settled')),
+            'total_borrowed_lifetime': total_borrowed_lifetime,
+            'pending_fines_amount': effective_pending_fine,
+            'active_reservations': active_res_count,
+        }
+
+        return self._success('My library data retrieved successfully', {
+            'member': member_info,
+            'kpis': kpis,
+            'active_loans': active_loans,
+            'history': history,
+            'fines': fines,
+            'reservations': reservations,
+        })
+
+
+class LibraryNotificationViewSet(LibraryViewSetMixin, viewsets.ViewSet):
+    """Dispatches daily 9:00 AM overdue notifications for library borrowers."""
+
+    def send_overdue_notifications(self, request):
+        today = timezone.localdate()
+        
+        # Dynamic fine rate from request parameter or default 1.00
+        rate_param = request.data.get('fine_per_day') or request.query_params.get('fine_per_day')
+        try:
+            fine_rate = Decimal(str(rate_param)) if rate_param is not None else Decimal('1.00')
+        except Exception:
+            fine_rate = Decimal('1.00')
+
+        overdue_loans = LibraryTransaction.objects.filter(
+            returned_on__isnull=True,
+            due_on__lt=today
+        ).select_related('member', 'member__student', 'member__user', 'book')
+
+        notified_users = 0
+        skipped_already_notified = 0
+        skipped_no_due = 0
+        total_overdue_fine_amount = Decimal('0.00')
+
+        from leave.models import Notification
+
+        for loan in overdue_loans:
+            days = (today - loan.due_on).days
+            if days <= 0:
+                continue
+
+            fine_amt = Decimal(str(days)) * fine_rate
+
+            # Check existing fine record
+            fine_rec = loan.fines.first()
+            if fine_rec:
+                # If fine record exists and was already paid in full, do NOT send notification!
+                if fine_rec.status == 'PAID':
+                    skipped_no_due += 1
+                    continue
+                
+                # Check balance
+                paid = fine_rec.paid_amount or Decimal('0.00')
+                balance = max(Decimal('0.00'), fine_amt - paid)
+                if balance <= Decimal('0.00'):
+                    skipped_no_due += 1
+                    continue
+
+                if fine_rec.status == 'PENDING':
+                    fine_rec.overdue_days = days
+                    fine_rec.fine_rate_per_day = fine_rate
+                    fine_rec.fine_amount = fine_amt
+                    fine_rec.save()
+            else:
+                balance = fine_amt
+                fine_rec = LibraryFine.objects.create(
+                    transaction=loan,
+                    member=loan.member,
+                    book=loan.book,
+                    due_on=loan.due_on,
+                    overdue_days=days,
+                    fine_rate_per_day=fine_rate,
+                    fine_amount=fine_amt,
+                    status='PENDING',
+                    created_by=self._tracking_user(),
+                    updated_by=self._tracking_user(),
+                )
+
+            total_overdue_fine_amount += balance
+
+            # Determine user account
+            target_user = None
+            if loan.member.user:
+                target_user = loan.member.user
+            elif loan.member.student:
+                stu = loan.member.student
+                target_user = User.objects.filter(
+                    Q(username=stu.roll_number) | Q(username=stu.register_number)
+                ).first()
+
+            if not target_user:
+                continue
+
+            # Prevent duplicate notifications on the same day for the same loan
+            already_notified_today = Notification.objects.filter(
+                user=target_user,
+                created_at__date=today,
+                title__icontains='Overdue Library Book',
+                message__icontains=loan.book.acc_no or loan.book.title[:20]
+            ).exists()
+
+            if already_notified_today:
+                skipped_already_notified += 1
+                continue
+
+            # Create in-app morning notification with exact dynamic amount
+            Notification.objects.create(
+                user=target_user,
+                title=f'Overdue Library Book: {loan.book.title[:50]}',
+                message=(
+                    f'Your borrowed book "{loan.book.title}" (Acc: {loan.book.acc_no}) was due on {loan.due_on} '
+                    f'and is now {days} day(s) overdue. Current pending fine due: ₹{balance:.2f} ({days} days @ ₹{fine_rate}/day). '
+                    f'Please return or renew it at the library desk today.'
+                ),
+                notification_type='GENERAL',
+            )
+            notified_users += 1
+
+        if notified_users == 0 and skipped_no_due > 0 and skipped_already_notified == 0:
+            msg = 'All borrowers with overdue checkouts have already cleared their dues. No notifications sent.'
+        else:
+            msg = f'Overdue check completed. Notified {notified_users} borrower(s) (Skipped {skipped_no_due} with zero due, {skipped_already_notified} already notified today).'
+
+        return self._success(
+            msg,
+            {
+                'total_overdue_loans': overdue_loans.count(),
+                'notified_users': notified_users,
+                'skipped_no_due': skipped_no_due,
+                'skipped_already_notified': skipped_already_notified,
+                'total_overdue_fines': float(total_overdue_fine_amount),
+                'check_date': str(today),
+            }
+        )
+

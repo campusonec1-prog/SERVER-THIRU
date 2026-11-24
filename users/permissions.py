@@ -42,9 +42,13 @@ class BaseRolePermission(permissions.BasePermission):
             except Exception:
                 return False
 
-        # Block edit for Principal
+        # Block edit for Principal (except profile details, password changes, and approvals)
+        is_profile_or_pwd = (
+            getattr(view, 'action', None) in ['change_password', 'me', 'my_profile', 'approve', 'reject', 'recommend', 'principal_approve', 'principal_reject'] or
+            view.__class__.__name__ in ['UserDetailsViewSet', 'ProfileViewSet']
+        )
         is_edit = (request.method in ['PUT', 'PATCH']) or (getattr(view, 'action', None) in ['update', 'partial_update', 'edit', 'full_profile_update'])
-        if is_edit and getattr(view, 'action', None) not in ['change_password', 'approve', 'reject', 'recommend', 'principal_approve', 'principal_reject']:
+        if is_edit and not is_profile_or_pwd:
             if not request.user or not request.user.is_authenticated:
                 return False
             if not getattr(request.user, 'is_superuser', False):
@@ -99,8 +103,12 @@ class BaseRolePermission(permissions.BasePermission):
             except Exception:
                 return False
 
+        is_profile_or_pwd = (
+            getattr(view, 'action', None) in ['change_password', 'me', 'my_profile', 'approve', 'reject', 'recommend', 'principal_approve', 'principal_reject'] or
+            view.__class__.__name__ in ['UserDetailsViewSet', 'ProfileViewSet']
+        )
         is_edit = (request.method in ['PUT', 'PATCH']) or (getattr(view, 'action', None) in ['update', 'partial_update', 'edit', 'full_profile_update'])
-        if is_edit and getattr(view, 'action', None) not in ['change_password', 'approve', 'reject', 'recommend', 'principal_approve', 'principal_reject']:
+        if is_edit and not is_profile_or_pwd:
             if not request.user or not request.user.is_authenticated:
                 return False
             if not getattr(request.user, 'is_superuser', False):
@@ -137,8 +145,12 @@ class RestrictDeleteToTechSupporterPermission(permissions.BasePermission):
             user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
             return user_role in self.DELETE_ALLOWED_ROLES
 
+        is_profile_or_pwd = (
+            getattr(view, 'action', None) in ['change_password', 'me', 'my_profile', 'approve', 'reject', 'recommend', 'principal_approve', 'principal_reject'] or
+            view.__class__.__name__ in ['UserDetailsViewSet', 'ProfileViewSet']
+        )
         is_edit = (request.method in ['PUT', 'PATCH']) or (getattr(view, 'action', None) in ['update', 'partial_update', 'edit', 'full_profile_update'])
-        if is_edit and getattr(view, 'action', None) not in ['change_password', 'approve', 'reject', 'recommend', 'principal_approve', 'principal_reject']:
+        if is_edit and not is_profile_or_pwd:
             if not request.user or not request.user.is_authenticated:
                 return False
             if getattr(request.user, 'is_superuser', False):
@@ -159,8 +171,12 @@ class RestrictDeleteToTechSupporterPermission(permissions.BasePermission):
             user_role = getattr(getattr(request.user, 'role', None), 'role_name', '').upper().replace(' ', '_')
             return user_role in self.DELETE_ALLOWED_ROLES
 
+        is_profile_or_pwd = (
+            getattr(view, 'action', None) in ['change_password', 'me', 'my_profile', 'approve', 'reject', 'recommend', 'principal_approve', 'principal_reject'] or
+            view.__class__.__name__ in ['UserDetailsViewSet', 'ProfileViewSet']
+        )
         is_edit = (request.method in ['PUT', 'PATCH']) or (getattr(view, 'action', None) in ['update', 'partial_update', 'edit', 'full_profile_update'])
-        if is_edit and getattr(view, 'action', None) not in ['change_password', 'approve', 'reject', 'recommend', 'principal_approve', 'principal_reject']:
+        if is_edit and not is_profile_or_pwd:
             if not request.user or not request.user.is_authenticated:
                 return False
             if getattr(request.user, 'is_superuser', False):
@@ -226,7 +242,23 @@ class UserPermission(BaseRolePermission):
 
 class UserDetailsPermission(BaseRolePermission):
     read_roles = ['authenticated']
-    write_roles = ['admin', 'administrator', 'office', 'manager', 'tech_supporter', 'administration_officer']
+    write_roles = [
+        'admin', 'administrator', 'office', 'manager', 'tech_supporter',
+        'administration_officer', 'principal', 'vice_principal', 'authenticated'
+    ]
+
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        return True
+
+    def has_object_permission(self, request, view, obj):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        # Any authenticated user can manage and edit their own UserDetails profile
+        if hasattr(obj, 'user_id') and obj.user_id == request.user.id:
+            return True
+        return super().has_object_permission(request, view, obj)
 
 
 

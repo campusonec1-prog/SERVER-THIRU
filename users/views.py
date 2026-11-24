@@ -1388,7 +1388,10 @@ class UserDetailsViewSet(viewsets.ModelViewSet):
         is_admin = False
         try:
             role_name = user.role.role_name.upper()
-            if role_name in ['ADMIN', 'ADMINISTRATOR', 'SUPER_ADMIN', 'SUPERADMIN']:
+            if role_name in [
+                'ADMIN', 'ADMINISTRATOR', 'SUPER_ADMIN', 'SUPERADMIN',
+                'PRINCIPAL', 'VICE_PRINCIPAL', 'AO', 'ADMINISTRATION_OFFICER', 'TECH_SUPPORTER'
+            ]:
                 is_admin = True
         except AttributeError:
             pass

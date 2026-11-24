@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -42,7 +43,7 @@ class LibraryBook(TrackingModel):
 
     class Meta:
         db_table = 'library_books'
-        ordering = ['title', 'author']
+        ordering = ['acc_no', 'title', 'author']
         indexes = [
             models.Index(fields=['status', 'is_active']),
             models.Index(fields=['department']),
@@ -58,13 +59,29 @@ class LibraryBook(TrackingModel):
 
 
 class LibraryMember(TrackingModel):
+    MEMBER_TYPE_CHOICES = [
+        ('STUDENT', 'Student'),
+        ('STAFF', 'Staff / Faculty / Other'),
+    ]
+
+    member_type = models.CharField(max_length=20, choices=MEMBER_TYPE_CHOICES, default='STUDENT')
     student = models.OneToOneField(
         Student,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name='library_membership',
         db_column='student_id',
     )
-    membership_number = models.CharField(max_length=50, unique=True)
+    user = models.OneToOneField(
+        'users.User',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='library_membership',
+        db_column='user_id',
+    )
+    membership_number = models.CharField(max_length=50, unique=True, verbose_name='Library Code')
     joined_on = models.DateField(default=timezone.now)
     is_active = models.BooleanField(default=True)
 
@@ -73,7 +90,70 @@ class LibraryMember(TrackingModel):
         ordering = ['membership_number']
 
     def __str__(self):
-        return f'{self.membership_number} - {self.student}'
+        return f'{self.membership_number} - {self.borrower_name}'
+
+    @property
+    def borrower_name(self):
+        if self.student:
+            if self.student.student_name:
+                return self.student.student_name
+            if hasattr(self.student, 'application') and self.student.application and hasattr(self.student.application, 'candidate'):
+                return self.student.application.candidate.name or ''
+            return f"Student #{self.student.id}"
+        if self.user:
+            return self.user.name or self.user.username
+        return "Unknown"
+
+    @property
+    def borrower_role(self):
+        if self.student:
+            return 'STUDENT'
+        if self.user:
+            return getattr(self.user.role, 'role_name', 'STAFF') if getattr(self.user, 'role', None) else 'STAFF'
+        return 'STAFF'
+
+    @property
+    def borrower_code(self):
+        return self.membership_number
+
+    @classmethod
+    def generate_code_for_student(cls, student):
+        import re
+        dept_short = 'STU'
+        if student.department and student.department.short_name:
+            cleaned = re.sub(r'[^A-Za-z0-9]', '', str(student.department.short_name)).upper()
+            if cleaned:
+                dept_short = cleaned
+        
+        existing_codes = cls.objects.filter(membership_number__startswith=dept_short).values_list('membership_number', flat=True)
+        max_num = 0
+        for code in existing_codes:
+            num_part = code[len(dept_short):]
+            if num_part.isdigit():
+                val = int(num_part)
+                if val > max_num:
+                    max_num = val
+        next_num = max_num + 1
+        return f"{dept_short}{next_num:03d}"
+
+    @classmethod
+    def generate_code_for_user(cls, user):
+        import re
+        raw_prefix = re.sub(r'[^A-Za-z0-9]', '', str(user.username or '')).upper()
+        prefix = raw_prefix[:4] if len(raw_prefix) >= 4 else raw_prefix.ljust(4, '0')
+        if not prefix:
+            prefix = 'USER'
+
+        existing_codes = cls.objects.filter(membership_number__startswith=prefix).values_list('membership_number', flat=True)
+        max_num = 0
+        for code in existing_codes:
+            num_part = code[len(prefix):]
+            if num_part.isdigit():
+                val = int(num_part)
+                if val > max_num:
+                    max_num = val
+        next_num = max_num + 1
+        return f"{prefix}{next_num:03d}"
 
 
 class LibraryTransaction(TrackingModel):
@@ -115,3 +195,98 @@ class LibraryTransaction(TrackingModel):
 
     def __str__(self):
         return f'{self.book.title} / {self.member.membership_number}'
+
+
+class LibraryFine(TrackingModel):
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending Payment'),
+        ('PAID', 'Paid in Full'),
+        ('PARTIAL', 'Partially Paid'),
+    ]
+
+    transaction = models.ForeignKey(
+        LibraryTransaction,
+        on_delete=models.CASCADE,
+        related_name='fines',
+        null=True,
+        blank=True,
+    )
+    member = models.ForeignKey(
+        LibraryMember,
+        on_delete=models.PROTECT,
+        related_name='fines',
+    )
+    book = models.ForeignKey(
+        LibraryBook,
+        on_delete=models.PROTECT,
+        related_name='fines',
+    )
+    due_on = models.DateField()
+    returned_on = models.DateField(null=True, blank=True)
+    overdue_days = models.PositiveIntegerField(default=0)
+    fine_rate_per_day = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('2.00'))
+    fine_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    waived_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    paid_on = models.DateTimeField(null=True, blank=True)
+    receipt_no = models.CharField(max_length=50, blank=True)
+    remarks = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'library_fines'
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['status']),
+            models.Index(fields=['member', 'status']),
+            models.Index(fields=['transaction']),
+        ]
+
+    def __str__(self):
+        return f'{self.member.membership_number} - Rs. {self.fine_amount} ({self.status})'
+
+
+class LibraryReservation(TrackingModel):
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending (In Queue)'),
+        ('AVAILABLE', 'Ready for Pickup'),
+        ('FULFILLED', 'Fulfilled / Borrowed'),
+        ('CANCELLED', 'Cancelled by User'),
+        ('EXPIRED', 'Pickup Window Expired'),
+    ]
+
+    book = models.ForeignKey(
+        LibraryBook,
+        on_delete=models.CASCADE,
+        related_name='reservations'
+    )
+    book_title = models.CharField(max_length=255, blank=True)
+    member = models.ForeignKey(
+        LibraryMember,
+        on_delete=models.CASCADE,
+        related_name='reservations'
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING', db_index=True)
+    queue_position = models.PositiveIntegerField(default=1)
+    reserved_on = models.DateTimeField(auto_now_add=True)
+    notified_on = models.DateTimeField(null=True, blank=True)
+    available_until = models.DateField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'library_reservations'
+        ordering = ['reserved_on', 'id']
+        indexes = [
+            models.Index(fields=['status', 'book']),
+            models.Index(fields=['member', 'status']),
+            models.Index(fields=['available_until']),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.book_title and self.book:
+            self.book_title = self.book.title or ''
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.book_title} - {self.member.borrower_code} ({self.status})'
+

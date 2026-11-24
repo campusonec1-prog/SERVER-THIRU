@@ -369,8 +369,12 @@ class StudentSemesterFee(TrackingModel):
         if self.paid_amount is not None and self.paid_amount < 0:
             raise ValidationError({'paid_amount': 'Paid amount cannot be negative.'})
 
+    @property
+    def net_payable(self):
+        return max(Decimal('0.00'), (self.total_amount or Decimal('0.00')) - (self.concession_amount or Decimal('0.00')))
+
     def recalculate_balance(self):
-        net_payable = max(Decimal('0.00'), (self.total_amount or Decimal('0.00')) - (self.concession_amount or Decimal('0.00')))
+        net_payable = self.net_payable
         paid = self.paid_amount or Decimal('0.00')
         self.balance_amount = max(Decimal('0.00'), net_payable - paid)
         if net_payable == Decimal('0.00'):

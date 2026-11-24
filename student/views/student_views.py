@@ -5,6 +5,7 @@ import re
 import urllib.request
 import datetime
 from datetime import datetime as dt_datetime
+from decimal import Decimal
 from io import BytesIO
 
 from django.http import Http404, HttpResponse
@@ -2069,7 +2070,7 @@ class StudentViewSet(viewsets.ModelViewSet):
                     'semester_number': sf.semester.semester_number if sf.semester else 0,
                     'total_amount': float(sf.total_amount or 0.0),
                     'concession_amount': float(sf.concession_amount or 0.0),
-                    'net_payable': float(sf.net_payable or 0.0),
+                    'net_payable': float(getattr(sf, 'net_payable', max(Decimal('0.00'), (sf.total_amount or Decimal('0.00')) - (sf.concession_amount or Decimal('0.00')))) or 0.0),
                     'paid_amount': float(sf.paid_amount or 0.0),
                     'balance_amount': float(sf.balance_amount or 0.0),
                     'status': sf.status or 'PENDING',

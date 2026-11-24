@@ -6,6 +6,10 @@ from .views import (
     LibraryMemberViewSet,
     LibraryStudentLookupViewSet,
     LibraryTransactionViewSet,
+    LibraryFineViewSet,
+    LibraryReservationViewSet,
+    MyLibraryViewSet,
+    LibraryNotificationViewSet,
 )
 
 urlpatterns = [
@@ -32,6 +36,20 @@ urlpatterns = [
     path('transactions/edit/<int:pk>', LibraryTransactionViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='library-transactions-edit'),
     path('transactions/return/<int:pk>', LibraryTransactionViewSet.as_view({'post': 'return_book'}), name='library-transactions-return'),
     path('transactions/renew/<int:pk>', LibraryTransactionViewSet.as_view({'post': 'renew'}), name='library-transactions-renew'),
+    path('fines/list', LibraryFineViewSet.as_view({'get': 'list'}), name='library-fines-list'),
+    path('fines/pay/<int:pk>', LibraryFineViewSet.as_view({'post': 'pay'}), name='library-fines-pay'),
+    path('fines/sync-overdue', LibraryFineViewSet.as_view({'post': 'sync_overdue'}), name='library-fines-sync-overdue'),
     path('dashboard/summary', LibraryDashboardViewSet.as_view({'get': 'summary'}), name='library-dashboard-summary'),
     path('students/list', LibraryStudentLookupViewSet.as_view({'get': 'list'}), name='library-student-lookup'),
+    # Reservation Queue
+    path('reservations/list', LibraryReservationViewSet.as_view({'get': 'list'}), name='library-reservations-list'),
+    path('reservations/create', LibraryReservationViewSet.as_view({'post': 'create'}), name='library-reservations-create'),
+    path('reservations/cancel/<int:pk>', LibraryReservationViewSet.as_view({'post': 'cancel'}), name='library-reservations-cancel'),
+    path('reservations/approve/<int:pk>', LibraryReservationViewSet.as_view({'post': 'approve'}), name='library-reservations-approve'),
+    path('reservations/issue/<int:pk>', LibraryReservationViewSet.as_view({'post': 'issue'}), name='library-reservations-issue'),
+    path('reservations/fulfill/<int:pk>', LibraryReservationViewSet.as_view({'post': 'fulfill'}), name='library-reservations-fulfill'),
+    # My Library Self-Service (Student, Faculty & Staff)
+    path('my-library', MyLibraryViewSet.as_view({'get': 'my_library'}), name='library-my-library'),
+    # Daily Overdue Notification Trigger (Runs morning 9:00 AM)
+    path('notifications/send-overdue', LibraryNotificationViewSet.as_view({'post': 'send_overdue_notifications'}), name='library-send-overdue-notifications'),
 ]

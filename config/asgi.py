@@ -21,8 +21,8 @@ from django.urls import path, re_path
 from common.consumers import RealTimeConsumer, PresenceConsumer
 
 websocket_urlpatterns = [
-    re_path(r'^ws/realtime/?$', RealTimeConsumer.as_asgi()),
-    re_path(r'^ws/presence/?$', PresenceConsumer.as_asgi()),
+    re_path(r'^/?ws/realtime/?$', RealTimeConsumer.as_asgi()),
+    re_path(r'^/?ws/presence/?$', PresenceConsumer.as_asgi()),
 ]
 
 application = ProtocolTypeRouter({
