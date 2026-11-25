@@ -128,10 +128,19 @@ class LibraryMember(TrackingModel):
     def generate_code_for_student(cls, student):
         import re
         dept_short = 'STU'
-        if student.department and student.department.short_name:
-            cleaned = re.sub(r'[^A-Za-z0-9]', '', str(student.department.short_name)).upper()
-            if cleaned:
-                dept_short = cleaned
+        if student.department:
+            if getattr(student.department, 'short_name', None):
+                cleaned = re.sub(r'[^A-Za-z0-9]', '', str(student.department.short_name)).upper()
+                if cleaned:
+                    dept_short = cleaned
+            elif getattr(student.department, 'department_code', None):
+                cleaned = re.sub(r'[^A-Za-z0-9]', '', str(student.department.department_code)).upper()
+                if cleaned:
+                    dept_short = cleaned
+            elif getattr(student.department, 'department_name', None):
+                cleaned = re.sub(r'[^A-Za-z0-9]', '', str(student.department.department_name)).upper()
+                if cleaned:
+                    dept_short = cleaned[:4]
         
         # 2-digit batch prefix from student's batch (e.g. 2025-2029 -> '25', 2023-2027 -> '23')
         batch_prefix = ''
@@ -144,6 +153,20 @@ class LibraryMember(TrackingModel):
                 m2 = re.search(r'(\d{2})', batch_str)
                 if m2:
                     batch_prefix = m2.group(1)
+
+        # Fallback to roll number (e.g. 2025IT5001 -> '25')
+        if not batch_prefix and getattr(student, 'roll_number', None):
+            r_str = str(student.roll_number).strip()
+            m_year = re.match(r'^(?:20)?(\d{2})', r_str)
+            if m_year:
+                batch_prefix = m_year.group(1)
+
+        # Fallback to register number (e.g. 513224106325 -> '24')
+        if not batch_prefix and getattr(student, 'register_number', None):
+            reg_str = str(student.register_number).strip()
+            m_reg = re.match(r'^\d{4}(\d{2})\d+', reg_str)
+            if m_reg:
+                batch_prefix = m_reg.group(1)
         
         full_prefix = f"{batch_prefix}{dept_short}"
         existing_codes = cls.objects.filter(membership_number__startswith=full_prefix).values_list('membership_number', flat=True)

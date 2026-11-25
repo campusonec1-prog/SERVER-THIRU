@@ -478,6 +478,51 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         return self._success('Book deleted successfully')
 
 
+def _extract_student_batch_prefix(student):
+    import re
+    if getattr(student, 'batch', None) and getattr(student.batch, 'batch', None):
+        batch_str = str(student.batch.batch).strip()
+        match = re.search(r'(\d{4})', batch_str)
+        if match:
+            return match.group(1)[-2:]
+        m2 = re.search(r'(\d{2})', batch_str)
+        if m2:
+            return m2.group(1)
+
+    if getattr(student, 'roll_number', None):
+        r_str = str(student.roll_number).strip()
+        m_year = re.match(r'^(?:20)?(\d{2})', r_str)
+        if m_year:
+            return m_year.group(1)
+
+    if getattr(student, 'register_number', None):
+        reg_str = str(student.register_number).strip()
+        m_reg = re.match(r'^\d{4}(\d{2})\d+', reg_str)
+        if m_reg:
+            return m_reg.group(1)
+
+    return ''
+
+
+def _extract_student_dept_short(student):
+    import re
+    dept = getattr(student, 'department', None)
+    if dept:
+        if getattr(dept, 'short_name', None):
+            cleaned = re.sub(r'[^A-Za-z0-9]', '', str(dept.short_name)).upper()
+            if cleaned:
+                return cleaned
+        if getattr(dept, 'department_code', None):
+            cleaned = re.sub(r'[^A-Za-z0-9]', '', str(dept.department_code)).upper()
+            if cleaned:
+                return cleaned
+        if getattr(dept, 'department_name', None):
+            cleaned = re.sub(r'[^A-Za-z0-9]', '', str(dept.department_name)).upper()
+            if cleaned:
+                return cleaned[:4]
+    return 'STU'
+
+
 class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
     queryset = LibraryMember.objects.select_related(
         'student__application', 'student__application__candidate', 'student__department',
@@ -631,36 +676,27 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
             pass
 
     def _ensure_student_batch_codes(self):
-        """Auto-detects and updates legacy student codes directly in DB to include batch prefix (e.g. IT001 -> 23IT001)."""
+        """Auto-detects and updates legacy student codes directly in DB to include batch prefix (e.g. IT001 -> 25IT001)."""
         import re
         try:
-            legacy_members = LibraryMember.objects.filter(
-                student__isnull=False,
-                student__batch__isnull=False
-            ).exclude(
-                membership_number__regex=r'^\d{2}[A-Za-z]'
-            ).select_related('student__batch', 'student__department')[:100]
+            student_members = LibraryMember.objects.filter(
+                student__isnull=False
+            ).select_related('student__batch', 'student__department')
 
-            for member in legacy_members:
+            candidates = []
+            for m in student_members:
+                code = str(m.membership_number or '').strip()
+                if not re.match(r'^[0-9]{2}[A-Za-z]', code):
+                    candidates.append(m)
+                if len(candidates) >= 100:
+                    break
+
+            for member in candidates:
                 student = member.student
                 if not student:
                     continue
-                dept_short = 'STU'
-                if student.department and student.department.short_name:
-                    cleaned = re.sub(r'[^A-Za-z0-9]', '', str(student.department.short_name)).upper()
-                    if cleaned:
-                        dept_short = cleaned
-
-                batch_prefix = ''
-                if getattr(student, 'batch', None) and getattr(student.batch, 'batch', None):
-                    batch_str = str(student.batch.batch).strip()
-                    match = re.search(r'(\d{4})', batch_str)
-                    if match:
-                        batch_prefix = match.group(1)[-2:]
-                    else:
-                        m2 = re.search(r'(\d{2})', batch_str)
-                        if m2:
-                            batch_prefix = m2.group(1)
+                dept_short = _extract_student_dept_short(student)
+                batch_prefix = _extract_student_batch_prefix(student)
 
                 if not batch_prefix:
                     continue
@@ -714,37 +750,29 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         data['active_loans_count'] = LibraryTransaction.objects.filter(member=member, returned_on__isnull=True).count()
         return self._success('Member found successfully', data)
 
-    @action(detail=False, methods=['post'], url_path='sync-batch-codes')
+    @action(detail=False, methods=['post', 'get'], url_path='sync-batch-codes')
     def sync_batch_codes(self, request):
         """
         Migrates existing student library membership numbers to include their 2-digit batch prefix
-        (e.g., IT001 -> 23IT001 for batch 2023-2027, 25IT001 for batch 2025-2029).
+        (e.g., IT001 -> 25IT001 for batch 2025-2029, 24CSE001 for batch 2024-2028).
         """
         import re
-        student_members = LibraryMember.objects.filter(student__isnull=False).select_related('student__batch', 'student__department')
+        student_members = LibraryMember.objects.filter(student__isnull=False).select_related(
+            'student__batch', 'student__department'
+        )
         updated_count = 0
+        skipped_count = 0
+
         for member in student_members:
             student = member.student
             if not student:
                 continue
-            dept_short = 'STU'
-            if student.department and student.department.short_name:
-                cleaned = re.sub(r'[^A-Za-z0-9]', '', str(student.department.short_name)).upper()
-                if cleaned:
-                    dept_short = cleaned
 
-            batch_prefix = ''
-            if getattr(student, 'batch', None) and getattr(student.batch, 'batch', None):
-                batch_str = str(student.batch.batch).strip()
-                match = re.search(r'(\d{4})', batch_str)
-                if match:
-                    batch_prefix = match.group(1)[-2:]
-                else:
-                    m2 = re.search(r'(\d{2})', batch_str)
-                    if m2:
-                        batch_prefix = m2.group(1)
+            dept_short = _extract_student_dept_short(student)
+            batch_prefix = _extract_student_batch_prefix(student)
 
             if not batch_prefix:
+                skipped_count += 1
                 continue
 
             expected_prefix = f"{batch_prefix}{dept_short}"
@@ -762,7 +790,10 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
                 member.save(update_fields=['membership_number', 'updated_at'])
                 updated_count += 1
 
-        return self._success(f'Updated {updated_count} student library member ID(s) with batch prefix.', {'updated': updated_count})
+        return self._success(
+            f'Updated {updated_count} student library member ID(s) with batch prefix.',
+            {'updated': updated_count, 'skipped': skipped_count}
+        )
 
     @action(detail=False, methods=['get'], url_path='quick-search')
     def quick_search(self, request):
