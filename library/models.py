@@ -116,6 +116,14 @@ class LibraryMember(TrackingModel):
     def borrower_code(self):
         return self.membership_number
 
+    @property
+    def max_books_allowed(self):
+        return 3 if self.member_type == 'STUDENT' else 5
+
+    @property
+    def max_days_allowed(self):
+        return 15 if self.member_type == 'STUDENT' else 30
+
     @classmethod
     def generate_code_for_student(cls, student):
         import re
@@ -125,16 +133,29 @@ class LibraryMember(TrackingModel):
             if cleaned:
                 dept_short = cleaned
         
-        existing_codes = cls.objects.filter(membership_number__startswith=dept_short).values_list('membership_number', flat=True)
+        # 2-digit batch prefix from student's batch (e.g. 2025-2029 -> '25', 2023-2027 -> '23')
+        batch_prefix = ''
+        if getattr(student, 'batch', None) and getattr(student.batch, 'batch', None):
+            batch_str = str(student.batch.batch).strip()
+            match = re.search(r'(\d{4})', batch_str)
+            if match:
+                batch_prefix = match.group(1)[-2:]
+            else:
+                m2 = re.search(r'(\d{2})', batch_str)
+                if m2:
+                    batch_prefix = m2.group(1)
+        
+        full_prefix = f"{batch_prefix}{dept_short}"
+        existing_codes = cls.objects.filter(membership_number__startswith=full_prefix).values_list('membership_number', flat=True)
         max_num = 0
         for code in existing_codes:
-            num_part = code[len(dept_short):]
+            num_part = code[len(full_prefix):]
             if num_part.isdigit():
                 val = int(num_part)
                 if val > max_num:
                     max_num = val
         next_num = max_num + 1
-        return f"{dept_short}{next_num:03d}"
+        return f"{full_prefix}{next_num:03d}"
 
     @classmethod
     def generate_code_for_user(cls, user):
@@ -184,7 +205,7 @@ class LibraryTransaction(TrackingModel):
 
     def save(self, *args, **kwargs):
         if not self.due_on:
-            self.due_on = self.issued_on + timedelta(days=14)
+            self.due_on = self.issued_on + timedelta(days=15)
         if self.returned_on:
             self.status = 'RETURNED'
         elif self.due_on < timezone.localdate():
@@ -224,7 +245,7 @@ class LibraryFine(TrackingModel):
     due_on = models.DateField()
     returned_on = models.DateField(null=True, blank=True)
     overdue_days = models.PositiveIntegerField(default=0)
-    fine_rate_per_day = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('2.00'))
+    fine_rate_per_day = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('1.00'))
     fine_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     waived_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
@@ -275,7 +296,7 @@ class LibraryReservation(TrackingModel):
 
     class Meta:
         db_table = 'library_reservations'
-        ordering = ['reserved_on', 'id']
+        ordering = ['-reserved_on', '-id']
         indexes = [
             models.Index(fields=['status', 'book']),
             models.Index(fields=['member', 'status']),

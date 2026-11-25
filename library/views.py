@@ -115,7 +115,7 @@ class LibraryBookViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='barcode-lookup')
     def barcode_lookup(self, request):
-        barcode = (
+        barcode = str(
             request.query_params.get('barcode')
             or request.query_params.get('acc_no')
             or request.query_params.get('q')
@@ -521,7 +521,165 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
     def perform_update(self, serializer):
         serializer.save(updated_by=self._tracking_user())
 
+    def _sync_library_members_and_statuses(self):
+        """
+        1. Auto-provisions missing LibraryMember records for all Students.
+        2. Auto-provisions missing LibraryMember records for all staff Users.
+        3. Synchronizes active/inactive status across all members based on actual Student & User states.
+        4. Updates legacy student membership codes to batch prefix (e.g. IT001 -> 23IT001).
+        """
+        import re
+        try:
+            # 1. Provision missing student members
+            missing_students = Student.objects.filter(library_membership__isnull=True).select_related('department', 'batch', 'status')[:250]
+            for stu in missing_students:
+                code = LibraryMember.generate_code_for_student(stu)
+                user_obj = None
+                if stu.roll_number:
+                    user_obj = User.objects.filter(username__iexact=stu.roll_number).first()
+                if not user_obj and stu.register_number:
+                    user_obj = User.objects.filter(username__iexact=stu.register_number).first()
+
+                stu_active = True
+                if stu.status:
+                    if not getattr(stu.status, 'is_active', True):
+                        stu_active = False
+                    elif getattr(stu.status, 'status_name', '').upper() in ['INACTIVE', 'DISCONTINUED', 'TERMINATED', 'CANCELLED', 'DROPPED', 'SUSPENDED', 'PASSED_OUT', 'ALUMNI']:
+                        stu_active = False
+                if user_obj and not getattr(user_obj, 'is_active', True):
+                    stu_active = False
+
+                LibraryMember.objects.create(
+                    student=stu,
+                    user=user_obj,
+                    member_type='STUDENT',
+                    membership_number=code,
+                    is_active=stu_active,
+                )
+
+            # 2. Provision missing staff members
+            student_usernames = set(Student.objects.filter(roll_number__isnull=False).values_list('roll_number', flat=True))
+            missing_users = User.objects.exclude(
+                role__role_name__iexact='STUDENT'
+            ).filter(
+                library_membership__isnull=True
+            )[:150]
+
+            for u in missing_users:
+                if u.username in student_usernames:
+                    continue
+                code = LibraryMember.generate_code_for_user(u)
+                LibraryMember.objects.create(
+                    user=u,
+                    member_type='STAFF',
+                    membership_number=code,
+                    is_active=bool(getattr(u, 'is_active', True)),
+                )
+
+            # 3. Synchronize is_active status for existing members
+            # Inactive students -> member.is_active = False
+            inactive_student_members = LibraryMember.objects.filter(
+                student__isnull=False,
+                is_active=True
+            ).filter(
+                Q(student__status__is_active=False) |
+                Q(student__status__status_name__in=['INACTIVE', 'DISCONTINUED', 'TERMINATED', 'CANCELLED', 'DROPPED', 'SUSPENDED', 'PASSED_OUT', 'ALUMNI']) |
+                Q(user__is_active=False)
+            )[:100]
+            for m in inactive_student_members:
+                m.is_active = False
+                m.save(update_fields=['is_active', 'updated_at'])
+
+            # Active students -> member.is_active = True
+            active_student_members = LibraryMember.objects.filter(
+                student__isnull=False,
+                is_active=False
+            ).exclude(
+                Q(student__status__is_active=False) |
+                Q(student__status__status_name__in=['INACTIVE', 'DISCONTINUED', 'TERMINATED', 'CANCELLED', 'DROPPED', 'SUSPENDED', 'PASSED_OUT', 'ALUMNI']) |
+                Q(user__is_active=False)
+            )[:100]
+            for m in active_student_members:
+                m.is_active = True
+                m.save(update_fields=['is_active', 'updated_at'])
+
+            # Inactive staff -> member.is_active = False
+            inactive_staff_members = LibraryMember.objects.filter(
+                user__isnull=False,
+                student__isnull=True,
+                is_active=True,
+                user__is_active=False
+            )[:50]
+            for m in inactive_staff_members:
+                m.is_active = False
+                m.save(update_fields=['is_active', 'updated_at'])
+
+            # Active staff -> member.is_active = True
+            active_staff_members = LibraryMember.objects.filter(
+                user__isnull=False,
+                student__isnull=True,
+                is_active=False,
+                user__is_active=True
+            )[:50]
+            for m in active_staff_members:
+                m.is_active = True
+                m.save(update_fields=['is_active', 'updated_at'])
+
+            # 4. Batch prefix updates for student codes
+            self._ensure_student_batch_codes()
+        except Exception:
+            pass
+
+    def _ensure_student_batch_codes(self):
+        """Auto-detects and updates legacy student codes directly in DB to include batch prefix (e.g. IT001 -> 23IT001)."""
+        import re
+        try:
+            legacy_members = LibraryMember.objects.filter(
+                student__isnull=False,
+                student__batch__isnull=False
+            ).exclude(
+                membership_number__regex=r'^\d{2}[A-Za-z]'
+            ).select_related('student__batch', 'student__department')[:100]
+
+            for member in legacy_members:
+                student = member.student
+                if not student:
+                    continue
+                dept_short = 'STU'
+                if student.department and student.department.short_name:
+                    cleaned = re.sub(r'[^A-Za-z0-9]', '', str(student.department.short_name)).upper()
+                    if cleaned:
+                        dept_short = cleaned
+
+                batch_prefix = ''
+                if getattr(student, 'batch', None) and getattr(student.batch, 'batch', None):
+                    batch_str = str(student.batch.batch).strip()
+                    match = re.search(r'(\d{4})', batch_str)
+                    if match:
+                        batch_prefix = match.group(1)[-2:]
+                    else:
+                        m2 = re.search(r'(\d{2})', batch_str)
+                        if m2:
+                            batch_prefix = m2.group(1)
+
+                if not batch_prefix:
+                    continue
+
+                expected_prefix = f"{batch_prefix}{dept_short}"
+                current_code = str(member.membership_number or '').strip().upper()
+                if not current_code.startswith(expected_prefix):
+                    num_match = re.search(r'(\d+)$', current_code)
+                    num_val = int(num_match.group(1)) if num_match else 1
+                    new_code = f"{expected_prefix}{num_val:03d}"
+                    if LibraryMember.objects.filter(membership_number=new_code).exclude(id=member.id).exists():
+                        new_code = LibraryMember.generate_code_for_student(student)
+                    member.membership_number = new_code
+                    member.save(update_fields=['membership_number', 'updated_at'])
+        except Exception:
+            pass
+
     def list(self, request, *args, **kwargs):
+        self._sync_library_members_and_statuses()
         response = super().list(request, *args, **kwargs)
         return self._success('Library members listed successfully', response.data)
 
@@ -531,19 +689,23 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='barcode-lookup')
     def barcode_lookup(self, request):
-        barcode = (request.query_params.get('barcode') or request.query_params.get('q') or '').strip()
+        barcode = str(request.query_params.get('barcode') or request.query_params.get('q') or '').strip()
         if not barcode:
             return Response({'code': 400, 'message': 'Barcode / Membership ID is required.'}, status=400)
 
-        member = LibraryMember.objects.select_related(
-            'student__application', 'student__application__candidate', 'student__department',
-            'student__batch', 'student__section', 'user', 'user__role'
-        ).filter(
+        lookup_q = (
             Q(membership_number__iexact=barcode)
             | Q(student__roll_number__iexact=barcode)
             | Q(student__register_number__iexact=barcode)
             | Q(user__username__iexact=barcode)
-        ).first()
+        )
+        if len(barcode) >= 4:
+            lookup_q |= Q(membership_number__iendswith=barcode)
+
+        member = LibraryMember.objects.select_related(
+            'student__application', 'student__application__candidate', 'student__department',
+            'student__batch', 'student__section', 'user', 'user__role'
+        ).filter(lookup_q).first()
 
         if not member:
             return Response({'code': 404, 'message': f'No borrower member found matching "{barcode}".'}, status=404)
@@ -551,6 +713,56 @@ class LibraryMemberViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         data = LibraryMemberSerializer(member, context={'request': request}).data
         data['active_loans_count'] = LibraryTransaction.objects.filter(member=member, returned_on__isnull=True).count()
         return self._success('Member found successfully', data)
+
+    @action(detail=False, methods=['post'], url_path='sync-batch-codes')
+    def sync_batch_codes(self, request):
+        """
+        Migrates existing student library membership numbers to include their 2-digit batch prefix
+        (e.g., IT001 -> 23IT001 for batch 2023-2027, 25IT001 for batch 2025-2029).
+        """
+        import re
+        student_members = LibraryMember.objects.filter(student__isnull=False).select_related('student__batch', 'student__department')
+        updated_count = 0
+        for member in student_members:
+            student = member.student
+            if not student:
+                continue
+            dept_short = 'STU'
+            if student.department and student.department.short_name:
+                cleaned = re.sub(r'[^A-Za-z0-9]', '', str(student.department.short_name)).upper()
+                if cleaned:
+                    dept_short = cleaned
+
+            batch_prefix = ''
+            if getattr(student, 'batch', None) and getattr(student.batch, 'batch', None):
+                batch_str = str(student.batch.batch).strip()
+                match = re.search(r'(\d{4})', batch_str)
+                if match:
+                    batch_prefix = match.group(1)[-2:]
+                else:
+                    m2 = re.search(r'(\d{2})', batch_str)
+                    if m2:
+                        batch_prefix = m2.group(1)
+
+            if not batch_prefix:
+                continue
+
+            expected_prefix = f"{batch_prefix}{dept_short}"
+            current_code = str(member.membership_number or '').strip().upper()
+
+            if not current_code.startswith(expected_prefix):
+                num_match = re.search(r'(\d+)$', current_code)
+                num_val = int(num_match.group(1)) if num_match else 1
+                new_code = f"{expected_prefix}{num_val:03d}"
+
+                if LibraryMember.objects.filter(membership_number=new_code).exclude(id=member.id).exists():
+                    new_code = LibraryMember.generate_code_for_student(student)
+
+                member.membership_number = new_code
+                member.save(update_fields=['membership_number', 'updated_at'])
+                updated_count += 1
+
+        return self._success(f'Updated {updated_count} student library member ID(s) with batch prefix.', {'updated': updated_count})
 
     @action(detail=False, methods=['get'], url_path='quick-search')
     def quick_search(self, request):
@@ -615,11 +827,12 @@ class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
             )
         if status_filter and status_filter != 'ALL':
             today = timezone.localdate()
-            if status_filter == 'ACTIVE':
+            status_clean = str(status_filter).strip().upper()
+            if status_clean in ('ACTIVE', 'ISSUED'):
                 queryset = queryset.filter(returned_on__isnull=True)
-            elif status_filter == 'OVERDUE':
+            elif status_clean == 'OVERDUE':
                 queryset = queryset.filter(returned_on__isnull=True, due_on__lt=today)
-            elif status_filter == 'RETURNED':
+            elif status_clean == 'RETURNED':
                 queryset = queryset.filter(returned_on__isnull=False)
             else:
                 queryset = queryset.filter(status=status_filter)
@@ -725,7 +938,11 @@ class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         if loan.due_on and loan.returned_on > loan.due_on:
             days = (loan.returned_on - loan.due_on).days
             if days > 0:
-                fine_rate = Decimal('2.00')
+                rate_param = request.data.get('fine_per_day') or request.query_params.get('fine_per_day')
+                try:
+                    fine_rate = Decimal(str(rate_param)) if rate_param is not None and str(rate_param).strip() != '' else Decimal('1.00')
+                except Exception:
+                    fine_rate = Decimal('1.00')
                 fine_amt = Decimal(str(days)) * fine_rate
                 fine_rec, created = LibraryFine.objects.get_or_create(
                     transaction=loan,
@@ -745,6 +962,7 @@ class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
                 if not created and fine_rec.status == 'PENDING':
                     fine_rec.returned_on = loan.returned_on
                     fine_rec.overdue_days = days
+                    fine_rec.fine_rate_per_day = fine_rate
                     fine_rec.fine_amount = fine_amt
                     fine_rec.updated_by = self._tracking_user()
                     fine_rec.save()
@@ -812,7 +1030,7 @@ class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         loan = self.get_object()
         if loan.returned_on:
             return Response({'message': 'Returned books cannot be renewed.'}, status=400)
-        loan.due_on = loan.due_on + timedelta(days=14)
+        loan.due_on = loan.due_on + timedelta(days=15)
         loan.renewal_count += 1
         loan.updated_by = self._tracking_user()
         
@@ -828,7 +1046,7 @@ class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='lookup-by-barcode')
     def lookup_by_barcode(self, request):
-        barcode = (request.query_params.get('barcode') or request.query_params.get('q') or '').strip()
+        barcode = str(request.query_params.get('barcode') or request.query_params.get('q') or '').strip()
         if not barcode:
             return Response({'code': 400, 'message': 'Barcode is required.'}, status=400)
 
@@ -877,29 +1095,50 @@ class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path='scan-action')
     @transaction.atomic
     def scan_action(self, request):
-        barcode = (request.data.get('barcode') or '').strip()
-        action_type = (request.data.get('action') or '').upper()
+        raw_barcode = request.data.get('barcode')
+        if raw_barcode is None or raw_barcode == '':
+            raw_barcode = request.data.get('acc_no') or request.data.get('book_id') or ''
+        barcode = str(raw_barcode).strip()
 
-        if not barcode:
-            return Response({'code': 400, 'message': 'Barcode is required.'}, status=400)
-        if action_type not in ('RETURN', 'RENEW'):
-            return Response({'code': 400, 'message': 'Action must be RETURN or RENEW.'}, status=400)
+        raw_action = request.data.get('action') or ''
+        action_type = str(raw_action).strip().upper()
 
-        book = LibraryBook.objects.select_for_update().filter(
-            Q(acc_no__iexact=barcode)
-            | Q(isbn__iexact=barcode)
-            | (Q(id=int(barcode)) if barcode.isdigit() else Q(pk__isnull=True))
-            | Q(call_no__iexact=barcode)
-        ).first()
+        loan_id = request.data.get('loan_id') or request.data.get('transaction_id')
 
-        if not book:
-            return Response({'code': 404, 'message': f'Book with barcode "{barcode}" was not found.'}, status=404)
+        loan = None
+        book = None
+        if loan_id:
+            try:
+                loan = LibraryTransaction.objects.select_for_update().filter(pk=int(loan_id), returned_on__isnull=True).first()
+            except (ValueError, TypeError):
+                loan = None
 
-        loan = LibraryTransaction.objects.select_for_update().filter(book=book, returned_on__isnull=True).first()
+        if loan:
+            book = loan.book
+        else:
+            if not barcode:
+                return Response({'code': 400, 'message': 'Barcode is required.'}, status=400)
+            if action_type not in ('RETURN', 'RENEW'):
+                return Response({'code': 400, 'message': 'Action must be RETURN or RENEW.'}, status=400)
+
+            book = LibraryBook.objects.select_for_update().filter(
+                Q(acc_no__iexact=barcode)
+                | Q(isbn__iexact=barcode)
+                | (Q(id=int(barcode)) if barcode.isdigit() else Q(pk__isnull=True))
+                | Q(call_no__iexact=barcode)
+            ).first()
+
+            if not book:
+                return Response({'code': 404, 'message': f'Book with barcode "{barcode}" was not found.'}, status=404)
+
+            loan = LibraryTransaction.objects.select_for_update().filter(book=book, returned_on__isnull=True).first()
+
         if not loan:
+            book_label = getattr(book, 'title', '') if book else barcode
+            acc_label = f" (ACC: {book.acc_no or book.id})" if book and getattr(book, 'acc_no', None) else ""
             return Response({
                 'code': 400,
-                'message': f'Book "{book.title}" (ACC: {book.acc_no or book.id}) has no active circulation loan to {action_type.lower()}. It is currently available.'
+                'message': f'Book "{book_label}"{acc_label} has no active circulation loan to {action_type.lower()}. It is currently available in stacks.'
             }, status=400)
 
         tracking_user = self._tracking_user()
@@ -919,13 +1158,40 @@ class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
             book.available_copies = min(book.total_copies, book.available_copies + 1)
             book.save(update_fields=['available_copies', 'updated_at'])
 
+            # Promote next reservation in queue if any
+            pending_res = LibraryReservation.objects.filter(
+                book=book,
+                status='PENDING'
+            ).order_by('reserved_on', 'id').first()
+
+            reservation_msg = ''
+            if pending_res:
+                hold_until = timezone.localdate() + timedelta(days=2)
+                pending_res.status = 'AVAILABLE'
+                pending_res.available_until = hold_until
+                pending_res.notified_on = timezone.now()
+                pending_res.updated_by = tracking_user
+                pending_res.save()
+                reservation_msg = f" Note: Reserved for {pending_res.member.borrower_name} ({pending_res.member.borrower_code}) - hold until {hold_until}."
+
+            send_targeted_broadcast('realtime_updates', {
+                'model': 'LibraryTransaction',
+                'action': 'returned',
+                'id': loan.id
+            })
+            send_targeted_broadcast('realtime_updates', {
+                'model': 'LibraryBook',
+                'action': 'updated',
+                'id': book.id
+            })
+
             return self._success(
-                f'Book "{book.title}" returned successfully via Barcode scan.',
+                f'Book "{book.title}" returned successfully via Barcode scan.{reservation_msg}',
                 LibraryTransactionSerializer(loan, context={'request': request}).data
             )
 
         elif action_type == 'RENEW':
-            loan.due_on = loan.due_on + timedelta(days=14)
+            loan.due_on = loan.due_on + timedelta(days=15)
             loan.renewal_count += 1
             loan.updated_by = tracking_user
             loan.history.append({
@@ -935,6 +1201,12 @@ class LibraryTransactionViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
                 'user': user_name,
             })
             loan.save()
+
+            send_targeted_broadcast('realtime_updates', {
+                'model': 'LibraryTransaction',
+                'action': 'renewed',
+                'id': loan.id
+            })
 
             return self._success(
                 f'Book "{book.title}" renewed successfully until {loan.due_on}.',
@@ -947,9 +1219,9 @@ class LibraryDashboardViewSet(LibraryViewSetMixin, viewsets.ViewSet):
     def summary(self, request):
         today = timezone.localdate()
         try:
-            fine_per_day = max(0.0, float(request.query_params.get('fine_per_day', 2.0)))
+            fine_per_day = max(0.0, float(request.query_params.get('fine_per_day', 1.0)))
         except (ValueError, TypeError):
-            fine_per_day = 2.0
+            fine_per_day = 1.0
 
         active_loans_qs = LibraryTransaction.objects.filter(returned_on__isnull=True)
         active_loans_count = active_loans_qs.count()
@@ -1085,10 +1357,10 @@ class LibraryFineViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         try:
             if fine_per_day is None:
                 rate_param = self.request.query_params.get('fine_per_day') or (self.request.data.get('fine_per_day') if hasattr(self.request, 'data') else None)
-                fine_per_day = float(rate_param) if rate_param else 2.0
+                fine_per_day = float(rate_param) if rate_param is not None and str(rate_param).strip() != '' else 1.0
             fine_per_day = max(0.0, float(fine_per_day))
         except (ValueError, TypeError):
-            fine_per_day = 2.0
+            fine_per_day = 1.0
 
         overdue_loans = LibraryTransaction.objects.filter(
             returned_on__isnull=True,
@@ -1155,9 +1427,9 @@ class LibraryFineViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path='sync-overdue')
     def sync_overdue(self, request):
         try:
-            fine_per_day = max(0.0, float(request.data.get('fine_per_day', 2.0)))
+            fine_per_day = max(0.0, float(request.data.get('fine_per_day', 1.0)))
         except (ValueError, TypeError):
-            fine_per_day = 2.0
+            fine_per_day = 1.0
         synced_count = self._sync_active_overdue_fines(fine_per_day=fine_per_day)
         return self._success(f'Successfully synced {synced_count} overdue fine records', {'synced_count': synced_count})
 
@@ -1203,7 +1475,12 @@ class LibraryReservationViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
                 Q(member__user__name__icontains=search)
             )
 
-        return qs.order_by('reserved_on')
+        ordering = self.request.query_params.get('ordering')
+        if ordering:
+            order_fields = [f.strip() for f in str(ordering).split(',') if f.strip()]
+            if order_fields:
+                return qs.order_by(*order_fields)
+        return qs.order_by('-reserved_on', '-id')
 
     def create(self, request, *args, **kwargs):
         book_id = request.data.get('book_id') or request.data.get('book')
@@ -1292,6 +1569,12 @@ class LibraryReservationViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         if book.available_copies > 0:
             avail_msg = ' (Note: Copies are currently in stacks; you can also borrow directly at the desk).'
 
+        send_targeted_broadcast('realtime_updates', {
+            'model': 'LibraryReservation',
+            'action': 'created',
+            'id': reservation.id
+        })
+
         return self._success(
             f'Book reserved successfully. You are #{queue_pos} in queue{avail_msg}.',
             serializer.data,
@@ -1300,7 +1583,9 @@ class LibraryReservationViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
-        reservation = self.get_object()
+        reservation = LibraryReservation.objects.filter(pk=pk).first()
+        if not reservation:
+            return Response({'code': 404, 'message': 'Reservation not found.'}, status=404)
         user = request.user
         role_name = getattr(getattr(user, 'role', None), 'role_name', '').upper().replace(' ', '_')
         staff_roles = {'ADMIN', 'ADMINISTRATOR', 'SUPER_ADMIN', 'SUPERADMIN', 'LIBRARY', 'LIBRARIAN', 'TECH_SUPPORTER', 'ADMINISTRATION_OFFICER', 'AO'}
@@ -1308,8 +1593,8 @@ class LibraryReservationViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
 
         if not is_staff:
             is_owner = (
-                (reservation.member.user_id and reservation.member.user_id == user.id) or
-                (reservation.member.student and (
+                (reservation.member and reservation.member.user_id and reservation.member.user_id == user.id) or
+                (reservation.member and reservation.member.student and (
                     reservation.member.student.roll_number == user.username or
                     reservation.member.student.register_number == user.username
                 ))
@@ -1340,8 +1625,8 @@ class LibraryReservationViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
                 next_res.save()
 
                 try:
-                    target_user = next_res.member.user
-                    if not target_user and next_res.member.student:
+                    target_user = next_res.member.user if next_res.member else None
+                    if not target_user and next_res.member and next_res.member.student:
                         stu = next_res.member.student
                         target_user = User.objects.filter(
                             Q(username=stu.roll_number) | Q(username=stu.register_number)
@@ -1357,6 +1642,12 @@ class LibraryReservationViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
                 except Exception:
                     pass
 
+        send_targeted_broadcast('realtime_updates', {
+            'model': 'LibraryReservation',
+            'action': 'cancelled',
+            'id': reservation.id
+        })
+
         return self._success('Reservation cancelled successfully.', self.get_serializer(reservation).data)
 
     @action(detail=True, methods=['post'])
@@ -1369,7 +1660,9 @@ class LibraryReservationViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         if not is_staff:
             return Response({'code': 403, 'message': 'Only library staff are permitted to approve reservations.'}, status=403)
 
-        reservation = self.get_object()
+        reservation = LibraryReservation.objects.filter(pk=pk).first()
+        if not reservation:
+            return Response({'code': 404, 'message': 'Reservation not found.'}, status=404)
         if reservation.status not in ['PENDING']:
             return Response({'code': 400, 'message': f'Cannot approve reservation with status {reservation.status}.'}, status=400)
 
@@ -1381,8 +1674,8 @@ class LibraryReservationViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         reservation.save()
 
         try:
-            target_user = reservation.member.user
-            if not target_user and reservation.member.student:
+            target_user = reservation.member.user if reservation.member else None
+            if not target_user and reservation.member and reservation.member.student:
                 stu = reservation.member.student
                 target_user = User.objects.filter(
                     Q(username=stu.roll_number) | Q(username=stu.register_number)
@@ -1398,6 +1691,12 @@ class LibraryReservationViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         except Exception:
             pass
 
+        send_targeted_broadcast('realtime_updates', {
+            'model': 'LibraryReservation',
+            'action': 'approved',
+            'id': reservation.id
+        })
+
         return self._success(f'Reservation approved. Book held for pickup until {hold_until}.', self.get_serializer(reservation).data)
 
     @action(detail=True, methods=['post'])
@@ -1411,17 +1710,22 @@ class LibraryReservationViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         if not is_staff:
             return Response({'code': 403, 'message': 'Only library staff are permitted to issue books.'}, status=403)
 
-        reservation = self.get_object()
+        reservation = LibraryReservation.objects.filter(pk=pk).first()
+        if not reservation:
+            return Response({'code': 404, 'message': 'Reservation not found.'}, status=404)
         if reservation.status in ['FULFILLED', 'CANCELLED']:
             return Response({'code': 400, 'message': f'Cannot issue book for reservation with status {reservation.status}.'}, status=400)
 
         book = reservation.book
         member = reservation.member
+        if not member:
+            return Response({'code': 400, 'message': 'Reservation does not have an associated borrower member record.'}, status=400)
 
-        # Check borrower limit
+        # Check borrower limit (3 for students, 5 for staff)
+        max_books = getattr(member, 'max_books_allowed', 3)
         active_count = LibraryTransaction.objects.filter(member=member, returned_on__isnull=True).count()
-        if active_count >= member.max_books_allowed:
-            return Response({'code': 400, 'message': f'Borrower has reached max limit of {member.max_books_allowed} books.'}, status=400)
+        if active_count >= max_books:
+            return Response({'code': 400, 'message': f'Borrower has reached max limit of {max_books} books.'}, status=400)
 
         # Decrement available copies if > 0
         if book.available_copies > 0:
@@ -1429,7 +1733,8 @@ class LibraryReservationViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
             book.save(update_fields=['available_copies', 'updated_at'])
 
         issue_date = timezone.localdate()
-        due_date = issue_date + timedelta(days=member.max_days_allowed or 14)
+        loan_days = getattr(member, 'max_days_allowed', 15)
+        due_date = issue_date + timedelta(days=loan_days)
 
         loan = LibraryTransaction.objects.create(
             member=member,
@@ -1468,6 +1773,17 @@ class LibraryReservationViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         except Exception:
             pass
 
+        send_targeted_broadcast('realtime_updates', {
+            'model': 'LibraryReservation',
+            'action': 'fulfilled',
+            'id': reservation.id
+        })
+        send_targeted_broadcast('realtime_updates', {
+            'model': 'LibraryTransaction',
+            'action': 'issued',
+            'id': loan.id
+        })
+
         return self._success(f'Book "{book.title}" issued successfully to {member.borrower_name or "borrower"}. Due date: {due_date}.', {
             'reservation': self.get_serializer(reservation).data,
             'loan': LibraryTransactionSerializer(loan).data
@@ -1482,10 +1798,19 @@ class LibraryReservationViewSet(LibraryViewSetMixin, viewsets.ModelViewSet):
         if not is_staff:
             return Response({'code': 403, 'message': 'Only library staff are permitted to fulfill reservations.'}, status=403)
 
-        reservation = self.get_object()
+        reservation = LibraryReservation.objects.filter(pk=pk).first()
+        if not reservation:
+            return Response({'code': 404, 'message': 'Reservation not found.'}, status=404)
         reservation.status = 'FULFILLED'
         reservation.updated_by = self._tracking_user()
         reservation.save()
+
+        send_targeted_broadcast('realtime_updates', {
+            'model': 'LibraryReservation',
+            'action': 'fulfilled',
+            'id': reservation.id
+        })
+
         return self._success('Reservation marked as fulfilled.', self.get_serializer(reservation).data)
 
 
@@ -1531,6 +1856,47 @@ class MyLibraryViewSet(LibraryViewSetMixin, viewsets.ViewSet):
             ):
                 member.user = user
                 member.save(update_fields=['user', 'updated_at'])
+
+        # Auto-provision library member on the fly if missing for authenticated user
+        if not member and user and user.is_authenticated:
+            try:
+                matching_student = Student.objects.filter(roll_number__iexact=user.username).first()
+                if not matching_student:
+                    matching_student = Student.objects.filter(register_number__iexact=user.username).first()
+
+                is_student_role = (
+                    (hasattr(user, 'role') and getattr(user.role, 'role_name', '').upper() == 'STUDENT') or
+                    bool(matching_student)
+                )
+
+                if is_student_role and matching_student:
+                    code = LibraryMember.generate_code_for_student(matching_student)
+                    stu_active = True
+                    if matching_student.status:
+                        if not getattr(matching_student.status, 'is_active', True):
+                            stu_active = False
+                        elif getattr(matching_student.status, 'status_name', '').upper() in ['INACTIVE', 'DISCONTINUED', 'TERMINATED', 'CANCELLED', 'DROPPED', 'SUSPENDED', 'PASSED_OUT', 'ALUMNI']:
+                            stu_active = False
+                    if not getattr(user, 'is_active', True):
+                        stu_active = False
+
+                    member = LibraryMember.objects.create(
+                        student=matching_student,
+                        user=user,
+                        member_type='STUDENT',
+                        membership_number=code,
+                        is_active=stu_active,
+                    )
+                else:
+                    code = LibraryMember.generate_code_for_user(user)
+                    member = LibraryMember.objects.create(
+                        user=user,
+                        member_type='STAFF',
+                        membership_number=code,
+                        is_active=getattr(user, 'is_active', True),
+                    )
+            except Exception:
+                member = LibraryMember.objects.filter(user=user).first()
 
         if not member:
             return Response({
@@ -1606,25 +1972,37 @@ class MyLibraryViewSet(LibraryViewSetMixin, viewsets.ViewSet):
         history_qs = LibraryTransaction.objects.filter(
             member=member,
             returned_on__isnull=False
-        ).select_related('book').order_by('-returned_on')[:15]
+        ).select_related('book').prefetch_related('fines').order_by('-returned_on')[:25]
 
-        history = [{
-            'id': loan.id,
-            'book_title': loan.book.title,
-            'book_acc_no': loan.book.acc_no,
-            'author': loan.book.author,
-            'issued_on': str(loan.issued_on),
-            'due_on': str(loan.due_on),
-            'returned_on': str(loan.returned_on),
-            'status': loan.status,
-        } for loan in history_qs]
+        history = []
+        for loan in history_qs:
+            fine_rec = loan.fines.first()
+            fine_amt = float(fine_rec.fine_amount or 0) if fine_rec else 0.0
+            fine_paid = float(fine_rec.paid_amount or 0) if fine_rec else 0.0
+            fine_status = fine_rec.status if fine_rec else 'NONE'
+            history.append({
+                'id': loan.id,
+                'book_title': loan.book.title,
+                'book_acc_no': loan.book.acc_no,
+                'author': loan.book.author,
+                'issued_on': str(loan.issued_on),
+                'due_on': str(loan.due_on),
+                'returned_on': str(loan.returned_on),
+                'status': loan.status,
+                'fine_amount': fine_amt,
+                'fine_paid': fine_paid,
+                'fine_status': fine_status,
+            })
 
         # 4. Overdue Fines Ledger
-        fines_qs = LibraryFine.objects.filter(member=member).select_related('book').order_by('-created_at')[:20]
+        fines_qs = LibraryFine.objects.filter(member=member).select_related('book').order_by('-created_at')[:25]
         fines = [LibraryFineSerializer(f).data for f in fines_qs]
 
         pending_fines_sum = sum(
             float(f.get('balance_amount', 0)) for f in fines if f.get('status') in ['PENDING', 'PARTIAL']
+        )
+        total_fines_paid = sum(
+            float(f.get('paid_amount', 0)) for f in fines
         )
 
         # 5. Book Reservations Queue
@@ -1650,6 +2028,7 @@ class MyLibraryViewSet(LibraryViewSetMixin, viewsets.ViewSet):
             'unsettled_overdues': sum(1 for l in active_loans if l.get('is_overdue') and not l.get('fine_settled')),
             'total_borrowed_lifetime': total_borrowed_lifetime,
             'pending_fines_amount': effective_pending_fine,
+            'total_fines_paid': total_fines_paid,
             'active_reservations': active_res_count,
         }
 

@@ -16,9 +16,9 @@ class Command(BaseCommand):
         self.stdout.write("Starting generation of unique library codes for all users and students...")
 
         # 1. Process Students
-        # Code format: [Department Shortname][3-digit sequence] e.g. CSE001, MECH003, CIVIL168
-        students = Student.objects.select_related('department').order_by('department_id', 'roll_number', 'id')
-        dept_counters = defaultdict(int)
+        # Code format: [Batch 2-digits][Department Shortname][3-digit sequence] e.g. 23IT001, 25CSE001
+        students = Student.objects.select_related('department', 'batch').order_by('batch_id', 'department_id', 'roll_number', 'id')
+        batch_dept_counters = defaultdict(int)
 
         student_created = 0
         student_updated = 0
@@ -35,16 +35,45 @@ class Command(BaseCommand):
                     if cleaned:
                         dept_short = cleaned
 
-                dept_counters[dept_short] += 1
-                seq = dept_counters[dept_short]
-                code = f"{dept_short}{seq:03d}"
+                batch_prefix = ''
+                if getattr(student, 'batch', None) and getattr(student.batch, 'batch', None):
+                    batch_str = str(student.batch.batch).strip()
+                    match = re.search(r'(\d{4})', batch_str)
+                    if match:
+                        batch_prefix = match.group(1)[-2:]
+                    else:
+                        m2 = re.search(r'(\d{2})', batch_str)
+                        if m2:
+                            batch_prefix = m2.group(1)
+
+                full_prefix = f"{batch_prefix}{dept_short}"
+                batch_dept_counters[full_prefix] += 1
+                seq = batch_dept_counters[full_prefix]
+                code = f"{full_prefix}{seq:03d}"
+
+                student_active = True
+                if student.status:
+                    if not getattr(student.status, 'is_active', True):
+                        student_active = False
+                    elif getattr(student.status, 'status_name', '').upper() in ['INACTIVE', 'DISCONTINUED', 'TERMINATED', 'CANCELLED', 'DROPPED', 'SUSPENDED', 'PASSED_OUT', 'ALUMNI']:
+                        student_active = False
+
+                user_obj = None
+                if student.roll_number:
+                    user_obj = User.objects.filter(username__iexact=student.roll_number).first()
+                if not user_obj and student.register_number:
+                    user_obj = User.objects.filter(username__iexact=student.register_number).first()
+
+                if user_obj and not getattr(user_obj, 'is_active', True):
+                    student_active = False
 
                 member, created = LibraryMember.objects.get_or_create(
                     student=student,
                     defaults={
+                        'user': user_obj,
                         'member_type': 'STUDENT',
                         'membership_number': code,
-                        'is_active': True,
+                        'is_active': student_active,
                         'joined_on': timezone.localdate(),
                     }
                 )
@@ -54,16 +83,22 @@ class Command(BaseCommand):
                 else:
                     member.member_type = 'STUDENT'
                     member.membership_number = code
-                    member.is_active = True
-                    member.save(update_fields=['member_type', 'membership_number', 'is_active', 'updated_at'])
+                    member.is_active = student_active
+                    if user_obj and member.user != user_obj:
+                        member.user = user_obj
+                    member.save(update_fields=['member_type', 'membership_number', 'is_active', 'user', 'updated_at'])
                     student_updated += 1
 
         self.stdout.write(self.style.SUCCESS(
-            f"Processed {len(students)} students: {student_created} created, {student_updated} updated with department codes."
+            f"Processed {len(students)} students: {student_created} created, {student_updated} updated with batch department codes (e.g. 23IT001) and active status synced."
         ))
 
         # 2. Process Staff / Other Roles (Faculty, HOD, Admin, etc.)
         # Code format: [First 4 digits of username][3-digit sequence] e.g. 2656001
+        student_rolls = set(Student.objects.filter(roll_number__isnull=False).values_list('roll_number', flat=True))
+        student_regs = set(Student.objects.filter(register_number__isnull=False).values_list('register_number', flat=True))
+        student_usernames = {str(x).strip().upper() for x in (student_rolls | student_regs) if x}
+
         users = User.objects.order_by('username', 'id')
         user_prefix_counters = defaultdict(int)
 
@@ -72,24 +107,37 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             for user in users:
-                raw_username = re.sub(r'[^A-Za-z0-9]', '', str(user.username or '')).upper()
-                if len(raw_username) >= 4:
-                    prefix = raw_username[:4]
-                elif len(raw_username) > 0:
-                    prefix = raw_username.ljust(4, '0')
+                raw_username = str(user.username or '').strip().upper()
+                # If this user belongs to a student, link to student's LibraryMember record instead of creating duplicate
+                if raw_username in student_usernames or getattr(getattr(user, 'role', None), 'role_name', '').upper() == 'STUDENT':
+                    matching_member = LibraryMember.objects.filter(
+                        Q(student__roll_number__iexact=user.username) |
+                        Q(student__register_number__iexact=user.username)
+                    ).first()
+                    if matching_member and matching_member.user != user:
+                        matching_member.user = user
+                        matching_member.save(update_fields=['user', 'updated_at'])
+                    continue
+
+                clean_user = re.sub(r'[^A-Za-z0-9]', '', raw_username)
+                if len(clean_user) >= 4:
+                    prefix = clean_user[:4]
+                elif len(clean_user) > 0:
+                    prefix = clean_user.ljust(4, '0')
                 else:
                     prefix = f"U{user.id:03d}"[:4]
 
                 user_prefix_counters[prefix] += 1
                 seq = user_prefix_counters[prefix]
                 code = f"{prefix}{seq:03d}"
+                user_active = bool(getattr(user, 'is_active', True))
 
                 member, created = LibraryMember.objects.get_or_create(
                     user=user,
                     defaults={
                         'member_type': 'STAFF',
                         'membership_number': code,
-                        'is_active': True,
+                        'is_active': user_active,
                         'joined_on': timezone.localdate(),
                     }
                 )
@@ -99,7 +147,7 @@ class Command(BaseCommand):
                 else:
                     member.member_type = 'STAFF'
                     member.membership_number = code
-                    member.is_active = True
+                    member.is_active = user_active
                     member.save(update_fields=['member_type', 'membership_number', 'is_active', 'updated_at'])
                     user_updated += 1
 

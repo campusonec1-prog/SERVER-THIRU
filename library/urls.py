@@ -24,6 +24,7 @@ urlpatterns = [
     path('members/list', LibraryMemberViewSet.as_view({'get': 'list'}), name='library-members-list'),
     path('members/barcode-lookup', LibraryMemberViewSet.as_view({'get': 'barcode_lookup'}), name='library-members-barcode-lookup'),
     path('members/quick-search', LibraryMemberViewSet.as_view({'get': 'quick_search'}), name='library-members-quick-search'),
+    path('members/sync-batch-codes', LibraryMemberViewSet.as_view({'post': 'sync_batch_codes'}), name='library-members-sync-batch-codes'),
     path('members/create', LibraryMemberViewSet.as_view({'post': 'create'}), name='library-members-create'),
     path('members/get/<int:pk>', LibraryMemberViewSet.as_view({'get': 'retrieve'}), name='library-members-detail'),
     path('members/edit/<int:pk>', LibraryMemberViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='library-members-edit'),
@@ -45,9 +46,13 @@ urlpatterns = [
     path('reservations/list', LibraryReservationViewSet.as_view({'get': 'list'}), name='library-reservations-list'),
     path('reservations/create', LibraryReservationViewSet.as_view({'post': 'create'}), name='library-reservations-create'),
     path('reservations/cancel/<int:pk>', LibraryReservationViewSet.as_view({'post': 'cancel'}), name='library-reservations-cancel'),
+    path('reservations/cancel/<int:pk>/', LibraryReservationViewSet.as_view({'post': 'cancel'}), name='library-reservations-cancel-slash'),
     path('reservations/approve/<int:pk>', LibraryReservationViewSet.as_view({'post': 'approve'}), name='library-reservations-approve'),
+    path('reservations/approve/<int:pk>/', LibraryReservationViewSet.as_view({'post': 'approve'}), name='library-reservations-approve-slash'),
     path('reservations/issue/<int:pk>', LibraryReservationViewSet.as_view({'post': 'issue'}), name='library-reservations-issue'),
+    path('reservations/issue/<int:pk>/', LibraryReservationViewSet.as_view({'post': 'issue'}), name='library-reservations-issue-slash'),
     path('reservations/fulfill/<int:pk>', LibraryReservationViewSet.as_view({'post': 'fulfill'}), name='library-reservations-fulfill'),
+    path('reservations/fulfill/<int:pk>/', LibraryReservationViewSet.as_view({'post': 'fulfill'}), name='library-reservations-fulfill-slash'),
     # My Library Self-Service (Student, Faculty & Staff)
     path('my-library', MyLibraryViewSet.as_view({'get': 'my_library'}), name='library-my-library'),
     # Daily Overdue Notification Trigger (Runs morning 9:00 AM)
