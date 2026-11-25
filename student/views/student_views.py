@@ -411,14 +411,93 @@ class StudentViewSet(viewsets.ModelViewSet):
 
         instance = self.get_object()
         student_id = instance.id
-        StudentAdmissionSlip.objects.filter(student=instance).delete()
-        StudentFees.objects.filter(student=instance).delete()
-        super().destroy(request, *args, **kwargs)
-        self._broadcast_delete(student_id)
-        return Response({
-            "code": 200,
-            "message": "Student deleted successfully"
-        }, status=status.HTTP_200_OK)
+
+        try:
+            with transaction.atomic():
+                # 1. Clean up Student Fees & Payments (must delete children first to satisfy PROTECT foreign keys)
+                from student.models import FeePayment, StudentSemesterFee, StudentFees, StudentAdmissionSlip
+                FeePayment.objects.filter(student_fees__student=instance).delete()
+                StudentSemesterFee.objects.filter(student_fees__student=instance).delete()
+                StudentFees.objects.filter(student=instance).delete()
+                StudentAdmissionSlip.objects.filter(student=instance).delete()
+
+                # 2. Clean up Library memberships & transactions (which have PROTECT foreign keys)
+                try:
+                    from library.models import LibraryMember, LibraryTransaction, LibraryFine, LibraryReservation
+                    lib_members = LibraryMember.objects.filter(student=instance)
+                    for lm in lib_members:
+                        LibraryFine.objects.filter(member=lm).delete()
+                        LibraryReservation.objects.filter(member=lm).delete()
+                        LibraryTransaction.objects.filter(member=lm).delete()
+                    lib_members.delete()
+                except Exception:
+                    pass
+
+                # 3. Clean up LMS records
+                try:
+                    from lms.models import LMSAssessmentStudentAnswer, LMSAssessmentAttempt, LMSSubmission
+                    LMSAssessmentStudentAnswer.objects.filter(student=instance).delete()
+                    LMSAssessmentAttempt.objects.filter(student=instance).delete()
+                    LMSSubmission.objects.filter(student=instance).delete()
+                except Exception:
+                    pass
+
+                # 4. Clean up University Exam allocations
+                try:
+                    from university_exam.models import UniversityExamAttendance, ExamSeatAllocation, ExamAttendanceImport
+                    ExamSeatAllocation.objects.filter(student=instance).delete()
+                    UniversityExamAttendance.objects.filter(student=instance).delete()
+                    ExamAttendanceImport.objects.filter(student=instance).update(student=None)
+                except Exception:
+                    pass
+
+                # 5. Clean up Placement Trackings
+                try:
+                    from placement.models import StudentPlacementTracking
+                    StudentPlacementTracking.objects.filter(student=instance).delete()
+                except Exception:
+                    pass
+
+                # 6. Clean up SMS logs
+                try:
+                    from sms.models import SMSLog
+                    SMSLog.objects.filter(student=instance).delete()
+                except Exception:
+                    pass
+
+                # 7. Clean up Academic marks, attendance, certificates, counselling, hostel visitor logs
+                try:
+                    from student.models import Marks, StudentAttendance, BonafideCertificate, CounsellingReport, HostelVisitorLog
+                    Marks.objects.filter(student=instance).delete()
+                    StudentAttendance.objects.filter(student=instance).delete()
+                    BonafideCertificate.objects.filter(student=instance).delete()
+                    CounsellingReport.objects.filter(student=instance).delete()
+                    HostelVisitorLog.objects.filter(student=instance).delete()
+                except Exception:
+                    pass
+
+                # 8. Clean up Hostel leaves
+                try:
+                    from leave.models import HostelLeave
+                    HostelLeave.objects.filter(student=instance).delete()
+                except Exception:
+                    pass
+
+                # 9. Finally delete the student instance
+                instance.delete()
+
+            self._broadcast_delete(student_id)
+            return Response({
+                "code": 200,
+                "message": "Student deleted successfully"
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            logger.exception("Failed to delete student %s: %s", student_id, str(e))
+            return Response({
+                "code": 400,
+                "message": f"Unable to delete student: {str(e)}"
+            }, status=status.HTTP_400_BAD_REQUEST)
 
     def _broadcast_change(self, instance, event_name):
         try:
