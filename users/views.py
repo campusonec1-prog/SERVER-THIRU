@@ -1369,6 +1369,32 @@ class UserViewSet(viewsets.ModelViewSet):
         return response
 
 
+def _is_admin_or_privileged_user(user):
+    """
+    Check if a user has administrative privileges (Admin, Tech Supporter, AO, Principal, etc.)
+    Handles role name formatting differences (spaces, underscores, case).
+    """
+    if not user or not getattr(user, 'is_authenticated', False):
+        return False
+    if getattr(user, 'is_superuser', False):
+        return True
+    role = getattr(user, 'role', None)
+    if not role:
+        return False
+    role_name = getattr(role, 'role_name', '')
+    if not role_name:
+        return False
+    norm_role = str(role_name).strip().upper().replace(' ', '_')
+    admin_roles = {
+        'ADMIN', 'ADMINISTRATOR', 'SUPER_ADMIN', 'SUPERADMIN',
+        'PRINCIPAL', 'VICE_PRINCIPAL',
+        'AO', 'ADMINISTRATION_OFFICER', 'ADMINISTRATIVE_OFFICER',
+        'TECH_SUPPORTER', 'TECH_SUPPORT', 'TS', 'TECHNICAL_SUPPORTER', 'TECHNICAL_SUPPORT',
+        'ADMISSIONS_OFFICER', 'ADMISSION_OFFICER'
+    }
+    return norm_role in admin_roles
+
+
 class UserDetailsViewSet(viewsets.ModelViewSet):
     queryset = UserDetails.objects.select_related('user', 'role', 'department').all().order_by('id')
     serializer_class = UserDetailsSerializer
@@ -1385,18 +1411,7 @@ class UserDetailsViewSet(viewsets.ModelViewSet):
         if self.action in ['list', 'retrieve'] or self.request.method in ['GET']:
             return qs
 
-        is_admin = False
-        try:
-            role_name = user.role.role_name.upper()
-            if role_name in [
-                'ADMIN', 'ADMINISTRATOR', 'SUPER_ADMIN', 'SUPERADMIN',
-                'PRINCIPAL', 'VICE_PRINCIPAL', 'AO', 'ADMINISTRATION_OFFICER', 'TECH_SUPPORTER'
-            ]:
-                is_admin = True
-        except AttributeError:
-            pass
-
-        if is_admin:
+        if _is_admin_or_privileged_user(user):
             return qs
 
         if isinstance(user, User):
@@ -1404,17 +1419,45 @@ class UserDetailsViewSet(viewsets.ModelViewSet):
 
         return UserDetails.objects.none()
 
+    def get_object(self):
+        queryset = self.filter_queryset(self.get_queryset())
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        pk = self.kwargs.get(lookup_url_kwarg)
+
+        # 1. Look up by primary key (UserDetails.id)
+        obj = queryset.filter(pk=pk).first()
+
+        # 2. Look up by user_id
+        if not obj and pk:
+            obj = queryset.filter(user_id=pk).first()
+
+        # 3. Look up by user_id from request body
+        user_id_param = self.request.data.get('user_id') if hasattr(self.request, 'data') else None
+        if not obj and user_id_param:
+            obj = queryset.filter(user_id=user_id_param).first()
+
+        # 4. If still not found and this is an update request, auto-create/upsert UserDetails
+        if not obj and self.request.method in ['PUT', 'PATCH']:
+            target_user = None
+            if user_id_param:
+                target_user = User.objects.filter(id=user_id_param).first()
+            if not target_user and pk:
+                target_user = User.objects.filter(id=pk).first()
+
+            if target_user:
+                if _is_admin_or_privileged_user(self.request.user) or self.request.user == target_user:
+                    obj, _ = UserDetails.objects.get_or_create(user=target_user)
+
+        if not obj:
+            raise Http404("User details not found")
+
+        self.check_object_permissions(self.request, obj)
+        return obj
+
     def perform_create(self, serializer):
         user = self.request.user
         tracking_user = user if isinstance(user, User) else None
-
-        is_admin = False
-        try:
-            role_name = user.role.role_name.upper()
-            if role_name in ['ADMIN', 'ADMINISTRATOR']:
-                is_admin = True
-        except AttributeError:
-            pass
+        is_admin = _is_admin_or_privileged_user(user)
 
         # Handle image upload to R2
         image_file = serializer.validated_data.pop('user_image_file', None)
@@ -1434,14 +1477,7 @@ class UserDetailsViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         user = self.request.user
         instance = self.get_object()
-
-        is_admin = False
-        try:
-            role_name = user.role.role_name.upper()
-            if role_name in ['ADMIN', 'ADMINISTRATOR']:
-                is_admin = True
-        except AttributeError:
-            pass
+        is_admin = _is_admin_or_privileged_user(user)
 
         if not is_admin:
             if instance.user != user:
@@ -1464,14 +1500,7 @@ class UserDetailsViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         user = request.user
         instance = self.get_object()
-
-        is_admin = False
-        try:
-            role_name = user.role.role_name.upper()
-            if role_name in ['ADMIN', 'ADMINISTRATOR']:
-                is_admin = True
-        except AttributeError:
-            pass
+        is_admin = _is_admin_or_privileged_user(user)
 
         if not is_admin:
             if instance.user != user:
