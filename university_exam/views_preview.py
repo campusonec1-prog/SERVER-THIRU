@@ -21,20 +21,34 @@ def clean_str(val):
 
 def format_exam_title(raw):
     """
-    Format exam title to end strictly with the 4-digit year.
-    E.g.: 'Nov./Dec.Examination,2026Examination' -> 'Nov./Dec.Examination,2026'
-          'Application for Nov./Dec.Examination,2026Examination' -> 'Nov./Dec.Examination,2026'
+    Format exam title to: '<Session Months> <Year>', e.g. 'Nov. / Dec. 2026'.
+    Strips out 'Examination', 'Exam', and commas so dropdowns display cleanly.
+    E.g.: 'Nov./Dec.Examination,2026Examination' -> 'Nov. / Dec. 2026'
+          'Application for Nov. / Dec. Examination,2026 Examination' -> 'Nov. / Dec. 2026'
     """
     if not raw:
         return ''
     t = clean_str(raw)
     t = re.sub(r'^Application\s+for\s+', '', t, flags=re.IGNORECASE).strip()
-    # Match strictly up to the 4-digit year
-    m = re.search(r'^(.*?\d{4})', t)
-    if m:
-        t = m.group(1).strip()
-    else:
-        t = re.sub(r'\s*(?:Examination|Exam)\s*$', '', t, flags=re.IGNORECASE).strip()
+    
+    # Extract 4-digit year (match even if glued e.g. 2026Examination)
+    year_match = re.search(r'(20\d{2})', t)
+    year = year_match.group(1) if year_match else ''
+    
+    # Strip Examination/Exam, year, commas, and extra symbols
+    t = re.sub(r'\s*(?:Examination|Exam)\s*', ' ', t, flags=re.IGNORECASE)
+    t = re.sub(r',\s*\d{4}', '', t)
+    t = re.sub(r'20\d{2}', '', t)
+    t = re.sub(r'[,;:]+', ' ', t)
+    t = re.sub(r'\s+', ' ', t).strip()
+
+    # Normalize "Nov./Dec." or "Nov. / Dec." to "Nov. / Dec."
+    t = re.sub(r'\s*/\s*', ' / ', t)
+
+    if year:
+        return f"{t} {year}".strip() if t else year
+    if t and t.startswith('Nov') and 'Dec' in t:
+        return f"{t} 2026"
     return t
 
 
@@ -365,6 +379,13 @@ def ensure_university_exam_created(exam_name_str):
         from institution.models import ExamType, Exam
         from common.caching import invalidate_option_cache
 
+        def _bust_exam_cache():
+            for k in ('Exam', 'exams', 'ExamType', 'exam_types'):
+                try:
+                    invalidate_option_cache(k)
+                except Exception:
+                    pass
+
         # 1. Find or create University ExamType in exam_type table
         univ_type = ExamType.objects.filter(exam_type_name__iexact='University Exam').first()
         if not univ_type:
@@ -374,35 +395,32 @@ def ensure_university_exam_created(exam_name_str):
                 exam_type_name='University Exam',
                 is_active=True
             )
-            try:
-                invalidate_option_cache('exam_types')
-            except Exception:
-                pass
+            _bust_exam_cache()
 
         # 2. Find or create Exam under this ExamType in exams table
         exam_obj = Exam.objects.filter(exam_name__iexact=cleaned_name).first()
         if not exam_obj:
-            # Check if an exam exists with trailing text like 'Examination' and update it
-            exam_obj = Exam.objects.filter(exam_name__istartswith=cleaned_name).first()
+            # Check if an exam exists with previous long naming (e.g. 'Nov./Dec.Examination,2026') and update it
+            for ex in Exam.objects.all():
+                ex_norm = re.sub(r'[\s\.\,\/]|(?:Examination|Exam)', '', ex.exam_name, flags=re.IGNORECASE)
+                cl_norm = re.sub(r'[\s\.\,\/]|(?:Examination|Exam)', '', cleaned_name, flags=re.IGNORECASE)
+                if ex_norm.lower() == cl_norm.lower():
+                    exam_obj = ex
+                    break
+
             if exam_obj:
                 exam_obj.exam_name = cleaned_name
                 exam_obj.exam_type = univ_type
                 exam_obj.is_active = True
                 exam_obj.save()
-                try:
-                    invalidate_option_cache('exams')
-                except Exception:
-                    pass
+                _bust_exam_cache()
             else:
                 exam_obj = Exam.objects.create(
                     exam_name=cleaned_name,
                     exam_type=univ_type,
                     is_active=True
                 )
-                try:
-                    invalidate_option_cache('exams')
-                except Exception:
-                    pass
+                _bust_exam_cache()
         else:
             updated = False
             if not exam_obj.is_active:
@@ -413,10 +431,7 @@ def ensure_university_exam_created(exam_name_str):
                 updated = True
             if updated:
                 exam_obj.save()
-                try:
-                    invalidate_option_cache('exams')
-                except Exception:
-                    pass
+            _bust_exam_cache()
 
         return {
             'id': exam_obj.id,
@@ -924,7 +939,9 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                 }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
             else:
-                status_obj, _ = StudentStatus.objects.get_or_create(status_name='ACTIVE')
+                status_obj = StudentStatus.objects.filter(status_name__iexact='inactive').first()
+                if not status_obj:
+                    status_obj = StudentStatus.objects.create(status_name='INACTIVE', is_active=False)
 
                 # Resolve Section for Inter College Student (Default to Section A for this department)
                 sec_obj = None
@@ -993,7 +1010,9 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
         if not students_data:
             return Response({'error': 'No students provided to add.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        status_obj, _ = StudentStatus.objects.get_or_create(status_name='ACTIVE')
+        status_obj = StudentStatus.objects.filter(status_name__iexact='inactive').first()
+        if not status_obj:
+            status_obj = StudentStatus.objects.create(status_name='INACTIVE', is_active=False)
         
         # 1. Preload master records into memory dictionaries to eliminate 17,000+ repeated SQL queries
         all_depts = list(Department.objects.all())
