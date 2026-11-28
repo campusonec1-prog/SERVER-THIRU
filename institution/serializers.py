@@ -434,7 +434,7 @@ class CollegeHeaderSerializer(TrackingModelSerializerMixin, serializers.ModelSer
     class Meta:
         model = CollegeHeader
         fields = [
-            'id', 'college_name', 'address', 'header_type', 'primary_logo', 'secondary_logo',
+            'id', 'college_name', 'college_code', 'address', 'header_type', 'primary_logo', 'secondary_logo',
             'created_at', 'updated_at', 'created_by', 'updated_by',
             'created_by_name', 'created_by_username', 'created_by_role',
             'updated_by_name', 'updated_by_username', 'updated_by_role',

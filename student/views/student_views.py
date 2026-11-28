@@ -444,10 +444,9 @@ class StudentViewSet(viewsets.ModelViewSet):
 
                 # 4. Clean up University Exam allocations
                 try:
-                    from university_exam.models import UniversityExamAttendance, ExamSeatAllocation, ExamAttendanceImport
+                    from university_exam.models import UniversityExamAttendance, ExamSeatAllocation
                     ExamSeatAllocation.objects.filter(student=instance).delete()
                     UniversityExamAttendance.objects.filter(student=instance).delete()
-                    ExamAttendanceImport.objects.filter(student=instance).update(student=None)
                 except Exception:
                     pass
 

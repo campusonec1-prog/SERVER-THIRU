@@ -189,6 +189,7 @@ class Section(TrackingModel):
 
 class CollegeHeader(TrackingModel):
     college_name = models.CharField(max_length=255)
+    college_code = models.CharField(max_length=50, null=True, blank=True, default='5132')
     address = models.TextField()
     header_type = models.CharField(max_length=100, unique=True)
     primary_logo = models.CharField(max_length=500, null=True, blank=True)

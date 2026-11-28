@@ -1,8 +1,8 @@
 from django.urls import path
 from .views import (
     ExamAttendanceImportViewSet, UniversityExamScheduleViewSet,
-    UniversityExamAttendanceViewSet, ExamHallAllocationViewSet,
-    ExamSeatAllocationViewSet, UniversityExamHallViewSet, ExamHallDateViewSet
+    UniversityExamCandidateViewSet, UniversityExamAttendanceViewSet,
+    ExamHallAllocationViewSet, ExamSeatAllocationViewSet, UniversityExamHallViewSet
 )
 from .views_results import UniversityResultPublishViewSet
 from .views_preview import UniversityRegistrationPreviewViewSet
@@ -23,25 +23,13 @@ urlpatterns = [
     path('exam-halls/edit/<int:pk>', UniversityExamHallViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='univ-exam-hall-edit'),
     path('exam-halls/remove/<int:pk>', UniversityExamHallViewSet.as_view({'delete': 'destroy'}), name='univ-exam-hall-remove'),
 
-    # Exam Hall Dates
-    path('hall-dates/list', ExamHallDateViewSet.as_view({'get': 'list'}), name='univ-exam-hall-date-list'),
-    path('hall-dates/create', ExamHallDateViewSet.as_view({'post': 'create'}), name='univ-exam-hall-date-create'),
-    path('hall-dates/get/<int:pk>', ExamHallDateViewSet.as_view({'get': 'retrieve'}), name='univ-exam-hall-date-detail'),
-    path('hall-dates/edit/<int:pk>', ExamHallDateViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='univ-exam-hall-date-edit'),
-    path('hall-dates/remove/<int:pk>', ExamHallDateViewSet.as_view({'delete': 'destroy'}), name='univ-exam-hall-date-remove'),
-
     # Attendance Import
     path('import/preview', ExamAttendanceImportViewSet.as_view({'post': 'preview_pdf'}), name='univ-exam-import-preview'),
     path('import/quick-add-dept', ExamAttendanceImportViewSet.as_view({'post': 'quick_add_dept'}), name='univ-exam-import-quick-add-dept'),
     path('import/quick-add-subject', ExamAttendanceImportViewSet.as_view({'post': 'quick_add_subject'}), name='univ-exam-import-quick-add-subject'),
     path('import/quick-add-student', ExamAttendanceImportViewSet.as_view({'post': 'quick_add_student'}), name='univ-exam-import-quick-add-student'),
+    path('import/quick-add-all-students', ExamAttendanceImportViewSet.as_view({'post': 'quick_add_all_students'}), name='univ-exam-import-quick-add-all-students'),
     path('import/confirm-save', ExamAttendanceImportViewSet.as_view({'post': 'confirm_save'}), name='univ-exam-import-confirm-save'),
-    path('import/upload', ExamAttendanceImportViewSet.as_view({'post': 'upload_pdf'}), name='univ-exam-import-upload'),
-    path('import/process', ExamAttendanceImportViewSet.as_view({'post': 'process_imports'}), name='univ-exam-import-process'),
-    path('import/list', ExamAttendanceImportViewSet.as_view({'get': 'list'}), name='univ-exam-import-list'),
-    path('import/get/<int:pk>', ExamAttendanceImportViewSet.as_view({'get': 'retrieve'}), name='univ-exam-import-detail'),
-    path('import/remove/<int:pk>', ExamAttendanceImportViewSet.as_view({'delete': 'destroy'}), name='univ-exam-import-remove'),
-    path('import/clear-pending', ExamAttendanceImportViewSet.as_view({'delete': 'clear_pending'}), name='univ-exam-import-clear-pending'),
 
     # Exam Schedules
     path('schedules/list', UniversityExamScheduleViewSet.as_view({'get': 'list'}), name='univ-exam-schedule-list'),
@@ -51,7 +39,14 @@ urlpatterns = [
     path('schedules/remove/<int:pk>', UniversityExamScheduleViewSet.as_view({'delete': 'destroy'}), name='univ-exam-schedule-remove'),
     path('schedules/generate-seating', UniversityExamScheduleViewSet.as_view({'post': 'generate_seating'}), name='univ-exam-generate-seating'),
 
-    # Attendances
+    # Candidates (Replaces legacy Attendance table)
+    path('candidates/list', UniversityExamCandidateViewSet.as_view({'get': 'list'}), name='univ-exam-candidate-list'),
+    path('candidates/create', UniversityExamCandidateViewSet.as_view({'post': 'create'}), name='univ-exam-candidate-create'),
+    path('candidates/get/<int:pk>', UniversityExamCandidateViewSet.as_view({'get': 'retrieve'}), name='univ-exam-candidate-detail'),
+    path('candidates/edit/<int:pk>', UniversityExamCandidateViewSet.as_view({'put': 'update', 'patch': 'partial_update'}), name='univ-exam-candidate-edit'),
+    path('candidates/remove/<int:pk>', UniversityExamCandidateViewSet.as_view({'delete': 'destroy'}), name='univ-exam-candidate-remove'),
+
+    # Attendances (Legacy compatibility)
     path('attendances/list', UniversityExamAttendanceViewSet.as_view({'get': 'list'}), name='univ-exam-attendance-list'),
     path('attendances/create', UniversityExamAttendanceViewSet.as_view({'post': 'create'}), name='univ-exam-attendance-create'),
     path('attendances/get/<int:pk>', UniversityExamAttendanceViewSet.as_view({'get': 'retrieve'}), name='univ-exam-attendance-detail'),

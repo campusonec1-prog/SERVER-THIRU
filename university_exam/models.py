@@ -33,66 +33,6 @@ class UniversityExamHall(TrackingModel):
         return f"{self.hall.hall_no} (Exam Config)"
 
 
-class ExamHallDate(TrackingModel):
-    SESSION_CHOICES = [('FN', 'Forenoon'), ('AN', 'Afternoon')]
-
-    exam_hall = models.ForeignKey(
-        UniversityExamHall,
-        on_delete=models.CASCADE,
-        db_column='exam_hall_id',
-        related_name='hall_dates'
-    )
-    exam_date = models.DateField()
-    session = models.CharField(max_length=2, choices=SESSION_CHOICES)
-    is_available = models.BooleanField(default=True)
-    notes = models.CharField(max_length=255, null=True, blank=True)
-
-    class Meta:
-        db_table = 'university_exam_hall_dates'
-        unique_together = ('exam_hall', 'exam_date', 'session')
-        indexes = [
-            models.Index(fields=['exam_date', 'session']),
-            models.Index(fields=['exam_hall', 'exam_date']),
-        ]
-
-    def __str__(self):
-        return f"{self.exam_hall.hall.hall_no} | {self.exam_date} {self.session} | {'Available' if self.is_available else 'Unavailable'}"
-
-
-class ExamAttendanceImport(TrackingModel):
-    """Staging table for raw PDF import data before normalization."""
-    IMPORT_STATUS_CHOICES = [
-        ('PENDING', 'Pending'),
-        ('MATCHED', 'Matched'),
-        ('ERROR', 'Error'),
-        ('IMPORTED', 'Imported'),
-    ]
-    SESSION_CHOICES = [('FN', 'Forenoon'), ('AN', 'Afternoon')]
-
-    department = models.ForeignKey('institution.Department', null=True, blank=True, on_delete=models.SET_NULL, related_name='exam_imports')
-    student = models.ForeignKey('student.Student', null=True, blank=True, on_delete=models.SET_NULL, related_name='exam_imports')
-    subject = models.ForeignKey('subject.Subject', null=True, blank=True, on_delete=models.SET_NULL, related_name='exam_imports')
-    exam_date = models.DateField(null=True, blank=True)
-    session = models.CharField(max_length=2, choices=SESSION_CHOICES, null=True, blank=True)
-    answer_book_no = models.CharField(max_length=50, null=True, blank=True)
-    qp_code = models.CharField(max_length=50, null=True, blank=True)
-    source_file = models.CharField(max_length=255, null=True, blank=True)
-    source_page = models.IntegerField(null=True, blank=True)
-    import_status = models.CharField(max_length=10, choices=IMPORT_STATUS_CHOICES, default='PENDING')
-    error_message = models.TextField(null=True, blank=True)
-
-    class Meta:
-        db_table = 'exam_attendance_import'
-        indexes = [
-            models.Index(fields=['student']),
-            models.Index(fields=['import_status']),
-            models.Index(fields=['exam_date', 'session']),
-        ]
-
-    def __str__(self):
-        return f"{self.register_no} | {self.subject_code} | {self.exam_date} | {self.import_status}"
-
-
 class UniversityExamSchedule(TrackingModel):
     """One record = one subject exam for a department on a particular date+session."""
     SESSION_CHOICES = [('FN', 'Forenoon'), ('AN', 'Afternoon')]
@@ -144,54 +84,44 @@ class UniversityExamSchedule(TrackingModel):
     def __str__(self):
         return f"{self.department.department_code} | {self.subject.subject_code} | {self.exam_date} {self.session}"
 
+    @property
+    def attendances(self):
+        """Backward compatibility alias for candidates."""
+        return self.candidates
 
-class UniversityExamAttendance(TrackingModel):
-    """Normalized attendance table linking schedule <-> student."""
-    ATTENDANCE_STATUS_CHOICES = [
-        ('PRESENT', 'Present'),
-        ('ABSENT', 'Absent'),
-        ('NOT_MARKED', 'Not Marked'),
-    ]
 
+class UniversityExamCandidate(TrackingModel):
+    """Clean registration roster linking exam schedule <-> student candidate."""
     exam_schedule = models.ForeignKey(
         UniversityExamSchedule,
         on_delete=models.CASCADE,
         db_column='exam_schedule_id',
-        related_name='attendances'
+        related_name='candidates'
     )
     student = models.ForeignKey(
         'student.Student',
         on_delete=models.CASCADE,
         db_column='student_id',
-        related_name='university_exam_attendances'
+        related_name='university_exam_candidates'
     )
     department = models.ForeignKey(
         'institution.Department',
         on_delete=models.CASCADE,
         db_column='department_id',
-        related_name='university_exam_attendances'
+        related_name='university_exam_candidates'
     )
-    attendance_status = models.CharField(
-        max_length=12,
-        choices=ATTENDANCE_STATUS_CHOICES,
-        default='NOT_MARKED'
-    )
-    answer_book_no = models.CharField(max_length=50, null=True, blank=True)
-    qp_code = models.CharField(max_length=50, null=True, blank=True)
-    attendance_marked_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        db_table = 'university_exam_attendance'
+        db_table = 'university_exam_candidates'
         unique_together = ('exam_schedule', 'student')
         indexes = [
             models.Index(fields=['exam_schedule']),
             models.Index(fields=['student']),
             models.Index(fields=['department']),
-            models.Index(fields=['attendance_status']),
         ]
 
     def __str__(self):
-        return f"{self.student.register_number} | {self.exam_schedule.subject.subject_code} | {self.attendance_status}"
+        return f"{self.student.register_number} | {self.exam_schedule.subject.subject_code}"
 
 
 class ExamHallAllocation(TrackingModel):

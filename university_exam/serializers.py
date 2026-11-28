@@ -1,8 +1,7 @@
 from rest_framework import serializers
 from .models import (
-    ExamAttendanceImport, UniversityExamSchedule,
-    UniversityExamAttendance, ExamHallAllocation, ExamSeatAllocation,
-    UniversityExamHall, ExamHallDate
+    UniversityExamSchedule, UniversityExamCandidate,
+    ExamHallAllocation, ExamSeatAllocation, UniversityExamHall
 )
 from common.serializers import TrackingModelSerializerMixin
 
@@ -44,43 +43,6 @@ class UniversityExamHallSerializer(TrackingModelSerializerMixin, serializers.Mod
         return attrs
 
 
-class ExamHallDateSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
-    hall_no = serializers.CharField(source='exam_hall.hall.hall_no', read_only=True)
-
-    class Meta:
-        model = ExamHallDate
-        fields = [
-            'id', 'exam_hall', 'hall_no', 'exam_date', 'session', 'is_available', 'notes',
-            'created_at', 'updated_at',
-            *TrackingModelSerializerMixin.TRACKING_FIELDS,
-        ]
-
-
-class ExamAttendanceImportSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
-    branch_code = serializers.CharField(source='department.department_code', read_only=True)
-    branch_name = serializers.CharField(source='department.department_name', read_only=True)
-    register_no = serializers.CharField(source='student.register_number', read_only=True)
-    student_name = serializers.SerializerMethodField()
-    subject_code = serializers.CharField(source='subject.subject_code', read_only=True)
-    subject_name = serializers.CharField(source='subject.subject_name', read_only=True)
-
-    class Meta:
-        model = ExamAttendanceImport
-        fields = [
-            'id', 'department', 'student', 'subject', 'exam_date', 'session',
-            'answer_book_no', 'qp_code', 'source_file', 'source_page',
-            'import_status', 'error_message', 'branch_code', 'branch_name',
-            'register_no', 'student_name', 'subject_code', 'subject_name',
-            'created_at', 'updated_at',
-            *TrackingModelSerializerMixin.TRACKING_FIELDS,
-        ]
-
-    def get_student_name(self, obj):
-        if obj.student and obj.student.application:
-            return obj.student.application.form_data.get('personal_info', {}).get('full_name', '')
-        return ''
-
-
 class UniversityExamScheduleSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     department_name = serializers.CharField(source='department.department_name', read_only=True)
     department_code = serializers.CharField(source='department.department_code', read_only=True)
@@ -104,25 +66,24 @@ class UniversityExamScheduleSerializer(TrackingModelSerializerMixin, serializers
         ]
 
 
-class UniversityExamAttendanceSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
+class UniversityExamCandidateSerializer(TrackingModelSerializerMixin, serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     register_number = serializers.CharField(source='student.register_number', read_only=True)
     department_name = serializers.CharField(source='department.department_name', read_only=True)
     subject_code = serializers.CharField(source='exam_schedule.subject.subject_code', read_only=True)
 
     class Meta:
-        model = UniversityExamAttendance
+        model = UniversityExamCandidate
         fields = [
             'id', 'exam_schedule', 'student', 'student_name', 'register_number',
             'department', 'department_name', 'subject_code',
-            'attendance_status', 'answer_book_no', 'qp_code', 'attendance_marked_at',
             'created_at', 'updated_at',
             *TrackingModelSerializerMixin.TRACKING_FIELDS,
         ]
 
     def get_student_name(self, obj):
         try:
-            return obj.student.application.candidate.name
+            return getattr(obj.student, 'student_name', None) or obj.student.application.candidate.name
         except Exception:
             return obj.student.roll_number or str(obj.student.id)
 
@@ -178,15 +139,7 @@ class ExamSeatAllocationSerializer(TrackingModelSerializerMixin, serializers.Mod
         ]
 
     def get_answer_book_no(self, obj):
-        try:
-            from .models import UniversityExamAttendance
-            att = UniversityExamAttendance.objects.get(
-                exam_schedule=obj.exam_schedule,
-                student=obj.student
-            )
-            return att.answer_book_no
-        except Exception:
-            return None
+        return getattr(obj, 'answer_book_no', None)
 
     def get_student_name(self, obj):
         try:

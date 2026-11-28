@@ -10,7 +10,24 @@ from django.db import transaction
 from student.models import Student, StudentStatus, OuterStudent
 from subject.models import Subject
 from institution.models import Department, Program, Batch, Regulation, Semester, Section
-from .models import ExamAttendanceImport, UniversityExamSchedule
+from .models import UniversityExamSchedule
+from .views import format_short_exam_code, ensure_university_exam_code
+from common.caching import invalidate_option_cache
+from common.signals import _send_realtime_broadcast
+
+
+def _bust_preview_caches(model_names):
+    """
+    Invalidate in-memory LocMemCache/Redis option caches and versions
+    for created/updated models so other pages immediately reflect updated records.
+    """
+    for m in model_names:
+        try:
+            invalidate_option_cache(m)
+            invalidate_option_cache(m.lower())
+            invalidate_option_cache(f"{m.lower()}s")
+        except Exception:
+            pass
 
 
 def clean_str(val):
@@ -19,37 +36,27 @@ def clean_str(val):
     return str(val).strip()
 
 
+def get_institutional_college_code():
+    """
+    Fetch the institutional college code configured in CollegeHeader (e.g. '5132').
+    Defaults to '5132' if not configured.
+    """
+    from institution.models import CollegeHeader
+    try:
+        header = CollegeHeader.objects.first()
+        if header and header.college_code:
+            return str(header.college_code).strip()
+    except Exception:
+        pass
+    return '5132'
+
+
 def format_exam_title(raw):
     """
-    Format exam title to: '<Session Months> <Year>', e.g. 'Nov. / Dec. 2026'.
-    Strips out 'Examination', 'Exam', and commas so dropdowns display cleanly.
-    E.g.: 'Nov./Dec.Examination,2026Examination' -> 'Nov. / Dec. 2026'
-          'Application for Nov. / Dec. Examination,2026 Examination' -> 'Nov. / Dec. 2026'
+    Standardize exam string into standard format e.g. 'NOV/DEC-26' or 'APR/MAY-26'.
+    Unified with Attendance Import to prevent duplicate exam creation.
     """
-    if not raw:
-        return ''
-    t = clean_str(raw)
-    t = re.sub(r'^Application\s+for\s+', '', t, flags=re.IGNORECASE).strip()
-    
-    # Extract 4-digit year (match even if glued e.g. 2026Examination)
-    year_match = re.search(r'(20\d{2})', t)
-    year = year_match.group(1) if year_match else ''
-    
-    # Strip Examination/Exam, year, commas, and extra symbols
-    t = re.sub(r'\s*(?:Examination|Exam)\s*', ' ', t, flags=re.IGNORECASE)
-    t = re.sub(r',\s*\d{4}', '', t)
-    t = re.sub(r'20\d{2}', '', t)
-    t = re.sub(r'[,;:]+', ' ', t)
-    t = re.sub(r'\s+', ' ', t).strip()
-
-    # Normalize "Nov./Dec." or "Nov. / Dec." to "Nov. / Dec."
-    t = re.sub(r'\s*/\s*', ' / ', t)
-
-    if year:
-        return f"{t} {year}".strip() if t else year
-    if t and t.startswith('Nov') and 'Dec' in t:
-        return f"{t} 2026"
-    return t
+    return format_short_exam_code(raw)
 
 
 def clean_subject_title(t):
@@ -365,84 +372,10 @@ def parse_anna_univ_reg_preview_pdf(file_bytes):
 
 def ensure_university_exam_created(exam_name_str):
     """
-    Ensure ExamType ('University Exam') and Exam ('<exam_name>') exist in database.
-    Dynamically creates them if not present. Not hard-coded.
+    Ensure ExamType ('University Exam') and Exam ('NOV/DEC-26') exist in database.
+    Directly routes to unified ensure_university_exam_code to prevent duplicate exams.
     """
-    if not exam_name_str:
-        return None
-
-    cleaned_name = format_exam_title(exam_name_str)
-    if not cleaned_name:
-        return None
-
-    try:
-        from institution.models import ExamType, Exam
-        from common.caching import invalidate_option_cache
-
-        def _bust_exam_cache():
-            for k in ('Exam', 'exams', 'ExamType', 'exam_types'):
-                try:
-                    invalidate_option_cache(k)
-                except Exception:
-                    pass
-
-        # 1. Find or create University ExamType in exam_type table
-        univ_type = ExamType.objects.filter(exam_type_name__iexact='University Exam').first()
-        if not univ_type:
-            univ_type = ExamType.objects.filter(exam_type_name__icontains='University').first()
-        if not univ_type:
-            univ_type = ExamType.objects.create(
-                exam_type_name='University Exam',
-                is_active=True
-            )
-            _bust_exam_cache()
-
-        # 2. Find or create Exam under this ExamType in exams table
-        exam_obj = Exam.objects.filter(exam_name__iexact=cleaned_name).first()
-        if not exam_obj:
-            # Check if an exam exists with previous long naming (e.g. 'Nov./Dec.Examination,2026') and update it
-            for ex in Exam.objects.all():
-                ex_norm = re.sub(r'[\s\.\,\/]|(?:Examination|Exam)', '', ex.exam_name, flags=re.IGNORECASE)
-                cl_norm = re.sub(r'[\s\.\,\/]|(?:Examination|Exam)', '', cleaned_name, flags=re.IGNORECASE)
-                if ex_norm.lower() == cl_norm.lower():
-                    exam_obj = ex
-                    break
-
-            if exam_obj:
-                exam_obj.exam_name = cleaned_name
-                exam_obj.exam_type = univ_type
-                exam_obj.is_active = True
-                exam_obj.save()
-                _bust_exam_cache()
-            else:
-                exam_obj = Exam.objects.create(
-                    exam_name=cleaned_name,
-                    exam_type=univ_type,
-                    is_active=True
-                )
-                _bust_exam_cache()
-        else:
-            updated = False
-            if not exam_obj.is_active:
-                exam_obj.is_active = True
-                updated = True
-            if exam_obj.exam_type_id != univ_type.id:
-                exam_obj.exam_type = univ_type
-                updated = True
-            if updated:
-                exam_obj.save()
-            _bust_exam_cache()
-
-        return {
-            'id': exam_obj.id,
-            'exam_name': exam_obj.exam_name,
-            'exam_type_id': univ_type.id,
-            'exam_type_name': univ_type.exam_type_name,
-        }
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning("ensure_university_exam_created error: %s", e)
-        return None
+    return ensure_university_exam_code(exam_name_str)
 
 
 class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
@@ -534,7 +467,8 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
         # Preload DB master lookups
         all_departments = list(Department.objects.filter(is_active=True).values('id', 'department_code', 'department_name', 'short_name', 'program_id'))
         all_programs = list(Program.objects.all().values('id', 'program_name', 'program_level', 'duration'))
-        all_batches = list(Batch.objects.filter(is_active=True).values('id', 'department_id', 'batch'))
+        all_batches = list(Batch.objects.all().values('id', 'department_id', 'batch', 'is_active'))
+        active_batch_set = set((b['department_id'], str(b['batch']).strip().lower()) for b in all_batches if b.get('is_active'))
         all_regulations = list(Regulation.objects.filter(is_active=True).values('id', 'regulation_code', 'effective_from_year'))
         all_sections = list(Section.objects.all().values('id', 'department_id', 'sections'))
 
@@ -585,6 +519,8 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
         students_analysis = []
         missing_students = []
 
+        inst_college_code = get_institutional_college_code()
+
         for cand in raw_candidates:
             r_no = cand['register_no']
             s_name = cand['student_name']
@@ -592,10 +528,16 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
             matched_dept = match_department(cand['branch'], cand.get('branch_au_code'), cand.get('degree', 'B.E.'))
 
             matched_batch = None
+            is_batch_active = False
             if matched_dept and calc_batch:
+                d_id = matched_dept['id']
+                b_clean = calc_batch.strip().lower()
+                is_batch_active = (d_id, b_clean) in active_batch_set
                 for b in all_batches:
-                    if b['department_id'] == matched_dept['id'] and b['batch'].lower() == calc_batch.lower():
+                    if b['department_id'] == d_id and str(b['batch']).strip().lower() == b_clean:
                         matched_batch = b
+                        if b.get('is_active'):
+                            is_batch_active = True
                         break
 
             matched_prog = None
@@ -614,7 +556,18 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
             db_inter = inter_map.get(r_no)
             db_outer = outer_map.get(r_no)
             is_found = (db_inter is not None) or (db_outer is not None)
-            found_college_type = 'INTER' if db_inter else ('OUTER' if db_outer else 'INTER')
+
+            # Auto-detect college type based on matching first 4 digits with institutional college code (5132)
+            clean_reg = (r_no or '').replace(' ', '')
+            is_own_college = clean_reg.startswith(inst_college_code) if (clean_reg and len(clean_reg) >= 4) else True
+
+            if db_inter:
+                found_college_type = 'INTER'
+            elif db_outer:
+                found_college_type = 'OUTER'
+            else:
+                found_college_type = 'INTER' if is_own_college else 'OUTER'
+
             db_student = db_inter or db_outer
 
             # Gather available batches specifically for the matched department
@@ -632,6 +585,9 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                 'is_found': is_found,
                 'is_department_found': matched_dept is not None,
                 'college_type': found_college_type,
+                'is_own_college': is_own_college,
+                'institutional_college_code': inst_college_code,
+                'reg_college_code': clean_reg[:4] if len(clean_reg) >= 4 else '',
                 'db_student_id': db_student.id if is_found else None,
                 'db_student_name': db_student.student_name if is_found else '',
                 'db_department_name': db_student.department.department_name if is_found and db_student.department else '',
@@ -644,6 +600,8 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                 'suggested_program_name': matched_prog['program_name'] if matched_prog else 'Under Graduate',
                 'suggested_batch_id': matched_batch['id'] if matched_batch else None,
                 'suggested_batch_name': calc_batch,
+                'is_batch_active': is_batch_active,
+                'batch_status': 'ACTIVE' if is_batch_active else ('INACTIVE' if matched_batch else 'NOT_FOUND'),
                 'department_batches': dept_batches,
                 'subjects_count': len(cand['subjects']),
                 'subjects': cand['subjects'],
@@ -781,12 +739,16 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
             'file_names': file_names,
             'file_stats': parsed_file_stats,
             'college': '',
+            'college_code': inst_college_code,
+            'institutional_college_code': inst_college_code,
             'exam_title': detected_exam_title or (raw_candidates[0]['exam_title'] if raw_candidates else ''),
             'exam_info': db_exam_info,
             'college_type': college_type,
             'total_candidates': len(students_analysis),
             'students_found': len(students_analysis) - len(missing_students),
             'students_not_found': len(missing_students),
+            'inter_candidates_count': sum(1 for c in students_analysis if c.get('college_type') == 'INTER'),
+            'outer_candidates_count': sum(1 for c in students_analysis if c.get('college_type') == 'OUTER'),
             'total_subjects': len(subjects_analysis),
             'subjects_found': len(subjects_analysis) - len(missing_subjects),
             'subjects_not_found': len(missing_subjects),
@@ -830,10 +792,16 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
         section_name = clean_str(request.data.get('section_name') or request.data.get('section') or 'Section: A')
         section_id = request.data.get('section_id')
         reg_code = clean_str(request.data.get('regulation_code', '2021') or '2021')
-        college_type = clean_str(request.data.get('college_type', 'INTER')).upper()
+        college_type = clean_str(request.data.get('college_type') or '').upper()
 
         if not reg_no:
             return Response({'error': 'Register number is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Auto-match college code if college_type not explicitly given
+        if not college_type or college_type not in ('INTER', 'OUTER'):
+            inst_code = get_institutional_college_code()
+            clean_reg = reg_no.replace(' ', '')
+            college_type = 'INTER' if (clean_reg and len(clean_reg) >= 4 and clean_reg.startswith(inst_code)) else 'OUTER'
 
         with transaction.atomic():
             # 1. Resolve / Create Program if missing
@@ -865,28 +833,28 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                         'department_code': dept_code or dept_name[:10].upper(),
                         'short_name': dept_code or dept_name[:10].upper(),
                         'program': program,
-                        'is_active': True
+                        'is_active': False
                     }
                 )
             if not dept:
                 dept = Department.objects.first()
 
-            # 3. Resolve / Create Batch if missing
+            # 3. Resolve / Create Batch if missing (Auto-created batches default to inactive)
             batch = None
             if batch_id and str(batch_id).isdigit():
                 batch = Batch.objects.filter(id=int(batch_id)).first()
             if not batch and batch_name and dept:
-                batch, _ = Batch.objects.get_or_create(department=dept, batch=batch_name)
+                batch, _ = Batch.objects.get_or_create(department=dept, batch=batch_name, defaults={'is_active': False})
             if not batch and dept and len(reg_no) >= 6:
                 digit = reg_no[4:6]
                 if digit.isdigit():
                     yr = int(digit)
                     est_batch = f"{2000 + yr}-{2000 + yr + 4}"
-                    batch, _ = Batch.objects.get_or_create(department=dept, batch=est_batch)
+                    batch, _ = Batch.objects.get_or_create(department=dept, batch=est_batch, defaults={'is_active': False})
             if not batch and dept:
                 batch = Batch.objects.filter(department=dept).first()
                 if not batch:
-                    batch, _ = Batch.objects.get_or_create(department=dept, batch='REGULAR')
+                    batch, _ = Batch.objects.get_or_create(department=dept, batch='REGULAR', defaults={'is_active': False})
 
             # 4. Resolve / Create Regulation if missing
             regulation = None
@@ -923,6 +891,16 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                     if updated:
                         outer_stud.save()
 
+                _bust_preview_caches(['Student', 'OuterStudent', 'Batch', 'Department', 'Program', 'Regulation'])
+                _send_realtime_broadcast({
+                    'model': 'Student',
+                    'action': 'create',
+                    'event': 'student_created',
+                    'id': outer_stud.id,
+                    'register_number': outer_stud.register_number,
+                    'is_outer': True
+                })
+
                 return Response({
                     'success': True,
                     'college_type': 'OUTER',
@@ -946,23 +924,23 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                 # Resolve Section for Inter College Student (Default to Section A for this department)
                 sec_obj = None
                 if dept:
-                    target_sec_name = section_name or 'Section: A'
+                    target_sec_name = section_name or 'A'
                     clean_sec = target_sec_name.replace('Section:', '').replace('Section', '').strip() or 'A'
                     if section_id and str(section_id).isdigit():
                         sec_obj = Section.objects.filter(id=int(section_id), department=dept).first()
+                    # Always prioritize matching Section 'A' for this department
+                    if not sec_obj:
+                        sec_obj = Section.objects.filter(department=dept, sections__iexact='A').first()
+                    if not sec_obj:
+                        sec_obj = Section.objects.filter(department=dept, sections__iexact='Section: A').first()
                     if not sec_obj:
                         sec_obj = Section.objects.filter(department=dept, sections__iexact=target_sec_name).first()
                     if not sec_obj:
-                        sec_obj = Section.objects.filter(department=dept, sections__iexact=f"Section: {clean_sec}").first()
-                    if not sec_obj:
-                        sec_obj = Section.objects.filter(department=dept, sections__iexact=clean_sec).first()
-                    if not sec_obj:
-                        sec_obj = Section.objects.filter(department=dept, sections__icontains=clean_sec).first()
-                    if not sec_obj:
                         sec_obj = Section.objects.filter(department=dept, sections__icontains='A').first()
                     if not sec_obj:
-                        sec_obj, _ = Section.objects.get_or_create(department=dept, sections='Section: A')
+                        sec_obj, _ = Section.objects.get_or_create(department=dept, sections='A')
 
+                audit_user = request.user if request.user and request.user.is_authenticated else None
                 student, created = Student.objects.get_or_create(
                     register_number=reg_no,
                     defaults={
@@ -971,8 +949,13 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                         'batch': batch,
                         'section': sec_obj,
                         'status': status_obj,
+                        'created_by': audit_user,
+                        'updated_by': audit_user,
                     }
                 )
+                if not created and audit_user and not student.updated_by:
+                    student.updated_by = audit_user
+                    student.save(update_fields=['updated_by', 'updated_at'])
                 if not created:
                     updated = False
                     if s_name and not student.student_name:
@@ -985,6 +968,16 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                         student.section = sec_obj; updated = True
                     if updated:
                         student.save()
+
+                _bust_preview_caches(['Student', 'Batch', 'Department', 'Program', 'Section'])
+                _send_realtime_broadcast({
+                    'model': 'Student',
+                    'action': 'create',
+                    'event': 'student_created',
+                    'id': student.id,
+                    'register_number': student.register_number,
+                    'is_outer': False
+                })
 
                 return Response({
                     'success': True,
@@ -1090,7 +1083,7 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                             'department_code': dept_code or dept_name[:10].upper(),
                             'short_name': dept_code or dept_name[:10].upper(),
                             'program': program,
-                            'is_active': True
+                            'is_active': False
                         }
                     )
                     dept_by_id[dept.id] = dept
@@ -1110,7 +1103,7 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                     b_key = (dept.id, batch_str.lower())
                     batch = batch_cache.get(b_key)
                     if not batch:
-                        batch, _ = Batch.objects.get_or_create(department=dept, batch=batch_str)
+                        batch, _ = Batch.objects.get_or_create(department=dept, batch=batch_str, defaults={'is_active': False})
                         batch_cache[b_key] = batch
                 elif dept:
                     for (d_id, b_name), b_obj in batch_cache.items():
@@ -1118,7 +1111,7 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                             batch = b_obj
                             break
                     if not batch:
-                        batch, _ = Batch.objects.get_or_create(department=dept, batch='REGULAR')
+                        batch, _ = Batch.objects.get_or_create(department=dept, batch='REGULAR', defaults={'is_active': False})
                         batch_cache[(dept.id, 'regular')] = batch
 
                 # Regulation resolution in memory
@@ -1133,7 +1126,14 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                         )
                         reg_cache[reg_key] = regulation
 
-                item_college_type = clean_str(item.get('college_type') or college_type or 'INTER').upper()
+                item_college_type = clean_str(item.get('college_type') or '').upper()
+                if not item_college_type or item_college_type not in ('INTER', 'OUTER'):
+                    inst_code = get_institutional_college_code()
+                    clean_r = reg_no.replace(' ', '')
+                    if clean_r and len(clean_r) >= 4 and not clean_r.startswith(inst_code):
+                        item_college_type = 'OUTER'
+                    else:
+                        item_college_type = college_type or 'INTER'
 
                 if item_college_type == 'OUTER':
                     outer_stud = existing_outer_map.get(reg_no)
@@ -1171,21 +1171,26 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
 
                         if not sec_obj:
                             clean_sec = sec_name.replace('Section:', '').replace('Section', '').strip() or 'A'
-                            for s in dept_secs:
-                                s_low = s.sections.lower()
-                                if s_low == sec_name.lower() or s_low == f"section: {clean_sec}".lower() or s_low == clean_sec.lower():
-                                    sec_obj = s
-                                    break
+                            # Default strictly to Section A for this department
+                            sec_obj = next((s for s in dept_secs if s.sections.strip().lower() == 'a'), None)
+                            if not sec_obj:
+                                sec_obj = next((s for s in dept_secs if s.sections.strip().lower() == 'section: a'), None)
                             if not sec_obj:
                                 for s in dept_secs:
-                                    if clean_sec.lower() in s.sections.lower():
+                                    s_low = s.sections.lower()
+                                    if s_low == sec_name.lower() or s_low == clean_sec.lower():
+                                        sec_obj = s
+                                        break
+                            if not sec_obj:
+                                for s in dept_secs:
+                                    if 'a' in s.sections.lower():
                                         sec_obj = s
                                         break
                             if not sec_obj and dept_secs:
                                 sec_obj = dept_secs[0]
 
                             if not sec_obj:
-                                sec_obj, _ = Section.objects.get_or_create(department=dept, sections='Section: A')
+                                sec_obj, _ = Section.objects.get_or_create(department=dept, sections='A')
                                 section_cache.setdefault(dept.id, []).append(sec_obj)
 
                     student = existing_inter_map.get(reg_no)
@@ -1245,6 +1250,18 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
 
         inter_count = sum(1 for s in added_list if s.get('college_type') == 'INTER')
         outer_count = sum(1 for s in added_list if s.get('college_type') == 'OUTER')
+
+        _bust_preview_caches(['Student', 'OuterStudent', 'Batch', 'Department', 'Program', 'Regulation', 'Section'])
+        _send_realtime_broadcast({
+            'model': 'Student',
+            'action': 'bulk_create',
+            'event': 'student_created',
+            'count': created_count,
+            'inter_count': inter_count,
+            'outer_count': outer_count
+        })
+        _send_realtime_broadcast({'model': 'Batch', 'action': 'create', 'event': 'batch_created'})
+
         return Response({
             'success': True,
             'message': f"Successfully processed {len(added_list)} students ({inter_count} Inter College, {outer_count} Outer College).",
@@ -1287,6 +1304,7 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
             defaults={'semester_name': f"Semester {sem_num}"}
         )
 
+        audit_user = request.user if request.user and request.user.is_authenticated else None
         subj, created = Subject.objects.get_or_create(
             subject_code=s_code,
             department=dept,
@@ -1297,9 +1315,14 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                 'credits': credits,
                 'is_theory': is_theory,
                 'is_lab': is_lab,
-                'is_active': True,
+                'is_active': False,
+                'created_by': audit_user,
+                'updated_by': audit_user,
             }
         )
+        if not created and audit_user and not subj.updated_by:
+            subj.updated_by = audit_user
+            subj.save(update_fields=['updated_by', 'updated_at'])
         if not created:
             updated = False
             if s_name and subj.subject_name != s_name:
@@ -1312,6 +1335,15 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                 subj.is_lab = is_lab; updated = True
             if updated:
                 subj.save()
+
+        _bust_preview_caches(['Subject', 'Semester', 'Regulation', 'Department'])
+        _send_realtime_broadcast({
+            'model': 'Subject',
+            'action': 'create',
+            'event': 'subject_created',
+            'id': subj.id,
+            'subject_code': subj.subject_code
+        })
 
         return Response({
             'success': True,
@@ -1425,7 +1457,7 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                         credits=credits,
                         is_theory=is_theory,
                         is_lab=is_lab,
-                        is_active=True,
+                        is_active=False,
                     )
                     existing_subjects[subj_key] = subj
                     to_create_subjects.append(subj)
@@ -1445,6 +1477,14 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
 
             if to_update_subjects:
                 Subject.objects.bulk_update(to_update_subjects, ['subject_name', 'credits', 'is_theory', 'is_lab'], batch_size=500)
+
+        _bust_preview_caches(['Subject', 'Semester', 'Regulation', 'Department'])
+        _send_realtime_broadcast({
+            'model': 'Subject',
+            'action': 'bulk_create',
+            'event': 'subject_created',
+            'count': created_count
+        })
 
         return Response({
             'success': True,
@@ -1496,6 +1536,8 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
         if not short_name:
             short_name = derive_short_name(dept_name)
 
+        audit_user = request.user if request.user and request.user.is_authenticated else None
+
         with transaction.atomic():
             dept = Department.objects.filter(department_code__iexact=dept_code).first()
             created = False
@@ -1504,8 +1546,10 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                 dept.short_name = short_name
                 if program:
                     dept.program = program
-                dept.is_active = True
+                dept.is_active = False
                 dept.is_display = True
+                if audit_user:
+                    dept.updated_by = audit_user
                 dept.save()
             else:
                 dept = Department.objects.create(
@@ -1513,10 +1557,22 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
                     department_code=dept_code,
                     short_name=short_name,
                     program=program,
-                    is_active=True,
-                    is_display=True
+                    is_active=False,
+                    is_display=True,
+                    created_by=audit_user,
+                    updated_by=audit_user,
                 )
                 created = True
+
+        _bust_preview_caches(['Department', 'Program'])
+        _send_realtime_broadcast({
+            'model': 'Department',
+            'action': 'create',
+            'event': 'department_created',
+            'id': dept.id,
+            'department_code': dept.department_code,
+            'department_name': dept.department_name
+        })
 
         return Response({
             'success': True,
@@ -1535,7 +1591,7 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['post'], url_path='confirm-save')
     def confirm_save(self, request):
         """
-        Save the verified candidates and their registered subjects into ExamAttendanceImport.
+        Confirm verified candidates and broadcast real-time sync notification.
         """
         candidates = request.data.get('candidates', [])
         source_file = request.data.get('source_file', 'Registration_Preview.pdf')
@@ -1547,45 +1603,24 @@ class UniversityRegistrationPreviewViewSet(viewsets.ViewSet):
         if exam_title:
             ensure_university_exam_created(exam_title)
 
-        saved_records = 0
-        with transaction.atomic():
-            for cand in candidates:
-                reg_no = clean_str(cand.get('register_no'))
-                student = Student.objects.filter(register_number=reg_no).first()
-                outer_student = OuterStudent.objects.filter(register_number=reg_no).first() if not student else None
-                dept = (student.department if student else (outer_student.department if outer_student else None)) or Department.objects.filter(id=cand.get('suggested_department_id')).first()
+        saved_records = len(candidates)
 
-                cand_subjects = cand.get('subjects', [])
-                if cand_subjects:
-                    for sub in cand_subjects:
-                        sub_code = sub.get('subject_code')
-                        subject_obj = Subject.objects.filter(subject_code__iexact=sub_code).first() if sub_code else None
-
-                        ExamAttendanceImport.objects.create(
-                            department=dept,
-                            student=student,
-                            subject=subject_obj,
-                            source_file=source_file,
-                            source_page=cand.get('page', 1),
-                            import_status='MATCHED' if ((student or outer_student) and subject_obj) else 'PENDING',
-                            error_message='Outer Candidate' if outer_student and not student else ('' if ((student or outer_student) and subject_obj) else 'Missing student or subject master')
-                        )
-                        saved_records += 1
-                else:
-                    # For sheets where subjects are 0 or candidate-level roster registration
-                    ExamAttendanceImport.objects.create(
-                        department=dept,
-                        student=student,
-                        subject=None,
-                        source_file=source_file,
-                        source_page=cand.get('page', 1),
-                        import_status='MATCHED' if (student or outer_student) else 'PENDING',
-                        error_message='Outer Candidate' if outer_student and not student else ('' if student else 'Missing student master')
-                    )
-                    saved_records += 1
+        # Broadcast Real-time WebSocket Event
+        try:
+            from common.signals import _send_realtime_broadcast
+            _send_realtime_broadcast({
+                'model': 'UniversityExam',
+                'action': 'registration_confirmed',
+                'event': 'REGISTRATION_IMPORTED',
+                'saved_count': saved_records,
+                'candidates_count': len(candidates),
+                'exam_title': exam_title,
+            })
+        except Exception:
+            pass
 
         return Response({
             'success': True,
-            'message': f"Successfully saved {saved_records} registration entries from {len(candidates)} candidates.",
+            'message': f"Successfully verified and saved registration entries for {len(candidates)} candidates.",
             'saved_count': saved_records
         }, status=status.HTTP_200_OK)
